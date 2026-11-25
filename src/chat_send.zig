@@ -551,8 +551,6 @@ const ChatPiModelJob = struct {
     name_len: u8 = 0,
     provider_name: [pi_models.MAX_PROVIDER]u8 = std.mem.zeroes([pi_models.MAX_PROVIDER]u8),
     provider_len: u8 = 0,
-    reference: [pi_models.MAX_NAME + pi_models.MAX_PROVIDER + 2]u8 = std.mem.zeroes([pi_models.MAX_NAME + pi_models.MAX_PROVIDER + 2]u8),
-    reference_len: u8 = 0,
 };
 
 var chat_pi_model_busy = std.atomic.Value(bool).init(false);
@@ -576,11 +574,6 @@ fn chatPiModelSetLive(shell: u32, chosen: pi_models.Model) bool {
     const provider_len = @min(chosen.providerText().len, job.provider_name.len);
     @memcpy(job.provider_name[0..provider_len], chosen.providerText()[0..provider_len]);
     job.provider_len = @intCast(provider_len);
-    const reference = if (provider_len > 0)
-        std.fmt.bufPrint(&job.reference, "{s}/{s}", .{ job.provider_name[0..provider_len], job.name[0..name_len] }) catch job.name[0..name_len]
-    else
-        job.name[0..name_len];
-    job.reference_len = @intCast(reference.len);
     const thread = std.Thread.spawn(.{}, chatPiModelThread, .{job}) catch {
         std.heap.page_allocator.destroy(job);
         chat_pi_model_busy.store(false, .release);
@@ -594,7 +587,7 @@ fn chatPiModelThread(job: *ChatPiModelJob) void {
     const a = std.heap.page_allocator;
     defer chat_pi_model_busy.store(false, .release);
     defer if (app_state.g_main_hwnd == null or @import("focus.zig").PostMessageW(app_state.g_main_hwnd, app_state.WM_APP_PI_MODEL_RESULT, 0, @bitCast(@intFromPtr(job))) == 0) std.heap.page_allocator.destroy(job);
-    const request = pi_models.requestLine(a, job.key.shell_id, std.mem.sliceTo(&job.key.sid, 0), job.provider_name[0..job.provider_len], job.reference[0..job.reference_len]) catch return;
+    const request = pi_models.requestLine(a, job.key.shell_id, std.mem.sliceTo(&job.key.sid, 0), job.provider_name[0..job.provider_len], job.name[0..job.name_len]) catch return;
     defer a.free(request);
     var response: std.ArrayList(u8) = .empty;
     defer response.deinit(a);

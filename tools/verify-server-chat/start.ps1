@@ -24,7 +24,8 @@ if (-not $actual.AreAccessRulesProtected -or $rules.Count -ne 1 -or $rules[0].Id
 @{ owner = $user.Value; protected = $actual.AreAccessRulesProtected; rules = @($rules | ForEach-Object { @{ sid = $_.IdentityReference.Value; rights = [string]$_.FileSystemRights } }) } | ConvertTo-Json -Depth 5 | Set-Content -Encoding UTF8 "$Evidence/key-acl.json"
 $repo = (Invoke-ServerNative -FilePath wsl.exe -Arguments @('-d', 'Ubuntu-24.04', '-u', 'root', '--exec', 'wslpath', '-a', $env:GITHUB_WORKSPACE) -Evidence $Evidence -Name 'start-repo-path').Trim()
 $public = (Invoke-ServerNative -FilePath wsl.exe -Arguments @('-d', 'Ubuntu-24.04', '-u', 'root', '--exec', 'wslpath', '-a', "$key.pub") -Evidence $Evidence -Name 'public-key-path').Trim()
-$started = Invoke-ServerNative -FilePath wsl.exe -Arguments @('-d', 'Ubuntu-24.04', '-u', 'root', '--exec', 'bash', "$repo/tools/verify-server-chat/start.sh", $repo, $public) -Evidence $Evidence -Name 'server-start'
+$serverMode = if ($env:REAL_PI_PROOF -eq '1') { 'real-pi' } else { 'deterministic' }
+$started = Invoke-ServerNative -FilePath wsl.exe -Arguments @('-d', 'Ubuntu-24.04', '-u', 'root', '--exec', 'bash', "$repo/tools/verify-server-chat/start.sh", $repo, $public, $serverMode) -Evidence $Evidence -Name 'server-start'
 Write-Host $started
 $config = @"
 Host remote-1

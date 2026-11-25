@@ -1,6 +1,7 @@
 set -euo pipefail
 repo=$1
 public=$2
+mode=${3:-deterministic}
 id mpverify >/dev/null 2>&1 || useradd -m -s /bin/bash mpverify
 passwd -d mpverify >/dev/null
 install -d -m 700 -o mpverify -g mpverify /home/mpverify/.ssh
@@ -24,5 +25,9 @@ Subsystem sftp internal-sftp
 CONFIG
 /usr/sbin/sshd -t -f /tmp/mp-ci-sshd.conf
 /usr/sbin/sshd -f /tmp/mp-ci-sshd.conf -E /tmp/mp-ci-sshd.log
-runuser -u mpverify -- env HOME=/home/mpverify python3 "$repo/tools/verify-server-chat/check-locks.py"
-runuser -u mpverify -- env HOME=/home/mpverify python3 "$repo/tools/verify-server-chat/seed.py" "$repo"
+runuser -u mpverify -- env -i HOME=/home/mpverify USER=mpverify LOGNAME=mpverify PATH=/usr/local/bin:/usr/bin:/bin python3 "$repo/tools/verify-server-chat/check-locks.py"
+if [[ "$mode" == "real-pi" ]]; then
+    runuser -u mpverify -- env -i HOME=/home/mpverify USER=mpverify LOGNAME=mpverify PATH=/usr/local/bin:/usr/bin:/bin python3 "$repo/tools/verify-server-chat/real-pi-seed.py" "$repo"
+else
+    runuser -u mpverify -- env HOME=/home/mpverify python3 "$repo/tools/verify-server-chat/seed.py" "$repo"
+fi

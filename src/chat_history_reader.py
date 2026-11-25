@@ -3842,6 +3842,8 @@ def host_agent_env(provider, sid):
     env['MULTIBOT_APP_VERSION'] = globals().get('MULTIBOT_APP_VERSION', '')
     if provider != 'claude':
         env['MULTIBOT_HOST'] = host_key(provider, sid)
+    if provider in ('codex', 'pi'):
+        env.pop('CODEX_AUTH_JSON', None)
     if provider == 'codex':
         for key in HOST_CODEX_SECRETS:
             env.pop(key, None)
@@ -3876,6 +3878,27 @@ def host_codex_argv(provider, sid, base):
 
 
 PI_MODEL_PART = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,159}")
+PI_SKILL_COMMAND = re.compile(r"^/([a-z0-9][a-z0-9-]{0,63})(?=\s|$)")
+
+
+def host_pi_normalize_model(model_provider, model):
+    prefix = model_provider + "/"
+    if model.startswith(prefix) and len(model) > len(prefix):
+        return model[len(prefix):]
+    return model
+
+
+def host_pi_default_choice():
+    configured = os.environ.get("PI_CODING_AGENT_DIR")
+    settings_path = (Path(configured).expanduser() if configured else HOME / ".pi/agent") / "settings.json"
+    settings = host_read(settings_path)
+    if isinstance(settings, dict):
+        chosen_provider = settings.get("defaultProvider")
+        chosen_model = settings.get("defaultModel")
+        if (isinstance(chosen_provider, str) and isinstance(chosen_model, str)
+                and PI_MODEL_PART.fullmatch(chosen_provider) and PI_MODEL_PART.fullmatch(chosen_model)):
+            return ["--provider", chosen_provider, "--model", host_pi_normalize_model(chosen_provider, chosen_model)]
+    return list(HOST_PI_MODEL)
 
 
 def host_pi_choice(provider, sid):
@@ -3883,8 +3906,8 @@ def host_pi_choice(provider, sid):
     chosen_provider = config.get("model_provider")
     chosen_model = config.get("model")
     if isinstance(chosen_provider, str) and isinstance(chosen_model, str) and PI_MODEL_PART.fullmatch(chosen_provider) and PI_MODEL_PART.fullmatch(chosen_model):
-        return ["--provider", chosen_provider, "--model", chosen_model]
-    return list(HOST_PI_MODEL)
+        return ["--provider", chosen_provider, "--model", host_pi_normalize_model(chosen_provider, chosen_model)]
+    return host_pi_default_choice()
 
 
 def host_pi_argv(provider, sid, base):
@@ -6254,8 +6277,28 @@ def host_pi_open(provider, sid, tmux, session):
     host_event(provider, sid, tmux, session, "host.status", dict(state="ready"))
 
 
+def host_pi_skill_exists(provider, sid, name):
+    configured = os.environ.get("PI_CODING_AGENT_DIR")
+    agent_dir = Path(configured).expanduser() if configured else HOME / ".pi/agent"
+    cwd = Path(host_cwd(provider, sid))
+    roots = (agent_dir / "skills", HOME / ".agents/skills", cwd / ".pi/skills", cwd / ".agents/skills")
+    return any((root / name / "SKILL.md").is_file() for root in roots)
+
+
+def host_pi_skill_prompt(provider, sid, text):
+    if not isinstance(text, str) or text.startswith("/skill:"):
+        return text
+    match = PI_SKILL_COMMAND.match(text)
+    if match is None:
+        return text
+    name = match.group(1)
+    if not host_pi_skill_exists(provider, sid, name):
+        return text
+    return "/skill:" + name + text[match.end():]
+
+
 def host_pi_write(provider, sid, session, token, text):
-    payload = dict(id=token, type="prompt", message=text)
+    payload = dict(id=token, type="prompt", message=host_pi_skill_prompt(provider, sid, text))
     if isinstance(session.get("inflight"), dict):
         payload["streamingBehavior"] = "followUp"
     return host_control_send(session, payload)
@@ -6273,7 +6316,10 @@ def host_pi_end(provider, sid, tmux, session, aborted):
     session["pi_last"] = None
     host_turn_end(provider, sid, tmux, session,
                   dict(status=status, stop_reason=last.get("stopReason"), cost_usd=cost.get("total"), usage=usage),
-                  dict(subtype=status))
+                  dict(subtype=status,
+                       provider=last.get("provider") if isinstance(last.get("provider"), str) else None,
+                       model=last.get("model") if isinstance(last.get("model"), str) else None,
+                       error=host_event_text(last.get("errorMessage"), 200) if isinstance(last.get("errorMessage"), str) else None))
 
 
 def host_pi_update(provider, sid, tmux, session, event):
@@ -6418,7 +6464,11 @@ def host_pi_event(provider, sid, tmux, session, event):
     if kind == "response":
         data = event.get("data") if isinstance(event.get("data"), dict) else {}
         if event.get("command") == "set_model":
-            host_log(provider, sid, "pi_set_model_reply", dict(success=event.get("success") is not False))
+            host_log(provider, sid, "pi_set_model_reply",
+                     dict(success=event.get("success") is not False,
+                          provider=data.get("provider") if isinstance(data.get("provider"), str) else None,
+                          model=data.get("id") if isinstance(data.get("id"), str) else None,
+                          error=host_event_text(event.get("error"), 200) if isinstance(event.get("error"), str) else None))
             return
         if event.get("command") == "get_login_providers":
             host_pi_login_providers(provider, sid, tmux, session, data)
@@ -6501,6 +6551,7 @@ def host_pi_set_model(provider, sid, tmux, session, request):
         return host_refuse("invalid_model")
     if not isinstance(model, str) or PI_MODEL_PART.fullmatch(model) is None:
         return host_refuse("invalid_model")
+    model = host_pi_normalize_model(model_provider, model)
     if not host_control_send(session, dict(type="set_model", provider=model_provider, modelId=model)):
         return dict(status="error", reason="stdin_write_failed")
     config = host_config(provider, sid)

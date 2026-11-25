@@ -127,6 +127,11 @@ on:
         required: false
         default: ''
         type: string
+      real_pi_proof:
+        description: Run server-chat with real Pi openai-codex/gpt-6.1-sol, pinned valentin-mode and roundtrip proof
+        required: false
+        default: false
+        type: boolean
   workflow_call:
     inputs:
       features:
@@ -209,6 +214,10 @@ on:
         default: false
         type: boolean
       chat_reply_baseline:
+        required: false
+        default: false
+        type: boolean
+      real_pi_proof:
         required: false
         default: false
         type: boolean
@@ -462,6 +471,7 @@ jobs:
       OWNER_BROWSER_PROOF: ${{ inputs.owner_browser_proof || '' }}
       AGENT_SOAK_SECONDS: ${{ matrix.feature == 'live-chat-pane' && '1200' || '' }}
       FEATURE: ${{ matrix.feature }}
+      REAL_PI_PROOF: ${{ inputs.real_pi_proof && '1' || '' }}
       VERIFY_CANDIDATE_ARTIFACT: ${{ inputs.candidate_artifact }}
       RELEASE_TAG: ${{ inputs.tag || '' }}
     steps:
@@ -521,6 +531,50 @@ jobs:
           distribution: Ubuntu-24.04
           wsl-version: '2'
           additional-packages: openssh-server tmux python3
+      - name: Prepare real Pi runtime, vstack skills and fail-closed auth
+        if: env.FEATURE == 'server-chat' && env.REAL_PI_PROOF == '1'
+        shell: pwsh
+        env:
+          CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:CODEX_AUTH_JSON)) { throw 'CODEX_AUTH_JSON secret is missing' }
+          try {
+            $parsed = $env:CODEX_AUTH_JSON | ConvertFrom-Json
+            if ($parsed.tokens) {
+              foreach ($field in @('access_token', 'refresh_token', 'id_token')) {
+                $val = $parsed.tokens.$field
+                if ($val -is [string] -and $val.Length -gt 0) { Write-Output ("::add-mask::$val") }
+              }
+            }
+          } catch {}
+          New-Item -ItemType Directory -Force evidence | Out-Null
+          $repoLinux = (wsl.exe -d Ubuntu-24.04 -u root --exec wslpath -a $env:GITHUB_WORKSPACE).Trim()
+          if ($LASTEXITCODE -ne 0 -or -not $repoLinux) { throw 'Failed to resolve workspace path in WSL' }
+          $summaryWin = Join-Path (Resolve-Path evidence).Path 'pi-auth-summary.json'
+          $summaryLinux = (wsl.exe -d Ubuntu-24.04 -u root --exec wslpath -a $summaryWin).Trim()
+          if ($LASTEXITCODE -ne 0 -or -not $summaryLinux) { throw 'Failed to resolve auth summary path in WSL' }
+          $psi = [Diagnostics.ProcessStartInfo]::new('wsl.exe')
+          $psi.UseShellExecute = $false
+          $psi.RedirectStandardInput = $true
+          $psi.RedirectStandardOutput = $true
+          $psi.RedirectStandardError = $true
+          $psi.Arguments = "-d Ubuntu-24.04 -u root --exec bash `"$repoLinux/tools/verify-server-chat/setup-real-pi.sh`" `"$repoLinux`" `"$summaryLinux`""
+          $proc = [Diagnostics.Process]::Start($psi)
+          try {
+            $proc.StandardInput.Write($env:CODEX_AUTH_JSON)
+            $proc.StandardInput.Close()
+            $stdout = $proc.StandardOutput.ReadToEnd()
+            $stderr = $proc.StandardError.ReadToEnd()
+            $proc.WaitForExit()
+            if ($stdout) { Write-Host $stdout }
+            if ($stderr) { [Console]::Error.WriteLine($stderr) }
+            if ($proc.ExitCode -ne 0) { throw "Real Pi runtime/auth setup failed with exit code $($proc.ExitCode)" }
+          } finally {
+            $proc.Dispose()
+          }
+          $summary = Get-Content $summaryWin -Raw | ConvertFrom-Json
+          if ($summary.ok -ne $true) { throw 'Pi auth conversion failed closed' }
       - name: Install journey video recorder
         uses: ./.github/actions/install-ffmpeg
         with:
@@ -556,6 +610,10 @@ jobs:
           if ($errors.Count) { throw ($errors | Out-String) }
           New-Item -ItemType Directory -Force evidence | Out-Null
           & tools/split-feature-controls.ps1 -Path "$pwd/.claude/skills/verify-multiprompt/control.ps1" -Output "$pwd/evidence/control-ast.json"
+          if ($env:FEATURE -eq 'server-chat') {
+            [System.Management.Automation.Language.Parser]::ParseFile("$pwd/tools/verify-server-chat/drive-real-pi.ps1", [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count) { throw ($errors | Out-String) }
+          }
           if ($env:FEATURE -eq 'session-actions') {
             [System.Management.Automation.Language.Parser]::ParseFile("$pwd/tools/verify-session-actions/drive.ps1", [ref]$tokens, [ref]$errors) | Out-Null
             if ($errors.Count) { throw ($errors | Out-String) }
@@ -1030,8 +1088,11 @@ jobs:
           if ($verdict.status -ne 'passed') { throw ('Verification failed: ' + ($verdict | ConvertTo-Json -Depth 8 -Compress)) }
           $global:LASTEXITCODE = 0
       - name: Check real server chat evidence
-        if: env.FEATURE == 'server-chat'
+        if: env.FEATURE == 'server-chat' && env.REAL_PI_PROOF != '1'
         run: node tools/verify-server-chat/check-evidence.cjs evidence
+      - name: Check real Pi server chat evidence
+        if: env.FEATURE == 'server-chat' && env.REAL_PI_PROOF == '1'
+        run: node tools/verify-server-chat/check-real-pi-evidence.cjs evidence
       - name: Save paired session views
         if: success() && steps.desktop-driver.outcome == 'success' && env.CHAT_HAX_PROOF == '1'
         shell: powershell
@@ -1195,3 +1256,65 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y tmux
       - name: Prove the exact Windows-generated command against real tmux
         run: python3 tools/tmux-generation-proof.py binding-evidence/binding-commands.jsonl
+  verify-real-pi-independent:
+    needs: [journeys, verify]
+    if: always() && !cancelled() && inputs.real_pi_proof && needs.verify.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.revision || github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: verify-server-chat
+          path: real-pi-evidence
+      - name: Independent other-family audit of real Pi proof
+        id: claude
+        uses: anthropics/claude-code-action@f3b070c88125d33dbae5653df5f143101d4ea9dc
+        with:
+          allowed_bots: software-factory-runners,hypertask-runners,cursor
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ github.token }}
+          prompt: |
+            You are an independent other-family verifier (Anthropic Claude) auditing a real Pi openai-codex/gpt-6.1-sol fallback proof in Multiprompt (MUBO-523). You did not author this code or run the Windows harness.
+            Inspect real-pi-evidence/result.json, real-pi-evidence/build.json, real-pi-evidence/doctor.json, real-pi-evidence/pi-auth-summary.json, real-pi-evidence/pi-provenance.json, real-pi-evidence/pi-return-server.json, real-pi-evidence/pi-turn1-copied.txt, real-pi-evidence/pi-valentin-mode-copied.txt, real-pi-evidence/pi-recall-copied.txt, real-pi-evidence/codex-reply-copied.txt, real-pi-evidence/pi-return-copied.txt, and inspect screenshots (pi-turn1.png, pi-valentin-mode.png, pi-recall-bottom.png, codex-reply.png, roundtrip-top.png, roundtrip-middle.png, roundtrip-bottom.png) as images.
+            Verify every requirement:
+            1. Exact executable build/doctor match, zero custom provider command, zero secret env leaks, zero credential files/tokens in artifacts.
+            2. Fail-closed CODEX_AUTH_JSON -> Pi openai-codex OAuth conversion with mode 0600 and JWT accountId match.
+            3. Auto-switch disabled via UI and persisted auto_switch.on=false across every host in the roundtrip.
+            4. Real Pi openai-codex/gpt-6.1-sol model selection acknowledged by Pi RPC and confirmed on every Pi assistant message with stopReason=stop.
+            5. Pinned vstack valentin-mode SKILL.md body SHA256 proven loaded in Pi native session JSONL plus real version.sh provenance.
+            6. Stable logical chat identity (name/tmux), ordered stored history and ordered visible/copied history across Pi -> Codex -> Pi roundtrip with screenshots showing readable non-blank conversation, model recall reported separately, and unsupported hops disclosed.
+            Return structured JSON only with verdict (PASS or FAIL), verifier_family ("anthropic"), verifier_model ("sonnet"), and up to 8 plain evidence lines naming exact files inspected.
+          claude_args: |
+            --model sonnet
+            --max-turns 30
+            --allowedTools "Read,Glob,Grep"
+            --json-schema '{"type":"object","properties":{"verdict":{"type":"string","enum":["PASS","FAIL"]},"verifier_family":{"type":"string"},"verifier_model":{"type":"string"},"evidence":{"type":"array","items":{"type":"string"},"maxItems":8}},"required":["verdict","verifier_family","verifier_model","evidence"]}'
+      - name: Save independent verifier verdict
+        if: always()
+        env:
+          VERDICT_JSON: ${{ steps.claude.outputs.structured_output }}
+        run: |
+          mkdir -p independent-evidence
+          python3 - <<'PY'
+          import json, os, pathlib, sys
+          raw = os.environ.get('VERDICT_JSON', '').strip()
+          if not raw:
+              out = {'verdict': 'FAIL', 'error': 'Missing structured verdict from independent verifier'}
+          else:
+              out = json.loads(raw)
+          pathlib.Path('independent-evidence/independent-verdict.json').write_text(json.dumps(out, indent=2) + '\n')
+          print(json.dumps(out, indent=2))
+          if out.get('verdict') != 'PASS':
+              sys.exit(1)
+          PY
+      - name: Upload independent verifier verdict
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: verify-real-pi-independent
+          path: independent-evidence/
+          if-no-files-found: error

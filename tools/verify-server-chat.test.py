@@ -178,6 +178,73 @@ foreach ($path in Get-ChildItem (Join-Path $env:VERIFY_SERVER_CHAT_ROOT 'tools/v
         result = subprocess.run([shell, '-NoProfile', '-Command', command], env=dict(os.environ, VERIFY_SERVER_CHAT_ROOT=str(ROOT)), text=True, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_pi_auth_adapter_converts_valid_oauth_and_fails_closed(self):
+        import base64 as b64
+        adapter = ROOT / 'tools/verify-server-chat/pi-auth-adapter.py'
+
+        def make_jwt(payload):
+            head = b64.urlsafe_b64encode(json.dumps({'alg': 'RS256'}).encode()).rstrip(b'=').decode()
+            body = b64.urlsafe_b64encode(json.dumps(payload).encode()).rstrip(b'=').decode()
+            return f'{head}.{body}.sigvalue'
+
+        valid_jwt = make_jwt({'exp': 1900000000, 'https://api.openai.com/auth': {'chatgpt_account_id': 'acct-test-123'}})
+        valid_input = json.dumps({
+            'auth_mode': 'chatgpt',
+            'OPENAI_API_KEY': None,
+            'tokens': {
+                'access_token': valid_jwt,
+                'refresh_token': 'rt-secret-value-xyz',
+                'account_id': 'acct-test-123',
+            },
+        })
+        with tempfile.TemporaryDirectory() as tmp:
+            pi_out = Path(tmp) / 'pi/auth.json'
+            codex_out = Path(tmp) / 'codex/auth.json'
+            run = subprocess.run(
+                [sys.executable, str(adapter), '--pi-auth-out', str(pi_out), '--codex-auth-out', str(codex_out)],
+                input=valid_input,
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            self.assertNotIn('rt-secret-value-xyz', run.stdout + run.stderr)
+            self.assertNotIn(valid_jwt, run.stdout + run.stderr)
+            self.assertNotIn('acct-test-123', run.stdout + run.stderr)
+            summary = json.loads(run.stdout)
+            self.assertTrue(summary['ok'])
+            self.assertEqual(summary['provider'], 'openai-codex')
+            self.assertEqual(summary['type'], 'oauth')
+            self.assertEqual(summary['expires_ms'], 1900000000000)
+            written = json.loads(pi_out.read_text(encoding='utf-8'))
+            self.assertEqual(written['openai-codex']['type'], 'oauth')
+            self.assertEqual(written['openai-codex']['access'], valid_jwt)
+            self.assertEqual(written['openai-codex']['refresh'], 'rt-secret-value-xyz')
+            self.assertEqual(written['openai-codex']['expires'], 1900000000000)
+            self.assertEqual(written['openai-codex']['accountId'], 'acct-test-123')
+            if os.name != 'nt':
+                self.assertEqual(os.stat(pi_out).st_mode & 0o777, 0o600)
+                self.assertEqual(os.stat(codex_out).st_mode & 0o777, 0o600)
+            bad_cases = [
+                json.dumps({'OPENAI_API_KEY': 'sk-only'}),
+                json.dumps({'auth_mode': 'apikey', 'tokens': {'access_token': valid_jwt, 'refresh_token': 'r'}}),
+                json.dumps({'tokens': {'access_token': valid_jwt}}),
+                json.dumps({'tokens': {'access_token': 'not-a-jwt', 'refresh_token': 'r'}}),
+                json.dumps({'tokens': {'access_token': make_jwt({'exp': 1900000000}), 'refresh_token': 'r'}}),
+                json.dumps({'tokens': {'access_token': valid_jwt, 'refresh_token': 'r', 'account_id': 'wrong-acct'}}),
+                json.dumps({'tokens': {'access_token': make_jwt({'https://api.openai.com/auth': {'chatgpt_account_id': 'a'}}), 'refresh_token': 'r'}}),
+            ]
+            for index, bad in enumerate(bad_cases):
+                with self.subTest(bad_case=index):
+                    bad_out = Path(tmp) / f'bad-{index}/auth.json'
+                    failed = subprocess.run(
+                        [sys.executable, str(adapter), '--pi-auth-out', str(bad_out)],
+                        input=bad,
+                        text=True,
+                        capture_output=True,
+                    )
+                    self.assertNotEqual(failed.returncode, 0)
+                    self.assertFalse(bad_out.exists())
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -120,13 +120,11 @@ Use separate disposable chats for Reset this chat, Resync chat, Fresh start and 
 
 Observable proof: Reset/resync retain the exact unsent draft and never resend old messages. Fresh start and AI switch preserve name, photo, address and readable history while the new provider receives the handover. Deferred restart runs once after the current turn, not during it.
 
-Switch AI (`SEARCH_CHAT_SWITCH_*` and tab-context Switch AI rows) is covered by the Linux live script `.claude/skills/verify-multiprompt/switch-ai-live.py` against the production agent host. Before each run, `~/.local/bin/vps-state --can-launch worker` must succeed. From the repository root:
+Switch AI (`SEARCH_CHAT_SWITCH_*` and tab-context Switch AI rows) needs public GitHub-hosted proof. Do not run `.claude/skills/verify-multiprompt/switch-ai-live.py` on a shared server or a user's computer. That script is not wired to a hosted workflow and does not drive the Windows UI.
 
-```sh
-python3 .claude/skills/verify-multiprompt/switch-ai-live.py
-```
+The deterministic `server-chat` journey exercises real Windows OpenSSH, WSL Linux OpenSSH, tmux, and the production host with a deterministic provider. For real Pi `openai-codex/gpt-6.1-sol` fallback proof, dispatch `gh workflow run verify.yml --ref <branch> -f feature=server-chat -f real_pi_proof=true`. That mode converts `CODEX_AUTH_JSON` fail-closed on the runner into Pi's OAuth format without logging secrets, installs pinned Pi 1.5.0, Codex, and pinned `valentinyeo/vstack` (`valentin-mode` + `responsive-mode`), disables auto-switch through the real UI, selects `openai-codex/gpt-6.1-sol` through Pi Model with RPC acknowledgement, proves real replies, `/valentin-mode` skill body hash and version provenance, marker recall separately from ordered stored and copied/screenshot history, and a Pi-to-Codex-to-Pi roundtrip with an independent other-family verifier job. Claude and Antigravity return hops remain unsupported until approved runner credentials exist.
 
-The script starts a throwaway hosted chat, sends a marker, switches Claude→Codex→Pi→Claude using [providers-switch-ai.json](../providers-switch-ai.json) (add Antigravity as a row after SOFT-3050), and after each hop asserts the same name and address, marker in history, exactly one live chat, and a fresh reply from the new provider; it kills every tmux session it created on exit. Reset, resync, fresh start and deferred restart journeys remain UNREACHABLE until native driver controls exist for those rows.
+Reset, resync, fresh start, and deferred restart journeys remain UNREACHABLE until native driver controls exist for each path.
 
 | Palette row or dynamic family | User reaches it |
 | --- | --- |

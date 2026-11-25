@@ -5,6 +5,10 @@ param(
     [Parameter(Mandatory)][string]$Evidence
 )
 $ErrorActionPreference = 'Stop'
+if ($env:REAL_PI_PROOF -eq '1') {
+    & "$PSScriptRoot/drive-real-pi.ps1" -Exe $Exe -ExpectedVersion $ExpectedVersion -ExpectedHash $ExpectedHash -Evidence $Evidence
+    return
+}
 . "$PSScriptRoot/native.ps1"
 Set-StrictMode -Version Latest
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows') { throw 'Use a GitHub Windows runner' }

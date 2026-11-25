@@ -1,0 +1,2 @@
+- Picking a model in a Pi chat sends the exact model identifier so Pi switches models cleanly.
+- Slash skills like Valentin Mode expand automatically in Pi chats, and Pi chats respect the saved default model when starting or switching.

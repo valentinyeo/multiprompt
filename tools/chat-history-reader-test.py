@@ -9262,6 +9262,46 @@ class MUBO135_ServerReplyOnceTest(unittest.TestCase):
         self.assert_once(True)
 
 
+class PiCodexFallbackTest(unittest.TestCase):
+    def test_pi_model_normalization_settings_default_and_skill_expansion(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            pi_dir = home / '.pi/agent'
+            (pi_dir / 'skills/valentin-mode').mkdir(parents=True)
+            (pi_dir / 'skills/valentin-mode/SKILL.md').write_text('---\nname: valentin-mode\n---\nbody\n', encoding='utf-8')
+            (pi_dir / 'settings.json').write_text(
+                json.dumps({'defaultProvider': 'openai-codex', 'defaultModel': 'gpt-6.1-sol'}),
+                encoding='utf-8',
+            )
+            stream = io.BytesIO()
+            sid = 'a1b2c3d4-2567-4000-8000-000000000523'
+            with patch.object(reader, 'HOME', home), patch.dict(os.environ, {'CODEX_AUTH_JSON': 'secret', 'PI_CODING_AGENT_DIR': str(pi_dir)}):
+                self.assertEqual(reader.host_pi_choice('pi', sid), ['--provider', 'openai-codex', '--model', 'gpt-6.1-sol'])
+                cfg_path = reader.host_paths('pi', sid)['config']
+                reader.host_write(cfg_path, {'enabled': True, 'provider': 'pi', 'sid': sid, 'tmux': 'live-pi', 'cwd': str(home)})
+                session = {'agent': types.SimpleNamespace(stdin=stream), 'state': {}}
+                res = reader.host_pi_set_model('pi', sid, 'live-pi', session, {'provider_name': 'openai-codex', 'model': 'openai-codex/gpt-6.1-sol'})
+                self.assertEqual(res['status'], 'ok')
+                sent_model = json.loads(stream.getvalue().decode().splitlines()[-1])
+                self.assertEqual(sent_model, {'type': 'set_model', 'provider': 'openai-codex', 'modelId': 'gpt-6.1-sol'})
+                self.assertEqual(reader.host_pi_skill_prompt('pi', sid, '/valentin-mode check'), '/skill:valentin-mode check')
+                self.assertEqual(reader.host_pi_skill_prompt('pi', sid, '/skill:valentin-mode check'), '/skill:valentin-mode check')
+                self.assertEqual(reader.host_pi_skill_prompt('pi', sid, '/unknown-skill'), '/unknown-skill')
+                self.assertNotIn('CODEX_AUTH_JSON', reader.host_agent_env('pi', sid))
+                self.assertNotIn('CODEX_AUTH_JSON', reader.host_agent_env('codex', sid))
+                reader.host_pi_event('pi', sid, 'live-pi', session, {
+                    'type': 'response',
+                    'command': 'set_model',
+                    'success': True,
+                    'data': {'provider': 'openai-codex', 'id': 'gpt-6.1-sol'},
+                })
+                log_lines = [json.loads(line) for line in reader.host_paths('pi', sid)['log'].read_text(encoding='utf-8').splitlines()]
+                reply_event = next(e for e in log_lines if e.get('event') == 'pi_set_model_reply')
+                self.assertTrue(reply_event['success'])
+                self.assertEqual(reply_event['provider'], 'openai-codex')
+                self.assertEqual(reply_event['model'], 'gpt-6.1-sol')
+
+
 def load_tests(loader, tests, pattern):
     shard = os.environ.get('HISTORY_READER_SHARD')
     if shard is None:
