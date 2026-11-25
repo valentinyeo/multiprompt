@@ -35,6 +35,7 @@ const Host = struct {
     outgoing: std.ArrayList(Packet) = .empty,
     outgoing_bytes: usize = 0,
     wake: w.HANDLE = null,
+    ready: w.HANDLE = null,
     retry_at: u64 = 0,
     next_id: u32 = 0,
     channels: std.ArrayList(*Channel) = .empty,
@@ -143,6 +144,7 @@ fn abortBoot(b: Boot) void {
 }
 
 fn handshakeWorker(b: Boot) void {
+    defer _ = w.SetEvent(b.host.ready);
     const deadline = w.GetTickCount64() + 15_000;
     var ready: [15]u8 = undefined;
     var ready_len: usize = 0;
@@ -195,7 +197,9 @@ fn handshakeWorker(b: Boot) void {
 
 fn bootHost(host: *Host, index: u8) bool {
     if (host.wake == null) host.wake = w.CreateEventW(null, 0, 0, null);
-    if (host.wake == null) return false;
+    if (host.ready == null) host.ready = w.CreateEventW(null, 1, 0, null);
+    if (host.wake == null or host.ready == null) return false;
+    _ = w.ResetEvent(host.ready);
     var cmd: [2048]u16 = undefined;
     var pos: usize = 0;
     const console = @import("console.zig");
@@ -330,6 +334,20 @@ pub fn openCommand(index: u8, command: []const u8) ?*Channel {
     return channel;
 }
 
+pub fn openCommandWait(index: u8, command: []const u8, timeout_ms: u32) ?*Channel {
+    if (openCommand(index, command)) |channel| return channel;
+    if (index >= hosts.len) return null;
+    const host = &hosts[index];
+    lock(host);
+    const starting = host.starting;
+    const ready = host.ready;
+    const running = host.running;
+    host.mutex.unlock();
+    if (starting and w.WaitForSingleObject(ready, timeout_ms) != 0) return null;
+    if (!starting and !running) return null;
+    return openCommand(index, command);
+}
+
 pub fn openTerminal(index: u8, hwnd: w.HANDLE, message: u32, user: usize) ?*Channel {
     const channel = open(index, false) orelse return null;
     lock(channel.host);
@@ -430,8 +448,7 @@ pub fn respawn(index: u8) void {
     const host = &hosts[index];
     lock(host);
     defer host.mutex.unlock();
-    if ((host.running or host.starting) and host.process != null) _ = w.TerminateProcess(host.process, 0);
-    host.starting = false;
+    if (host.running and host.process != null) _ = w.TerminateProcess(host.process, 0);
 }
 
 fn rejectTerminal(channel: *Channel) bool {

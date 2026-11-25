@@ -34,6 +34,8 @@ jobs:
           node-version: 22
       - name: Install Zig 0.16.0
         uses: ./.github/actions/setup-zig
+        with:
+          cache: 'false'
       - name: Acquire real app and compile boundary stand-in
         shell: pwsh
         env:
