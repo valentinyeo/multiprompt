@@ -1,5 +1,6 @@
 import base64
 import json
+import os
 from pathlib import Path
 import runpy
 import subprocess
@@ -10,6 +11,8 @@ root = Path(sys.argv[1])
 sources = {name: base64.b64encode((root / f'src/chat_connectors/{name}.py').read_bytes()).decode() for name in ('claude', 'codex')}
 reader = runpy.run_path(str(root / 'src/chat_history_reader.py'), init_globals=dict(CONNECTOR_SOURCES=sources))
 for name, sid in [('Alpha', 'a1b2c3d4-0534-4000-8000-000000000001'), ('Bravo', 'a1b2c3d4-0534-4000-8000-000000000002')]:
+    for marker in ('AWAY534', 'RESTART534'):
+        os.mkfifo(Path.home() / (sid + '-' + marker + '.fifo'), 0o600)
     session = 'rooms-' + name.lower()
     subprocess.run(['tmux', 'new-session', '-d', '-s', session, '-c', str(Path.home())], check=True)
     result = reader['host_cli'](['enable', 'claude', sid, '--tmux', session, '--cwd', str(Path.home())])

@@ -10,4 +10,8 @@ for path in sorted((home / '.local/state/multiprompt/rooms-accounts').glob('*/ro
         rooms.append(dict(account_digest=path.parent.name, tables={name: [dict(row) for row in db.execute('SELECT * FROM ' + name + (' ORDER BY seq' if name == 'events' else ''))] for name in ('rooms', 'members', 'events', 'deliveries')}))
 inputs = home / 'provider-input.jsonl'
 transcripts = {str(path.relative_to(home)): [json.loads(line) for line in path.read_text().splitlines()] for path in (home / '.claude/projects').glob('*/*.jsonl')}
-print(json.dumps(dict(rooms=rooms, inputs=[json.loads(line) for line in inputs.read_text().splitlines()] if inputs.exists() else [], transcripts=transcripts)))
+hosts = []
+for path in sorted((home / '.local/state/multiprompt/agent-host').glob('*.state.json')):
+    state = json.loads(path.read_text())
+    hosts.append(dict(file=path.name, inflight=bool(state.get('inflight')), queued=len(state.get('sends', [])), state=state))
+print(json.dumps(dict(rooms=rooms, hosts=hosts, inputs=[json.loads(line) for line in inputs.read_text().splitlines()] if inputs.exists() else [], transcripts=transcripts)))
