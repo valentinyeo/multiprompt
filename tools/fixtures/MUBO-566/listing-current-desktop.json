@@ -1,0 +1,61 @@
+{
+  "ok": true,
+  "active_workspace": "Multiprompt",
+  "sidebar_view": "Multiprompt",
+  "hosts": ["vps-de", "vps-uk", "vps-inne"],
+  "workspaces": [
+    {
+      "id": 0,
+      "name": "Multiprompt",
+      "active": true,
+      "groups": [
+        {
+          "id": 7,
+          "name": "Bugs",
+          "tabs": [
+            {
+              "id": 12,
+              "title": "Valentin Test Codex",
+              "host": "vps-uk",
+              "tmux": "project-566",
+              "active": false,
+              "cv": true,
+              "visible": true,
+              "waiting": false,
+              "pinned": false,
+              "archived": false,
+              "user_hidden": false,
+              "hidden_reason": null,
+              "state": "connected"
+            }
+          ]
+        }
+      ],
+      "tabs": [
+        {
+          "id": 11,
+          "title": "Multi Bot Bugs",
+          "host": "vps-uk",
+          "tmux": "project-13734",
+          "active": true,
+          "cv": true,
+          "visible": true,
+          "waiting": false,
+          "pinned": false,
+          "archived": false,
+          "user_hidden": false,
+          "hidden_reason": null,
+          "state": "connected"
+        }
+      ]
+    },
+    {
+      "id": 1,
+      "name": "Server",
+      "active": false,
+      "groups": [],
+      "tabs": []
+    }
+  ],
+  "archived_sessions": []
+}

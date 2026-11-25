@@ -1,0 +1,12 @@
+{
+  "ok": false,
+  "error": "port_conflict",
+  "message": "multiprompt app not reachable: pane port 19548 is held by pid 4211 (python3 /home/agent/.local/share/zigshell/stale_listener.py), not by the Multiprompt SSH tunnel, so this request went nowhere. Stop that process, then reconnect this SSH session from multiprompt.",
+  "session": "workspace",
+  "port": 19548,
+  "holder": {
+    "pid": 4211,
+    "command": "python3 /home/agent/.local/share/zigshell/stale_listener.py"
+  },
+  "hint": "Stop the stale process holding the pane port (kill 4211), then reconnect this SSH/tmux session from multiprompt."
+}

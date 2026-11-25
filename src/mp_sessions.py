@@ -337,6 +337,14 @@ def desktop_tabs(send, listing):
             yield workspace, group, tab
 
 
+def unreachable_detail(listing):
+    error = listing.get("error")
+    if not isinstance(error, str) or not error:
+        return None
+    message = listing.get("message")
+    return error if not isinstance(message, str) or not message else error + ": " + " ".join(message.split())
+
+
 def desktop_state(listing, tab=None, tmux=None, send=None):
     online = listing.get("ok") is True
     active = listing.get("active_workspace")
@@ -356,6 +364,7 @@ def desktop_state(listing, tab=None, tmux=None, send=None):
     else:
         visible, reason = None, "desktop visibility unavailable"
     return dict(in_layout=tab is not None if online else None, visible=visible, hidden_reason=reason,
+                offline_detail=None if online else unreachable_detail(listing),
                 waiting=tab.get("waiting") if tab else None, pinned=tab.get("pinned") if tab else None,
                 archived=tab.get("archived") if tab else (True if archived else None),
                 user_hidden=tab.get("user_hidden") if tab else None,
@@ -501,13 +510,14 @@ def find_existing(send, listing, slot, display, folder):
 
 def ensure_visible(send, listing, target, display):
     if listing.get("ok") is not True:
-        return dict(ok=False, error="desktop_offline")
+        return dict(ok=False, error="desktop_offline", detail=unreachable_detail(listing))
     workspace = target.get("workspace")
     if not workspace:
         workspace = default_workspace(listing)
-    host = target.get("host") or target.get("recorded_host_name")
+    host = target.get("host")
     if not host and isinstance(target.get("recorded_host"), int):
         host = host_name(listing, target["recorded_host"])
+    host = host or target.get("recorded_host_name")
     if not host:
         raise ValueError("this chat has no recorded host; start it again to record the server it runs on")
     present = send.find_tab(listing, target["tmux"])[2]
@@ -527,6 +537,20 @@ def start_host(send, provider, sid, folder, tmux):
     if started.get("status") not in ("started", "already"):
         raise ValueError("chat host did not start: " + str(started.get("reason") or started.get("status")))
     return started
+
+
+def verify_host_running(send, provider, sid, tmux):
+    status = send.reader_cli("status", provider, sid)
+    if status.get("status") != "ok" or status.get("alive") is not True or not send.pid_alive(status.get("pid")):
+        raise ValueError("chat host did not stay running for " + tmux + ": host_exited")
+    if status.get("tmux") != tmux:
+        raise ValueError("chat host is bound to another chat for " + tmux + ": host_binding_mismatch")
+    path = send.host_root() / (send.host_config_key(provider, sid) + ".state.json")
+    state = send.read_json(path) or {}
+    if state.get("provider") != provider or state.get("sid") != sid or state.get("pid") != status.get("pid"):
+        raise ValueError("chat host state does not match " + tmux + ": host_binding_mismatch")
+    if not send.pid_alive(state.get("agent_pid")):
+        raise ValueError("chat agent did not stay running for " + tmux + ": agent_exited")
 
 
 def row_state(row):
@@ -805,10 +829,13 @@ def cmd_start(args):
         send.dispatch(reader, provider, sid, tmux)
         final = send.handoff(reader, provider, sid, tmux, message.get("id"), 15.0)
         first = dict(id=message.get("id"), state=(final or {}).get("state"))
+    verify_host_running(send, provider, sid, tmux)
     result = dict(ok=True, status=status, name=display, tmux=tmux, sid=sid, provider=provider, folder=folder,
                   workspace=workspace, group=group, host=host, visible=shown.get("ok") is True, tab=shown.get("tab"), task=first)
     if shown.get("ok") is not True:
         result["visible_error"] = shown.get("error")
+        if shown.get("detail"):
+            result["visible_error_detail"] = shown["detail"]
     print(json.dumps(result, separators=(",", ":")))
     return 0 if first is None or first["state"] not in ("failed", "cancelled") else 3
 
@@ -824,6 +851,7 @@ def cmd_restart(args):
     tmux = target["tmux"]
     folder = target.get("folder") or os.getcwd()
     if target.get("running") and target.get("tab_open"):
+        verify_host_running(send, provider, sid, tmux)
         print(json.dumps(dict(ok=True, status="already", name=target.get("name"), tmux=tmux, sid=sid), separators=(",", ":")))
         return 0
     if target.get("busy"):
@@ -831,6 +859,7 @@ def cmd_restart(args):
     start_host(send, provider, sid, folder, tmux)
     display = target.get("name") or tmux
     shown = ensure_visible(send, listing, target, display)
+    verify_host_running(send, provider, sid, tmux)
     print(json.dumps(dict(ok=True, status="restarted", name=display, tmux=tmux, sid=sid,
                           visible=shown.get("ok") is True, tab=shown.get("tab")), separators=(",", ":")))
     return 0
@@ -1058,7 +1087,7 @@ def evaluate_row(send, listing, row, ping):
         provider=provider,
         workspace=row.get("workspace"),
         group=row.get("group"),
-        **{field: row.get(field) for field in ("in_layout", "visible", "hidden_reason", "waiting", "pinned", "archived", "user_hidden", "active_workspace", "sidebar_view")},
+        **{field: row.get(field) for field in ("in_layout", "visible", "hidden_reason", "offline_detail", "waiting", "pinned", "archived", "user_hidden", "active_workspace", "sidebar_view")},
         status=status,
         reasons=reasons,
         last_reply=last_reply,
@@ -1079,9 +1108,11 @@ def health_report(send, listing, rows, ping, as_json):
             visible = row.get("visible")
             visibility = "visible" if visible is True else ("hidden: " if visible is False else "unknown: ") + (row.get("hidden_reason") or "unreported")
             flags = " ".join(field + "=" + ("unknown" if row.get(field) is None else "yes" if row[field] else "no") for field in ("waiting", "pinned"))
+            detail = row.get("offline_detail")
             print(row["link"] + " " + row["status"] + " | " + visibility + " | " + flags +
                   " | workspace=" + (row.get("workspace") or "unknown") + " | on screen=" +
-                  (row.get("active_workspace") or "unknown") + " | view=" + (row.get("sidebar_view") or "unknown"))
+                  (row.get("active_workspace") or "unknown") + " | view=" + (row.get("sidebar_view") or "unknown") +
+                  (" | unreachable: " + detail if detail else ""))
 
     return 1 if broken else 0
 

@@ -777,9 +777,16 @@ def pane_holders():
 TUNNEL_PROCESSES = {"sshd", "sshd-session", "ssh", "ssh.exe", "sshd.exe"}
 
 
-def tunnel_holds_port(holders):
-    return all(any(os.path.basename(word).split(":")[0] in TUNNEL_PROCESSES for word in command.split())
-               for _, command in holders)
+def bridge_holds_port(holders):
+    for _, command in holders:
+        words = command.split()
+        if any(os.path.basename(word).split(":")[0] in TUNNEL_PROCESSES for word in words):
+            continue
+        if (len(words) >= 2 and os.path.basename(words[0]).split(".")[0] in {"python", "python3"}
+                and os.path.basename(words[1]) == "mp_notify_relay.py"):
+            continue
+        return False
+    return True
 
 
 def fail_port_conflict(holders):
@@ -842,7 +849,7 @@ if sock is None:
     except (OSError, subprocess.SubprocessError, ValueError):
         holders = pane_holders()
         detail = ""
-        if holders and not tunnel_holds_port(holders):
+        if holders and not bridge_holds_port(holders):
             detail = (f" Pane port {port} is held by pid {holders[0][0]} ({holders[0][1] or 'unknown process'}), "
                       "not by the Multiprompt SSH tunnel.")
         fail("notify_token_unavailable", "Notify relay token unavailable; set MULTIPROMP_NOTIFY_RELAY_TOKEN or unlock the Multiprompt Notify Relay Token item in Yeo UX Agents." + detail)
@@ -857,7 +864,7 @@ if sock is None:
         sock = socket.create_connection(("127.0.0.1", int(port)), timeout=min(5, timeout))
     except (OSError, ValueError):
         holders = pane_holders()
-        if holders and not tunnel_holds_port(holders):
+        if holders and not bridge_holds_port(holders):
             fail_port_conflict(holders)
         fail("tunnel_down", "multiprompt app not reachable (SSH tunnel down). Reconnect this SSH/tmux session from multiprompt.")
 try:
@@ -887,7 +894,15 @@ except OSError:
 raw = b"".join(chunks).decode(errors="replace")
 if not raw.strip():
     holders = pane_holders() if not endpoint else []
-    if holders and not tunnel_holds_port(holders):
+    if holders and bridge_holds_port(holders):
+        pid, command = holders[0]
+        message = (f"multiprompt app not reachable: pane port {port} is held by the pane bridge pid {pid} "
+                   f"({command or 'unknown process'}), which accepted the request but closed without a reply, "
+                   "so the desktop is offline or the app stopped. " + fix)
+        fail("empty_reply", message,
+             {"ok": False, "error": "empty_reply", "message": message, "session": session, "port": pane_port(),
+              "holder": {"pid": pid, "command": command}})
+    if holders:
         fail_port_conflict(holders)
     fail("empty_reply", "multiprompt app not reachable: tunnel accepted the request but closed without a reply (app stopped or bridge changed). " + fix)
 # The app's pane handoff and WebView2 actions use a literal acknowledgement.

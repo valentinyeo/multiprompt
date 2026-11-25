@@ -401,6 +401,37 @@ class Relay(unittest.TestCase):
         while b"DONE:tab\n" not in received and time.monotonic() < deadline:
             time.sleep(0.05)
         self.assertIn(b"DONE:tab\n", received)
+    def test_bind_failure_names_the_process_holding_the_port(self):
+        relay.reported_holder = None
+        stop = threading.Event()
+        with socket.socket() as squatter:
+            squatter.bind(("127.0.0.1", 0))
+            squatter.listen()
+            port = squatter.getsockname()[1]
+            with contextlib.redirect_stderr(io.StringIO()) as log:
+                server = threading.Thread(target=relay.serve, args=(self.directory, port, stop))
+                server.start()
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline and str(port) not in log.getvalue():
+                    time.sleep(0.05)
+                stop.set()
+                server.join(5)
+                self.assertFalse(server.is_alive())
+        held = log.getvalue()
+        self.assertIn(str(port), held)
+        self.assertIn("pid " + str(os.getpid()), held)
+        self.assertIn("python", held)
+
+    def test_the_same_port_holder_is_named_once_not_every_retry(self):
+        relay.reported_holder = None
+        with socket.socket() as squatter:
+            squatter.bind(("127.0.0.1", 0))
+            squatter.listen()
+            port = squatter.getsockname()[1]
+            with contextlib.redirect_stderr(io.StringIO()) as log:
+                relay.report_port_conflict(port)
+                relay.report_port_conflict(port)
+        self.assertEqual(log.getvalue().count(str(port)), 1)
 
 
 if __name__ == "__main__":
