@@ -70,11 +70,16 @@ class HostedClearTest(unittest.TestCase):
                                 dict(type='system', subtype='init', session_id=self.native))
         request = dict(op='message_submit', message_protocol=1, provider='claude', sid=self.sid,
                        tmux=self.tmux, message_id='desktop_clear_next_message', text='new conversation prompt')
-        queued = reader.message_store_request(request)
-        message = queued['message']
-        delivered = reader.host_handle_request('claude', self.sid, self.tmux, self.session,
-                    dict(op='deliver', id=message['id'], attempt=message['attempt'], epoch=queued['epoch'], text=request['text']))
-        self.assertEqual(delivered['status'], 'sent', delivered)
+        reader.message_store_request(request)
+        replies = []
+        def host_request(provider, sid, payload, **kwargs):
+            reply = reader.host_handle_request(provider, sid, self.tmux, self.session, payload)
+            replies.append(reply)
+            return reply
+        with patch.object(reader, 'host_owned', return_value=True), \
+                patch.object(reader, 'host_request', side_effect=host_request):
+            reader.message_store_request(dict(request, op='message_dispatch'))
+        self.assertEqual([reply['status'] for reply in replies], ['sent'], replies)
         events = [json.loads(line) for line in (ROOT / 'tools/fixtures/MUBO-136/new.jsonl').read_text().splitlines()]
         for event in events:
             reader.host_claude_event('claude', self.sid, self.tmux, self.session, event)
