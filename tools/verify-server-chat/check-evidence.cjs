@@ -11,7 +11,7 @@ assert.equal(result.status, 'passed');
 assert.deepEqual(result.cases.map(row => [row.name, row.passed]), [['open', true], ['send', true], ['clear', true], ['after-clear', true]]);
 assert.equal(result.cleanup.activeAfterStop, 0);
 assert.equal(result.keyRemoved, true);
-assert.equal(result.videoExit, 0);
+assert.ok(Array.isArray(json('video.json').streams) && json('video.json').streams.length === 1);
 assert.ok(text('open-copied.txt').includes('Server received: server seed'));
 for (const [name, message] of [['send', 'windows send proof'], ['clear', '/clear'], ['after-clear', 'windows after clear']]) {
   const wireText = name === 'clear' ? '/clear ' : message;

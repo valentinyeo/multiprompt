@@ -94,6 +94,8 @@ jobs:
         run: node --test tools/check-journey-evidence.test.js
       - name: Require journey evidence to survive every run
         run: node tools/check-journey-evidence.mjs
+      - name: Test the done-video evidence fetcher
+        run: node --test tools/done-video.test.mjs
       - name: Test the FFmpeg install guard
         run: node --test tools/check-ffmpeg-install.test.js
       - name: Require a cached, retried FFmpeg install
@@ -509,7 +511,7 @@ jobs:
       - name: Guard chat stillness before accepting chat changes
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1
         env:
-          CHAT_STILL_BASE: ${{ github.event.pull_request.base.sha || github.event.before || '' }}
+          CHAT_STILL_BASE: ${{ github.event.pull_request.base.sha || github.event.before || (github.event_name == 'workflow_dispatch' && 'origin/master') || '' }}
         run: |
           if grep -zEq '^(src/(chat[^/]*|app_state|layout|window_layout|browser_pane|drawing|main)\.(zig|py)|tools/chat-still/|tools/verify-chat-still$)' "$RUNNER_TEMP/changed-paths"; then
             bash tools/verify-chat-still --self-test --replay --inherit-from "$CHAT_STILL_BASE" --output "$RUNNER_TEMP/chat-still-formal.json"

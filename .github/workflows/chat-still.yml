@@ -38,7 +38,7 @@ jobs:
         uses: ./.github/actions/setup-zig
       - name: Check every geometry and replay every counterexample
         env:
-          CHAT_STILL_BASE: ${{ github.event.pull_request.base.sha || '' }}
+          CHAT_STILL_BASE: ${{ github.event.pull_request.base.sha || (github.event_name == 'workflow_dispatch' && 'origin/master') || '' }}
         run: bash tools/verify-chat-still --self-test --replay --inherit-from "$CHAT_STILL_BASE" --output evidence/formal.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()

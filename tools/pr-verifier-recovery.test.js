@@ -8,6 +8,7 @@ const verifier = require('./pr-verifier.cjs');
 
 const recovery = require('./fixtures/SOFT-2498/recovery.json');
 const artifacts = require('./fixtures/SOFT-2498/artifacts.json');
+const expectedArtifactIds = [...artifacts.expectedIds, 14246149485, 14246145450];
 
 for (const verdict of ['PASS', 'PASS+NOTES']) {
   test(`${verdict} is recognized with GitHub's rewritten check URL`, () => {
@@ -36,13 +37,13 @@ test('an older verdict or a different head cannot suppress genuine recovery', ()
   assert.equal(verifier.recoveryNeeded(recovery.run, 'a'.repeat(40), recovery.checks), true);
 });
 
-test('retry collection selects one newest head artifact ID per journey', () => {
+test('retry collection selects one newest base and head artifact ID per journey', () => {
   assert.equal(typeof verifier.latestArtifacts, 'function');
   const selected = verifier.latestArtifacts(artifacts.artifacts, artifacts.selection);
-  assert.deepEqual(selected.map(item => item.id).sort(), [...artifacts.expectedIds].sort());
+  assert.deepEqual(selected.map(item => item.id).sort(), [...expectedArtifactIds].sort());
   assert.equal(new Set(selected.map(item => item.name)).size, selected.length);
   assert.deepEqual(verifier.latestArtifacts([...artifacts.artifacts].reverse(), artifacts.selection), selected);
-  assert.ok(selected.every(item => !item.name.endsWith(artifacts.baseSha)), 'a revision-suffixed artifact is never head evidence');
+  assert.equal(selected.filter(item => item.name.endsWith(artifacts.baseSha)).length, 2);
 });
 
 test('retry collection downloads exact IDs and replaces evidence without duplicate extraction', { skip: process.platform !== 'linux' }, () => {
@@ -89,7 +90,7 @@ if (args.some(arg => /\\/artifacts\\/\\d+\\/zip$/.test(arg))) {
     }
     const calls = fs.readFileSync(requests, 'utf8').trim().split('\n').map(line => JSON.parse(line));
     const downloaded = calls.flatMap(args => args.filter(arg => /\/artifacts\/\d+\/zip$/.test(arg)).map(arg => Number(arg.match(/\/artifacts\/(\d+)\/zip$/)[1])));
-    assert.deepEqual(downloaded.sort(), [...artifacts.expectedIds, ...artifacts.expectedIds].sort());
+    assert.deepEqual(downloaded.sort(), [...expectedArtifactIds, ...expectedArtifactIds].sort());
     assert.ok(calls.every(args => args[0] !== 'run'));
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
