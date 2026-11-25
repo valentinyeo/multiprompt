@@ -1,6 +1,6 @@
 # Own browser profile per workspace
 
-Source files: src/browser*, extension/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, src/mp_zsb.sh, tools/vps-multiprompt-browser.sh, tools/agent-notifications/user_browser.py, .claude/skills/verify-multiprompt/control-feature-browser-own-profile.ps1, tools/agent-notifications/owner_browser_live.py
+Source files: src/browser*, src/bridge.zig, extension/*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, src/mp_zsb.sh, tools/vps-multiprompt-browser.sh, tools/agent-notifications/user_browser.py, .claude/skills/verify-multiprompt/control-feature-browser-own-profile.ps1, tools/agent-notifications/owner_browser_live.py
 
 Verify on: push
 
