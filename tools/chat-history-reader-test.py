@@ -4536,6 +4536,50 @@ class IGSH_1266_SharedMessageHostTest(unittest.TestCase):
             self.assertEqual(spawn.call_count, 2)
             self.assertEqual(self.send.call_count, 0)
 
+    def serve_polls(self, count, gap=0.0):
+        requests = [dict(self.base, id=index, op='message_snapshot') for index in range(1, count + 1)]
+        read_end, write_end = os.pipe()
+        started = time.monotonic()
+        def feed():
+            with os.fdopen(write_end, 'wb') as stream:
+                for request in requests:
+                    time.sleep(gap)
+                    stream.write((json.dumps(request) + '\n').encode())
+                    stream.flush()
+        writer = threading.Thread(target=feed, daemon=True)
+        output = io.StringIO()
+        try:
+            with os.fdopen(read_end, 'rb') as incoming, patch.object(reader.sys, 'stdin', types.SimpleNamespace(buffer=incoming)), patch.object(reader.sys, 'stdout', output):
+                writer.start()
+                reader.serve('pass')
+        finally:
+            writer.join(5)
+        return [json.loads(line) for line in output.getvalue().splitlines()], time.monotonic() - started
+
+    def test_mubo_528_an_idle_chat_poll_starts_no_message_worker(self):
+        def child(*args, **kwargs):
+            return types.SimpleNamespace(stdin=io.BytesIO())
+        with patch.object(reader.subprocess, 'Popen', side_effect=child) as spawn:
+            answers, elapsed = self.serve_polls(5, gap=0.2)
+        print(f'MUBO-528 idle_polls=5 worker_spawns={spawn.call_count} seconds={elapsed:.2f}', file=sys.stderr)
+        self.assertEqual([answer['id'] for answer in answers], [1, 2, 3, 4, 5])
+        self.assertGreaterEqual(elapsed, 0.8, 'the idle polls must span a real second of reading')
+        self.assertEqual(spawn.call_count, 0, 'a chat with nothing queued must not start a message worker')
+
+    def test_mubo_528_a_chat_with_work_starts_one_worker_and_reuses_it(self):
+        self.submit()
+        inherited = []
+        def child(*args, **kwargs):
+            inherited.extend(os.dup(fd) for fd in kwargs.get('pass_fds') or ())
+            return types.SimpleNamespace(stdin=io.BytesIO())
+        self.addCleanup(lambda: [os.close(fd) for fd in inherited])
+        with patch.object(reader.subprocess, 'Popen', side_effect=child) as spawn:
+            answers, _ = self.serve_polls(5, gap=0.05)
+        print(f'MUBO-528 work_polls=5 worker_spawns={spawn.call_count} reused={len(inherited)}', file=sys.stderr)
+        self.assertEqual(len(answers), 5)
+        self.assertEqual(spawn.call_count, 1, 'later polls must reach the running worker instead of starting another')
+        self.assertTrue(inherited, 'the worker must hold the lock its caller took before the reader finished compiling')
+
     def test_duplicate_worker_returns_without_blocking(self):
         import fcntl
         self.submit()
@@ -6769,6 +6813,83 @@ class HostWorkerDeliveryTest(AgentHostFixture, unittest.TestCase):
         self.assertFalse(worker.is_alive(), 'delivery worker must stop after becoming idle')
 
 
+class MUBO_452_FreshStartBusyTest(unittest.TestCase):
+    tmux = 'mubo-452-fresh-chat'
+    token = 'mubo_452_message_0001'
+    text = 'message typed while the fresh start reloads'
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name)
+        self.addCleanup(patch.stopall)
+        patch.object(reader, 'HOME', self.home).start()
+        patch.object(reader, 'resolve_tmux_agent', return_value=None).start()
+        patch.object(reader, 'host_owned', return_value=True).start()
+        patch.object(reader, 'host_dispatch_switch', return_value=True).start()
+        patch.object(reader, 'host_dispatch_start', return_value={'status': 'owned'}).start()
+        self.sid = str(uuid.uuid4())
+        self.delivered = []
+        self.busy = True
+        patch.object(reader, 'host_deliver', side_effect=self.deliver).start()
+        reader.host_write(reader.host_paths('claude', self.sid)['config'], dict(enabled=True, tmux=self.tmux))
+        self.write_state(fresh=True)
+        db = reader.message_store_db(self.tmux)
+        with db:
+            db.execute("INSERT OR IGNORE INTO message_chats(provider,sid,epoch,seq) VALUES ('claude',?,0,0)", (self.sid,))
+        db.close()
+
+    def write_state(self, fresh):
+        state = dict(provider='claude', sid=self.sid, tmux=self.tmux)
+        if fresh:
+            state['fresh_start'] = dict(phase='handover', started=time.time())
+        reader.host_state_write('claude', self.sid, state)
+
+    def deliver(self, provider, sid, token, attempt, epoch, text, room_scope=None):
+        if self.busy:
+            return dict(status='busy', reason='fresh_start_pending')
+        self.delivered.append(token)
+        return dict(status='sent')
+
+    def request(self, op, **values):
+        return reader.message_store_request(dict(message_protocol=1, tmux=self.tmux, provider='claude',
+                                                 sid=self.sid, op='message_' + op, **values))
+
+    def message(self):
+        return self.request('status', message_id=self.token)['message']
+
+    def age(self):
+        db = reader.message_store_db(self.tmux)
+        with db:
+            db.execute("UPDATE shared_messages SET deadline=?, created=? WHERE id=?",
+                       (time.time() - 1, time.time() - 700, self.token))
+        db.close()
+
+    def stop_ageing(self):
+        db = reader.message_store_db(self.tmux)
+        with db:
+            db.execute("UPDATE shared_messages SET created=? WHERE id=?", (time.time() - 60, self.token))
+        db.close()
+
+    def test_a_pending_fresh_start_holds_a_message_until_it_lands_exactly_once(self):
+        self.assertEqual(self.request('submit', message_id=self.token, text=self.text)['message']['state'], 'queued')
+        self.assertIsNone(self.request('dispatch')['message'])
+        self.assertEqual(self.message()['state'], 'queued')
+        self.age()
+        waiting = self.message()
+        self.assertEqual((waiting['state'], waiting['receipt']), ('queued', None))
+        self.assertIsNone(self.request('dispatch')['message'])
+        self.assertEqual(self.message()['state'], 'queued')
+        self.stop_ageing()
+        self.busy = False
+        self.write_state(fresh=False)
+        self.request('dispatch')
+        self.assertEqual(self.delivered, [self.token])
+        self.assertEqual(self.message()['state'], 'sent')
+        self.request('dispatch')
+        self.assertEqual(self.delivered, [self.token], 'the held message reached the chat twice')
+
+
 class EmptyHostedChatTest(unittest.TestCase):
     sid = 'empty-hosted-session'
     tmux = 'empty-hosted-chat'
@@ -7453,6 +7574,60 @@ class ServeEventPushTest(unittest.TestCase):
         self.assertIsNone(self.server.poll())
         self.ask(dict(id=89, op='engine_info'))
         self.assertEqual(self.line()['id'], 89)
+
+    def test_mubo_525_idle_reader_waits_without_spinning_cpu_or_rereading_store(self):
+        proc = Path(f'/proc/{self.server.pid}')
+        if not (proc / 'io').is_file() or not (proc / 'stat').is_file():
+            self.skipTest('proc io metrics unavailable')
+
+        def sample():
+            io_stats = {}
+            for row in (proc / 'io').read_text(encoding='utf-8').splitlines():
+                key, _, value = row.partition(':')
+                if value.strip().isdigit():
+                    io_stats[key.strip()] = int(value.strip())
+            stat_text = (proc / 'stat').read_text(encoding='utf-8')
+            tail = stat_text[stat_text.rfind(')') + 2:].split()
+            ticks = int(tail[11]) + int(tail[12])
+            return time.monotonic(), io_stats['rchar'], io_stats['syscr'], ticks
+
+        for index in range(30):
+            self.publish('seed ' + str(index))
+        self.ask(dict(id=88, op='events_subscribe', provider=self.provider, sid=self.sid, after=0, snapshot=True))
+        self.assertEqual(self.line()['id'], 88)
+        self.ask(dict(id=89, op='events_subscribe', provider=self.provider, sid='serve-events-empty', after=0, snapshot=True))
+        self.assertEqual(self.line()['id'], 89)
+        warm = self.publish('warm')
+        warmed = self.line()
+        self.assertEqual(warmed['id'], 88)
+        self.assertEqual([item['seq'] for item in warmed['result']['events']], [warm])
+        unrelated = reader.message_store_path().parent / 'store.unrelated.dispatch'
+        unrelated.write_bytes(b'x')
+        time.sleep(0.2)
+        t0, rchar0, syscr0, ticks0 = sample()
+        time.sleep(1.0)
+        unrelated.write_bytes(b'y')
+        time.sleep(1.0)
+        t1, rchar1, syscr1, ticks1 = sample()
+        elapsed = t1 - t0
+        delta_rchar = rchar1 - rchar0
+        delta_syscr = syscr1 - syscr0
+        cpu_pct = 100.0 * ((ticks1 - ticks0) / os.sysconf('SC_CLK_TCK')) / elapsed
+        summary = (f'MUBO_525_IDLE_SAMPLE cpu_pct={cpu_pct:.2f} read_bytes_per_s={delta_rchar / elapsed:.0f} '
+                   f'syscr_per_s={delta_syscr / elapsed:.1f} delta_rchar={delta_rchar} delta_syscr={delta_syscr} elapsed={elapsed:.2f}')
+        print(summary, flush=True)
+        self.assertLessEqual(delta_syscr, 50, summary)
+        self.assertLessEqual(delta_rchar, 64 * 1024, summary)
+        self.assertLess(cpu_pct, 10.0, summary)
+        started = time.monotonic()
+        fresh = self.publish('after idle')
+        pushed = self.line(timeout=2)
+        push_ms = (time.monotonic() - started) * 1000.0
+        print(f'MUBO_525_PUSH_LATENCY_MS={push_ms:.1f}', flush=True)
+        self.assertEqual(pushed['id'], 88)
+        self.assertEqual([item['seq'] for item in pushed['result']['events']], [fresh])
+        self.assertEqual(pushed['result']['events'][0]['event']['payload']['text'], 'after idle')
+        self.assertLess(push_ms, 1000.0)
 
 
 

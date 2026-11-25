@@ -1320,8 +1320,8 @@ fn zsbWorkerThread(ctx_ptr: usize) void {
         "reset",            "resolve-window", "routing-audit",  "screenshot",
         "script",           "session-archive", "session-close", "session-move",
         "session-open",     "session-pin",     "session-rebind", "session-rename",
-        "session-status",   "session-unarchive", "session-unpin", "shell-open",
-        "shoturl",
+        "session-status",   "session-unarchive", "session-unpin", "session-wait",
+        "shell-open",       "shoturl",
         "sidebar",          "snapshot",       "status",         "tab",
         "tabs",             "text",           "type",           "url",
         "version",          "workspace-list",
@@ -2553,6 +2553,16 @@ fn zsbTabClose(argv: []const []const u8, out: []u8, comptime ops: type) usize {
     return zsbTabReply(out, "closed", args.tab, null);
 }
 
+fn zsbTabWait(argv: []const []const u8, out: []u8, comptime ops: type) usize {
+    const args = parseZsbTabArgs(argv, .{ .verb = "session-wait", .allowed = &.{.tab}, .required = &.{.tab} }) catch |err| return zsbTabParseError(out, err);
+    const idx = zsbShellIndexForTab(args.tab) orelse return zsbWorkspaceError(out, "unknown_tab");
+    if (idx == app_state.active_shell) return zsbWorkspaceError(out, "active_tab");
+    if (app_state.shells[idx].inbox_archived and !app_state.shells[idx].needs_attention) return zsbTabReply(out, "already", args.tab, null);
+    if (!ops.markWaiting(idx)) return zsbWorkspaceError(out, "wait_failed");
+    ops.persist();
+    return zsbTabReply(out, "waiting", args.tab, null);
+}
+
 fn zsbTabRename(argv: []const []const u8, out: []u8, comptime ops: type) usize {
     const args = parseZsbTabArgs(argv, .{ .verb = "session-rename", .allowed = &.{ .tab, .name }, .required = &.{ .tab, .name } }) catch |err| return zsbTabParseError(out, err);
     const idx = zsbShellIndexForTab(args.tab) orelse return zsbWorkspaceError(out, "unknown_tab");
@@ -2709,6 +2719,12 @@ const ZsbTabOps = struct {
         @import("sidebar.zig").normalizeGroupOrder();
         @import("workspaces.zig").commitPillMove(workspace, false);
     }
+    fn markWaiting(idx: u32) bool {
+        if (!@import("sidebar.zig").recordInboxArchive(idx)) return false;
+        app_state.shells[idx].needs_attention = false;
+        @import("inbox.zig").publishInboxStateNow();
+        return true;
+    }
     fn persist() void {
         saveSession();
     }
@@ -2718,11 +2734,13 @@ fn zsbIsTabVerb(verb: []const u8) bool {
     return std.mem.eql(u8, verb, "session-close") or std.mem.eql(u8, verb, "session-rebind") or
         std.mem.eql(u8, verb, "session-rename") or std.mem.eql(u8, verb, "session-move") or
         std.mem.eql(u8, verb, "session-archive") or std.mem.eql(u8, verb, "session-unarchive") or
-        std.mem.eql(u8, verb, "session-pin") or std.mem.eql(u8, verb, "session-unpin");
+        std.mem.eql(u8, verb, "session-pin") or std.mem.eql(u8, verb, "session-unpin") or
+        std.mem.eql(u8, verb, "session-wait");
 }
 
 fn zsbTabCommand(args: []const []const u8, out: []u8, comptime ops: type) usize {
     if (std.mem.eql(u8, args[0], "session-close")) return zsbTabClose(args, out, ops);
+    if (std.mem.eql(u8, args[0], "session-wait")) return zsbTabWait(args, out, ops);
     if (std.mem.eql(u8, args[0], "session-rebind")) return zsbTabRebind(args, out, ops);
     if (std.mem.eql(u8, args[0], "session-rename")) return zsbTabRename(args, out, ops);
     if (std.mem.eql(u8, args[0], "session-archive")) return zsbTabArchive(args, out, ops);
@@ -3294,6 +3312,7 @@ const ZsbTabTestOps = struct {
     var respawn_ok = true;
     var moved: usize = 0;
     var move_workspace: u8 = 0;
+    var waited: usize = 0;
     var persisted: usize = 0;
 
     fn reset() void {
@@ -3302,7 +3321,15 @@ const ZsbTabTestOps = struct {
         respawn_ok = true;
         moved = 0;
         move_workspace = 0;
+        waited = 0;
         persisted = 0;
+    }
+
+    fn markWaiting(idx: u32) bool {
+        waited += 1;
+        app_state.shells[idx].inbox_archived = true;
+        app_state.shells[idx].needs_attention = false;
+        return true;
     }
 
     fn close(idx: u32) void {
@@ -3370,6 +3397,27 @@ test "tab verbs reject malformed arguments before touching any tab" {
     try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"invalid_name\"}\n", zsbTabTestRun(&.{ "session-rename", "--tab", "42", "--name", "bad\x07name" }, &out));
     try std.testing.expectEqual(@as(usize, 0), ZsbTabTestOps.closed + ZsbTabTestOps.respawned + ZsbTabTestOps.moved + ZsbTabTestOps.persisted);
     try std.testing.expectEqual(@as(u32, 2), app_state.shell_count);
+}
+
+test "session-wait puts one background tab in Waiting and a second call changes nothing" {
+    const saved = try ZsbWorkspaceTest.init();
+    defer saved.deinit();
+    ZsbTabTestOps.reset();
+    var out: [4096]u8 = undefined;
+    try zsbTabTestOpen("runner-7", &out);
+    const active = app_state.active_shell;
+    try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"unknown_tab\"}\n", zsbTabTestRun(&.{ "session-wait", "--tab", "99" }, &out));
+    try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"active_tab\"}\n", zsbTabTestRun(&.{ "session-wait", "--tab", "41" }, &out));
+    try std.testing.expectEqual(@as(usize, 0), ZsbTabTestOps.waited);
+    try std.testing.expectEqualStrings("{\"ok\":true,\"waiting\":true,\"tab\":42}\n", zsbTabTestRun(&.{ "session-wait", "--tab", "42" }, &out));
+    try std.testing.expect(app_state.shells[1].inbox_archived);
+    try std.testing.expect(!app_state.shells[1].needs_attention);
+    try std.testing.expectEqual(@as(usize, 1), ZsbTabTestOps.waited);
+    try std.testing.expectEqual(@as(usize, 1), ZsbTabTestOps.persisted);
+    try std.testing.expectEqualStrings("{\"ok\":true,\"already\":true,\"tab\":42}\n", zsbTabTestRun(&.{ "session-wait", "--tab", "42" }, &out));
+    try std.testing.expectEqual(@as(usize, 1), ZsbTabTestOps.waited);
+    try std.testing.expectEqual(@as(usize, 1), ZsbTabTestOps.persisted);
+    try std.testing.expectEqual(active, app_state.active_shell);
 }
 
 test "session-close removes a background tab and refuses the active, pinned and unknown tab" {
