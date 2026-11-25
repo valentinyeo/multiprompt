@@ -15,7 +15,7 @@ function python(program) {
 }
 
 const setup = String.raw`
-import json, sqlite3, tempfile
+import json, sqlite3, tempfile, time
 from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
@@ -32,7 +32,7 @@ def prepare(directory, provider='claude'):
     with closing(r['message_store_db'](tmux)) as db, db:
         db.execute('INSERT OR IGNORE INTO message_chats(provider,sid) VALUES (?,?)', (provider, sid))
         db.execute('INSERT OR REPLACE INTO message_locators(provider,sid,tmux) VALUES (?,?,?)', (provider, sid, tmux))
-        db.execute("INSERT INTO shared_messages VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", ('waiting-1', provider, sid, 'WAITING-TEXT', 1, 'attempt-1', 'queued', None, None, 0, 1.0, 'human'))
+        db.execute("INSERT INTO shared_messages VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", ('waiting-1', provider, sid, 'WAITING-TEXT', 1, 'attempt-1', 'queued', None, None, 0, time.time(), 'human'))
     return transcript
 
 def switch(provider, current, target, transcript):

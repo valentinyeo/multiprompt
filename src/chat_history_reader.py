@@ -5002,6 +5002,8 @@ def host_switch_ai(provider, sid, target, reason=None):
             provider, sid = moved
         if provider not in HOST_SWITCH_TARGETS or target not in HOST_SWITCH_TARGETS or provider == target:
             return dict(status="refused", reason="unsupported_provider")
+        if host_turn_busy(provider, sid):
+            return dict(status="busy", reason="chat_busy")
         with message_dispatch_lock_path(provider, sid).open("a") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             later = host_switch_follow(sid)
