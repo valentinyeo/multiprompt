@@ -167,3 +167,33 @@ test "collapsed and expanded counts retain omitted items" {
     try std.testing.expectEqualStrings("and 1 more", notes.more(&buf, false));
     try std.testing.expectEqualStrings("", notes.more(&buf, true));
 }
+
+test "published board keys reach the card and keep long Unicode notes whole" {
+    const long = "MUBO-77 Chats keep your place when the sidebar scrolls, the window resizes, the theme changes, and the keyboard is used across crowded workspaces with long names, café menus, and trailing ellipses… plus one more clause that keeps this line long";
+    const releases = [_]Release{
+        .{ .version = "1.2.0", .changes = &.{ "MUBO-243 Poteto tab points at its chat from before a clear", long } },
+        .{ .version = "1.1.0", .changes = &.{"SOFT-2272 Cleared chats keep their new replies"} },
+        .{ .version = "1.0.0", .changes = &.{"IGSH-12 Valid café"} },
+    };
+    const notes = pick(&releases, "0.9.0", "1.2.0");
+    try std.testing.expectEqual(@as(usize, 3), notes.count);
+    try std.testing.expectEqualStrings("MUBO-243 Poteto tab points at its chat from before a clear", notes.line(0));
+    try std.testing.expectEqualStrings(long, notes.line(1));
+    try std.testing.expectEqualStrings("IGSH-12 Valid café", notes.line(2));
+    try std.testing.expectEqual(@as(usize, 3), notes.shown(false));
+}
+
+test "MUBO-577 real published release paints change lines for an available update" {
+    const parsed = try std.json.parseFromSlice(Document, std.testing.allocator, @embedFile("testdata/mubo-577-release-notes.json"), .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+    try std.testing.expectEqualStrings("0.28.1985", parsed.value.version);
+    const newest = pick(parsed.value.releases, "0.28.1984", "0.28.1985");
+    try std.testing.expectEqual(@as(usize, 1), newest.total);
+    try std.testing.expectEqualStrings("MUBO-243 Poteto tab points at its chat from before a clear", newest.line(0));
+    const month = pick(parsed.value.releases, "0.28.1900", "0.28.1961");
+    try std.testing.expectEqual(@as(usize, 4), month.count);
+    try std.testing.expectEqual(@as(usize, 3), month.shown(false));
+    try std.testing.expectEqual(@as(usize, 4), month.shown(true));
+    try std.testing.expectEqualStrings("MUBO-194 Chats can list and message other chats in their workspace", month.line(0));
+    try std.testing.expectEqualStrings("MUBO-57 Wishes from any chat reach the Multi Bot board", month.line(3));
+}

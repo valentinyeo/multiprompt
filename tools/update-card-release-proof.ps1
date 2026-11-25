@@ -38,11 +38,6 @@ try {
         if ($process.HasExited -or [DateTime]::UtcNow -gt $deadline) { throw 'Released app did not paint the card' }
         Start-Sleep -Milliseconds 100
     } while ($true)
-    for ($i = 0; $i -lt [Math]::Min(3, $changes.Count); $i++) {
-        $note = [regex]::Match($text, '\[update\] card note ' + $i + '=([^\r\n]*)')
-        if (-not $note.Success -or $note.Groups[1].Value -cne $changes[$i]) { throw 'Released card differs from published notes' }
-    }
-    if ($text -match '\[update\] card note \d+=.*(behind the scenes|latest improvements)') { throw 'Released card showed filler' }
     Add-Type -AssemblyName System.Drawing
     Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class ReleaseCardProof { [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int command); [DllImport("user32.dll")] public static extern bool IsZoomed(IntPtr h); [StructLayout(LayoutKind.Sequential)] public struct Point { public int X,Y; } [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int w, int height, uint flags); [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h, ref Point p); [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr wp, IntPtr lp); [StructLayout(LayoutKind.Sequential)] public struct Rect { public int L,T,R,B; } [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out Rect r); [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags); }'
     $process.Refresh()
@@ -54,6 +49,12 @@ try {
     try { if (-not [ReleaseCardProof]::PrintWindow($process.MainWindowHandle, $dc, 2)) { throw 'Released screenshot failed' } } finally { $graphics.ReleaseHdc($dc); $graphics.Dispose() }
     $image = Join-Path $Evidence 'released-card.png'
     try { $bitmap.Save($image) } finally { $bitmap.Dispose() }
+    Copy-Item -LiteralPath $log -Destination (Join-Path $Evidence 'debug.log') -ErrorAction SilentlyContinue
+    for ($i = 0; $i -lt [Math]::Min(3, $changes.Count); $i++) {
+        $note = [regex]::Match($text, '\[update\] card note ' + $i + '=([^\r\n]*)')
+        if (-not $note.Success -or $note.Groups[1].Value -cne $changes[$i]) { throw 'Released card differs from published notes' }
+    }
+    if ($text -match '\[update\] card note \d+=.*(behind the scenes|latest improvements)') { throw 'Released card showed filler' }
     if ((Get-FileHash $cardExe -Algorithm SHA256).Hash.ToLowerInvariant() -ne $hash) { throw 'Released binary changed during proof' }
     @{ version = $document.version; sha256 = $hash; changes = $changes; simulatedOffer = '999.0.0'; success = $true } | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 (Join-Path $Evidence 'released-card.json')
     if ($Wrapped) {
