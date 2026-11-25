@@ -118,6 +118,7 @@ const PaintLogRule = struct { id: []const u8, line: []const u8, heartbeat_ms: u6
 const PAINT_LOG_HEARTBEAT_MS: u64 = 60_000;
 const PAINT_LOG_DIVIDER_HEARTBEAT_MS: u64 = 5_000;
 const PAINT_LOG_TRACE_HEARTBEAT_MS: u64 = 10_000;
+const PAINT_LOG_REQUEST_HEARTBEAT_MS: u64 = 30_000;
 const PAINT_LOG_SLOW_MS: u64 = 8;
 const SLOW_CALL_LOG_MS: u64 = 30;
 
@@ -134,10 +135,10 @@ fn paintLogRule(msg: []const u8) ?PaintLogRule {
         const start = std.mem.indexOf(u8, msg, " rect=") orelse return null;
         return .{ .id = msg[start..], .line = msg };
     }
-    if (std.mem.startsWith(u8, msg, "[chat] position ")) {
-        const state = std.mem.indexOf(u8, msg, " shell=") orelse return null;
-        const end = std.mem.indexOf(u8, msg, " paints=") orelse msg.len;
-        return .{ .id = "[chat] position", .line = msg[state..end], .heartbeat_ms = 1000 };
+    if (std.mem.startsWith(u8, msg, "[chat] transcript request ")) {
+        const shell_at = std.mem.indexOf(u8, msg, " shell=") orelse return null;
+        const shell_end = std.mem.indexOfPos(u8, msg, shell_at + 1, " ") orelse return null;
+        return .{ .id = msg[shell_at..shell_end], .line = msg[shell_at..shell_end], .heartbeat_ms = PAINT_LOG_REQUEST_HEARTBEAT_MS };
     }
     if (std.mem.startsWith(u8, msg, "[chat] unread divider ")) {
         return .{ .id = "[chat] unread divider", .line = msg, .heartbeat_ms = PAINT_LOG_DIVIDER_HEARTBEAT_MS };
@@ -683,6 +684,29 @@ test "IGSH-1973 an unchanged divider line logs again only after the heartbeat" {
     try std.testing.expect(limiter.allow(rule.id, rule.line, 6000, rule.heartbeat_ms));
     const moved = paintLogRule("[chat] unread divider count=1 marker=3 index=2 unknown=0 y=11 message_y=4 scroll=1 message=7 offset=9 line_y=25").?;
     try std.testing.expect(limiter.allow(moved.id, moved.line, 6001, moved.heartbeat_ms));
+}
+
+test "MUBO-17 a streamed reply logs one transcript request line per shell per half minute" {
+    var limiter: PaintLogLimiter = .{};
+    var line_buf: [128]u8 = undefined;
+    const first = paintLogRule("[chat] transcript request shell=4 offset=0 before=0 why=view quiet=0").?;
+    try std.testing.expect(limiter.allow(first.id, first.line, 1000, first.heartbeat_ms));
+    var now: u64 = 1000;
+    var logged: usize = 0;
+    var push: usize = 0;
+    while (push < 60) : (push += 1) {
+        now += 520;
+        const line = std.fmt.bufPrint(&line_buf, "[chat] transcript request shell=4 offset={d} before=0 why=view quiet=0", .{push * 471}) catch unreachable;
+        const rule = paintLogRule(line).?;
+        if (limiter.allow(rule.id, rule.line, now, rule.heartbeat_ms)) logged += 1;
+    }
+    try std.testing.expect(logged == 1);
+    const other = paintLogRule("[chat] transcript request shell=7 offset=0 before=0 why=view quiet=0").?;
+    try std.testing.expect(limiter.allow(other.id, other.line, now, other.heartbeat_ms));
+}
+
+test "MUBO-17 the chat paint path no longer writes a position line" {
+    try std.testing.expect(paintLogRule("[chat] position ms=12 shell=4 first=195 message=1 offset=2 y=-24 scroll=19040 height=19650 pad=52 opening=1 paints=7 layouts=7 tick=1050062") == null);
 }
 
 test "IGSH-1973 chat performance lines log on change or when slow and always for receive to paint" {
