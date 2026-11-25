@@ -16,6 +16,7 @@ Read the matching feature before driving. [Recent changes coverage](../coverage.
 - [Emergency lane](emergency-lane.md).
 - [Service route receipt](service-route-receipt.md).
 - [Test CLI checks](verify-cli.md).
+- [Agent feedback wishes](agent-feedback.md).
 - [Multi Bot session verbs and server slots](mp-sessions-slots.md).
 
 Part B (`w-2567b`, SOFT-2567) merged as the runner-hosted real SSH/tmux `server-chat` journey indexed below; maps that need a real server consume it rather than duplicating it. Part A (`w-2567a`, SOFT-2567, real-size seeded data) never landed: [PR 1070](https://github.com/valentinyeo/multiprompt/pull/1070) was closed unmerged, so no real-size profile exists. A named synthetic journey is not live-server proof.
