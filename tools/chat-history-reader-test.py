@@ -9398,6 +9398,51 @@ class MUBO135_ServerReplyOnceTest(unittest.TestCase):
         self.assert_once(True)
 
 
+class MUBO_221_LaunchCommandTest(unittest.TestCase):
+    ARGS = ('READER', 'name', 'sid', 'session', 'cwd', 'mode', 'READER', 'name', 'sid')
+
+    def launch_command(self, provider='antigravity'):
+        source = (ROOT / 'src/agent_host.zig').read_text()
+        start = source.index('pub fn launchCommandFor(')
+        block = source[start:source.index('pub fn resumeCommandFor(', start)]
+        opened = block.index('std.fmt.bufPrint(out, "') + len('std.fmt.bufPrint(out, "')
+        shape = block[opened:block.index('", .{', opened)]
+        holes = shape.split('{s}')
+        self.assertEqual(len(holes) - 1, len(self.ARGS), 'the launch command changed shape')
+        values = dict(READER='~/.multiprompt-runtime/reader.py', name=provider, session='live-abc',
+                      cwd='~/projects', sid='ffffffff-ffff-4fff-bfff-ffffffffffff', mode='')
+        text = holes[0]
+        for index, name in enumerate(self.ARGS):
+            text += values[name] + holes[index + 1]
+        return text
+
+    def run_launch(self, reader_source):
+        home = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, home, True)
+        runtime = home / '.multiprompt-runtime'
+        runtime.mkdir(parents=True)
+        (runtime / 'reader.py').write_text(reader_source)
+        return subprocess.run(['bash', '-c', self.launch_command()],
+                              env=dict(os.environ, HOME=str(home)), capture_output=True, text=True, timeout=30)
+
+    @unittest.skipUnless(os.name == 'posix', 'the launch command runs on the server shell')
+    def test_a_refused_enable_reports_its_reason_and_stops_the_launch(self):
+        self.assertNotIn('>/dev/null', self.launch_command())
+        ran = self.run_launch('import sys\nprint(\'{"status":"refused","reason":"unsupported_provider"}\')\nsys.exit(1)\n')
+        self.assertEqual(ran.returncode, 1)
+        self.assertIn('unsupported_provider', ran.stdout)
+        self.assertNotIn('"started"', ran.stdout)
+
+    @unittest.skipUnless(os.name == 'posix', 'the launch command runs on the server shell')
+    def test_a_started_host_is_the_last_line_the_desktop_reads(self):
+        ran = self.run_launch(
+            'import sys\n'
+            'step = sys.argv[2]\n'
+            'print(\'{"status":"enabled","sid":"x"}\' if step == "enable" else \'{"status":"started","pid":7}\')\n')
+        self.assertEqual(ran.returncode, 0)
+        self.assertEqual(ran.stdout.strip().splitlines()[-1], '{"status":"started","pid":7}')
+
+
 def load_tests(loader, tests, pattern):
     shard = os.environ.get('HISTORY_READER_SHARD')
     if shard is None:
