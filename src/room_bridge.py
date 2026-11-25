@@ -42,6 +42,7 @@ def private_file(directory, name, limit):
 RUNTIME_SOURCE = b''
 RUNTIME_FINGERPRINT = ''
 STORE_DIRECTORY = None
+PUBLISH_FAILED = False
 PUBLISHED_MARKER = 'runtime-published'
 DIGEST = re.compile(r'[0-9a-f]{64}\Z')
 
@@ -134,6 +135,8 @@ def publish_runtime():
 
 
 def runtime_gap():
+    if PUBLISH_FAILED:
+        fail('runtime_republish_failed')
     fail('runtime_unavailable' if RUNTIME_SOURCE or not RUNTIME_FINGERPRINT else 'runtime_republish_required')
 
 
@@ -210,7 +213,7 @@ def scoped_runtime():
     try:
         return runtime_request({'op': 'engine_info'}).get('room_message_protocols') == [1]
     except RoomError as error:
-        if error.code == 'runtime_republish_required':
+        if error.code == 'runtime_republish_required' or error.code == 'runtime_republish_failed':
             raise
         return False
 
@@ -470,14 +473,18 @@ class RoomBridge:
 
 
 def serve(directory, source=b'', fingerprint=''):
-    global RUNTIME_SOURCE, RUNTIME_FINGERPRINT, STORE_DIRECTORY
+    global RUNTIME_SOURCE, RUNTIME_FINGERPRINT, STORE_DIRECTORY, PUBLISH_FAILED
     RUNTIME_SOURCE = source if isinstance(source, bytes) else b''
     RUNTIME_FINGERPRINT = fingerprint if isinstance(fingerprint, str) else ''
     STORE_DIRECTORY = directory
+    PUBLISH_FAILED = False
     if runtime_ready():
         sys.stderr.write('[room_bridge] runtime already published %s\n' % runtime_digest()[:12])
     else:
         publish_runtime()
+        if RUNTIME_SOURCE and not runtime_ready():
+            PUBLISH_FAILED = True
+            sys.stderr.write('[room_bridge] publish failed the room host could not start\n')
     bridge = RoomBridge(directory)
     try:
         while True:

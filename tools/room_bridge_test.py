@@ -255,6 +255,38 @@ finally:
                     bridge_module.STORE_DIRECTORY = None
         self.assertIn('[room_bridge] runtime already published', errors.getvalue())
 
+    def test_a_publish_that_fails_says_the_room_host_could_not_start(self):
+        import io
+        import json
+        import os
+        from contextlib import redirect_stderr, redirect_stdout
+        from unittest import mock
+        fingerprint = 'd' * 64
+        store = Path(self.temp.name, 'serve-failed')
+        with tempfile.TemporaryDirectory() as home:
+            with mock.patch.dict(os.environ, {'HOME': home}):
+                bridge_module.RUNTIME_FINGERPRINT = fingerprint
+                bridge_module.RUNTIME_SOURCE = (root / 'src/chat_history_reader.py').read_bytes()
+                bridge_module.STORE_DIRECTORY = self.temp.name
+                try:
+                    bridge_module.PUBLISH_FAILED = False
+                    stdin = mock.MagicMock()
+                    stdin.buffer.readline.side_effect = [b'{"op":"capabilities"}\n', b'']
+                    out = io.StringIO()
+                    errors = io.StringIO()
+                    with mock.patch.object(sys, 'stdin', stdin), mock.patch.object(bridge_module.subprocess, 'run', side_effect=OSError('no runtime')), redirect_stdout(out), redirect_stderr(errors):
+                        bridge_module.serve(str(store), bridge_module.RUNTIME_SOURCE, fingerprint)
+                    response = json.loads(out.getvalue())
+                    installed = Path(home, '.multiprompt-runtime', 'active.json').exists()
+                finally:
+                    bridge_module.RUNTIME_SOURCE = b''
+                    bridge_module.RUNTIME_FINGERPRINT = ''
+                    bridge_module.STORE_DIRECTORY = None
+                    bridge_module.PUBLISH_FAILED = False
+        self.assertEqual({'ok': False, 'error': 'runtime_republish_failed'}, response)
+        self.assertIn('publish failed the room host could not start', errors.getvalue())
+        self.assertFalse(installed, 'a failed publish leaves no helper behind')
+
 
 if __name__ == '__main__':
     unittest.main()
