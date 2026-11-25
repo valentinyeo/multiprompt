@@ -65,6 +65,21 @@ test('an action without a cache fails', () => {
   assert.match(problems.join('\n'), /does not cache the install/);
 });
 
+test('an action without a pinned source version fails', () => {
+  const broken = action().replace(/\$archive = "https:\/\/github\.com\/GyanD\/codexffmpeg\/releases\/download[^\n]*\n/, '$archive = "https://community.chocolatey.org/api/v2/"\n');
+  assert.notEqual(broken, action(), 'the download source moved; update this control');
+  const problems = checkFfmpegInstall({}, broken);
+  assert.match(problems.join('\n'), /does not download the pinned release archive/);
+});
+
+test('an action that skips the checksum fails', () => {
+  const broken = action().replace(/\n\s*\$actual = \(Get-FileHash[^\n]*\n\s*if \(\$actual -ne \$sourceSha\)[^\n]*\n/, '\n');
+  assert.notEqual(broken, action(), 'the checksum check moved; update this control');
+  const problems = checkFfmpegInstall({}, broken);
+  assert.match(problems.join('\n'), /does not hash the downloaded archive/);
+  assert.match(problems.join('\n'), /does not refuse an archive whose checksum disagrees with the pin/);
+});
+
 test('an action with an unpinned default version fails', () => {
   const broken = action().replace(/default: '7\.1\.1'/, "default: 'latest'");
   assert.notEqual(broken, action(), 'the default version moved; update this control');

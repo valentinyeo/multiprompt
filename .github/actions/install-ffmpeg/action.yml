@@ -1,11 +1,15 @@
 name: Install FFmpeg
-description: Install the pinned FFmpeg build, reuse a cached install, and retry a failed download with backoff.
+description: Install the pinned FFmpeg build from its pinned release archive, verify its checksum, reuse a cached install, and retry a failed download with backoff.
 
 inputs:
   version:
     description: FFmpeg version the runner must provide
     required: false
     default: '7.1.1'
+  sha256:
+    description: SHA-256 of the pinned release archive for this version
+    required: false
+    default: '04861d3339c5ebe38b56c19a15cf2c0cc97f5de4fa8910e4d47e5e6404e4a2d4'
 
 runs:
   using: composite
@@ -16,29 +20,36 @@ runs:
       uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
       with:
         path: ${{ runner.temp }}/ffmpeg-${{ inputs.version }}
-        key: ${{ runner.os }}-ffmpeg-${{ inputs.version }}-2
+        key: ${{ runner.os }}-ffmpeg-${{ inputs.version }}-3
     - name: Install FFmpeg
       if: runner.os == 'Windows'
       shell: pwsh
       env:
         FFMPEG_VERSION: ${{ inputs.version }}
+        FFMPEG_SHA256: ${{ inputs.sha256 }}
         FFMPEG_TARGET: ${{ runner.temp }}/ffmpeg-${{ inputs.version }}
         FFMPEG_CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
       run: |
         $ErrorActionPreference = 'Stop'
+        $ProgressPreference = 'SilentlyContinue'
         $pinned = $env:FFMPEG_VERSION
+        $sourceSha = "$($env:FFMPEG_SHA256)".ToLowerInvariant()
         $limit = 5
-        if (-not $env:ChocolateyInstall) { $env:ChocolateyInstall = 'C:\ProgramData\chocolatey' }
         $target = $env:FFMPEG_TARGET
+        $archive = "https://github.com/GyanD/codexffmpeg/releases/download/$pinned/ffmpeg-$pinned-essentials_build.zip"
+        $reports = "version n?$([regex]::Escape($pinned))\b"
         function Use-Ffmpeg([string]$directory) {
-          Add-Content -Path $env:GITHUB_PATH -Value $directory
-          $first = (& (Join-Path $directory 'ffmpeg.exe') -version | Select-Object -First 1)
+          $exe = Join-Path $directory 'ffmpeg.exe'
+          if (-not (Test-Path $exe)) { throw "FFmpeg $pinned is missing from $directory" }
+          $first = (& $exe -version 2>$null | Select-Object -First 1)
           if ($LASTEXITCODE -ne 0 -or -not $first) { throw "FFmpeg $pinned does not run from $directory" }
+          if ($first -notmatch $reports) { throw "FFmpeg from $directory reports '$first' instead of $pinned" }
+          Add-Content -Path $env:GITHUB_PATH -Value $directory
           Write-Host "FFmpeg ready: $first"
         }
         if ($env:FFMPEG_CACHE_HIT -eq 'true' -and (Test-Path (Join-Path $target 'ffmpeg.exe'))) {
           $cached = (& (Join-Path $target 'ffmpeg.exe') -version 2>$null | Select-Object -First 1)
-          if ($LASTEXITCODE -eq 0 -and $cached) {
+          if ($LASTEXITCODE -eq 0 -and $cached -match $reports) {
             Write-Host "FFmpeg $pinned restored from cache"
             Use-Ffmpeg $target
             exit 0
@@ -49,35 +60,39 @@ runs:
         $existing = Get-Command ffmpeg -ErrorAction SilentlyContinue
         if ($existing) {
           $first = (& $existing.Source -version 2>$null | Select-Object -First 1)
-          if ($LASTEXITCODE -eq 0 -and $first -match "version n?$([regex]::Escape($pinned))\b") {
+          if ($LASTEXITCODE -eq 0 -and $first -match $reports) {
             Write-Host "FFmpeg $pinned already available at $($existing.Source)"
             exit 0
           }
         }
+        $failure = ''
         for ($attempt = 1; $attempt -le $limit; $attempt++) {
-          Write-Host "FFmpeg $pinned install attempt $attempt of $limit"
-          Remove-Item -Recurse -Force -ErrorAction SilentlyContinue (Join-Path $env:TEMP 'chocolatey')
-          & choco install ffmpeg --version=$pinned --yes --no-progress --limit-output
-          $code = $LASTEXITCODE
-          if ($code -eq 0) {
-            $bin = Get-ChildItem -Path (Join-Path $env:ChocolateyInstall 'lib\ffmpeg') -Recurse -Filter ffmpeg.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($bin) {
-              New-Item -ItemType Directory -Force -Path $target | Out-Null
-              Copy-Item -Path (Join-Path $bin.Directory.FullName '*') -Destination $target -Recurse -Force
-              Use-Ffmpeg $target
-            } else {
-              $found = Get-Command ffmpeg -ErrorAction SilentlyContinue
-              if (-not $found) { throw "FFmpeg $pinned installed without an executable" }
-              Write-Host "FFmpeg $pinned available at $($found.Source)"
-            }
+          Write-Host "FFmpeg $pinned download attempt $attempt of $limit from $archive"
+          try {
+            Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $target
+            Remove-Item -Force -ErrorAction SilentlyContinue "$target.zip"
+            Invoke-WebRequest -Uri $archive -OutFile "$target.zip" -UseBasicParsing
+            $actual = (Get-FileHash -Path "$target.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actual -ne $sourceSha) { throw "FFmpeg $pinned archive hash $actual does not match the pinned $sourceSha" }
+            Expand-Archive -Path "$target.zip" -DestinationPath "$target.extract" -Force
+            $bin = Get-ChildItem -Path "$target.extract" -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+            if (-not $bin) { throw "FFmpeg $pinned archive carries no ffmpeg.exe" }
+            New-Item -ItemType Directory -Force -Path $target | Out-Null
+            Copy-Item -Path (Join-Path $bin.Directory.FullName '*') -Destination $target -Recurse -Force
+            Use-Ffmpeg $target
+            Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "$target.zip", "$target.extract"
             exit 0
-          }
-          if ($attempt -lt $limit) {
-            $delay = [int][Math]::Min(60, 5 * [Math]::Pow(2, $attempt - 1))
-            Write-Host "FFmpeg $pinned install attempt $attempt failed with exit $code; retrying in $($delay)s"
-            Start-Sleep -Seconds $delay
+          } catch {
+            $failure = $_.Exception.Message
+            Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "$target.zip", "$target.extract"
+            if ($attempt -lt $limit) {
+              $delay = [int][Math]::Min(60, 5 * [Math]::Pow(2, $attempt - 1))
+              Write-Host "FFmpeg $pinned download attempt $attempt failed: $failure; retrying in $($delay)s"
+              Start-Sleep -Seconds $delay
+            }
           }
         }
+        Write-Host "FFmpeg $pinned download failed: $failure"
         throw "FFmpeg $pinned install failed after $limit attempts"
     - name: Install FFmpeg
       if: runner.os != 'Windows'

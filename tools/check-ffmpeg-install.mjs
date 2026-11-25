@@ -52,8 +52,14 @@ export function actionProblems(source) {
   if (!/uses:\s*actions\/cache@[0-9a-f]{40}/.test(source)) {
     problems.push(`${actionFile}: does not cache the install, so every run repeats the download that fails`);
   }
-  if (!/choco install ffmpeg --version=\$\w+/.test(source)) {
-    problems.push(`${actionFile}: does not pass the pinned version to the Windows install`);
+  if (!/GyanD\/codexffmpeg\/releases\/download\/\$pinned\/ffmpeg-\$pinned-essentials_build\.zip/.test(source)) {
+    problems.push(`${actionFile}: does not download the pinned release archive, so a package mirror outage or a different build decides what the journeys run`);
+  }
+  if (!/Get-FileHash[^\n]*-Algorithm SHA256/.test(source)) {
+    problems.push(`${actionFile}: does not hash the downloaded archive, so a corrupted or replaced download still passes`);
+  }
+  if (!/if \(\$actual -ne \$sourceSha\)/.test(source)) {
+    problems.push(`${actionFile}: does not refuse an archive whose checksum disagrees with the pin`);
   }
   if (!/apt-get install -y ffmpeg/.test(source)) {
     problems.push(`${actionFile}: does not install FFmpeg on Linux`);

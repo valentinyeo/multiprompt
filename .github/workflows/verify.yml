@@ -530,9 +530,30 @@ jobs:
         if: env.FEATURE == 'rooms'
         timeout-minutes: 10
         shell: pwsh
+        env:
+          TESSERACT_VERSION: '5.4.0.20240606'
+          TESSERACT_SHA256: 'c885fff6998e0608ba4bb8ab51436e1c6775c2bafc2559a19b423e18678b60c9'
         run: |
-          choco install tesseract --version=5.4.0.20240606 -y --no-progress
-          if ($LASTEXITCODE -ne 0) { throw 'Tesseract installation failed' }
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $ProgressPreference = 'SilentlyContinue'
+          $pinned = $env:TESSERACT_VERSION
+          $ocr = 'C:\Program Files\Tesseract-OCR\tesseract.exe'
+          if (-not (Test-Path $ocr)) {
+            choco install tesseract --version=$pinned -y --no-progress --limit-output
+          }
+          if (-not (Test-Path $ocr)) {
+            Write-Host "The package feed did not install Tesseract $pinned; installing the pinned release installer"
+            $setup = Join-Path $env:RUNNER_TEMP "tesseract-$pinned-setup.exe"
+            Invoke-WebRequest -Uri "https://github.com/UB-Mannheim/tesseract/releases/download/v$pinned/tesseract-ocr-w64-setup-$pinned.exe" -OutFile $setup -UseBasicParsing
+            $actual = (Get-FileHash -Path $setup -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actual -ne $env:TESSERACT_SHA256) { throw "Tesseract installer hash $actual does not match the pinned $env:TESSERACT_SHA256" }
+            $install = Start-Process -FilePath $setup -ArgumentList '/S' -Wait -PassThru
+            if ($install.ExitCode -ne 0) { throw "Tesseract installer exited $($install.ExitCode)" }
+          }
+          $reader = (& $ocr --version 2>$null | Select-Object -First 1)
+          if ($LASTEXITCODE -ne 0 -or -not $reader) { throw 'Tesseract installation failed' }
+          Write-Host "Tesseract ready: $reader"
           Set-Location service
           npm ci --no-audit --no-fund
           if ($LASTEXITCODE -ne 0) { throw 'Account Worker dependencies failed' }
