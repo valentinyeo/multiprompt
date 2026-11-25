@@ -5,11 +5,11 @@ function Read-SshLogins([string]$Name) {
 function Measure-SshIdle([string]$Name, [int]$Seconds = 210) {
     Doctor
     $before = Read-SshLogins "$Name-before"
-    $started = [Environment]::TickCount64
+    $started = [ChatDeliveryDesktop]::GetTickCount64()
     $timer = [Diagnostics.Stopwatch]::StartNew()
     Start-Sleep -Seconds $Seconds
     $timer.Stop()
-    $finished = [Environment]::TickCount64
+    $finished = [ChatDeliveryDesktop]::GetTickCount64()
     Doctor
     $after = Read-SshLogins "$Name-after"
     $spawns = @(Get-ChildItem "$Evidence/ssh-spawns/*.txt" | ForEach-Object {
