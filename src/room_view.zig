@@ -111,6 +111,8 @@ pub const View = struct {
     start_failed: bool = false,
     loading: bool = false,
     deferred_submit: bool = false,
+    opening: [128]u8 = undefined,
+    opening_len: usize = 0,
     error_text: [1024]u16 = undefined,
     error_len: usize = 0,
     title_hit: w.RECT = empty_rect,
@@ -208,11 +210,18 @@ pub const View = struct {
         self.showError("Could not load this room. Check the server connection and try again.");
     }
 
-    pub fn showLoading(self: *View) void {
+    pub fn showLoading(self: *View, room_id: []const u8) void {
+        if (!self.openingRoom(room_id)) self.deferred_submit = false;
+        self.opening_len = @min(room_id.len, self.opening.len);
+        @memcpy(self.opening[0..self.opening_len], room_id[0..self.opening_len]);
         self.loading = true;
         self.result = null;
         self.error_len = 0;
         self.invalidate();
+    }
+
+    fn openingRoom(self: *const View, room_id: []const u8) bool {
+        return self.opening_len > 0 and std.mem.eql(u8, self.opening[0..self.opening_len], room_id);
     }
 
     pub fn showError(self: *View, message: []const u8) void {
@@ -225,7 +234,12 @@ pub const View = struct {
 
     pub fn flushDeferred(self: *View) void {
         if (!self.deferred_submit or self.presented_revision == 0 or self.pending != null) return;
+        if (!self.openingRoom(self.model.room_id)) {
+            self.deferred_submit = false;
+            return;
+        }
         self.deferred_submit = false;
+        if (w.GetWindowTextLengthW(self.composer) <= 0) return;
         self.submit();
     }
 
@@ -267,6 +281,7 @@ pub const View = struct {
             self.scroll = 0;
             self.presented_revision = 0;
             self.picker = false;
+            if (!self.openingRoom(model.room_id)) self.deferred_submit = false;
         }
         self.model = model;
         self.loading = false;
@@ -282,6 +297,7 @@ pub const View = struct {
 
     pub fn resetScope(self: *View, empty: *const ViewModel) void {
         self.retire();
+        self.deferred_submit = false;
         self.selected_count = 0;
         self.mode = .room;
         self.scroll = 0;
@@ -341,6 +357,7 @@ pub const View = struct {
 
     fn closeDialog(self: *View) void {
         self.retire();
+        self.deferred_submit = false;
         self.mode = .room;
         self.layout();
         self.setFocus(self.composer);
@@ -349,6 +366,7 @@ pub const View = struct {
     fn openDialog(self: *View, mode: Mode) void {
         if (self.too_small) return;
         self.retire();
+        self.deferred_submit = false;
         self.mode = mode;
         self.edit_revision = self.model.revision;
         self.selected_count = 0;
@@ -427,7 +445,6 @@ pub const View = struct {
         self.result = null;
         self.start_failed = false;
         self.loading = false;
-        self.deferred_submit = false;
         self.clearHits();
     }
 
@@ -665,11 +682,7 @@ fn draw(view: *View, dc: w.HANDLE, bounds: w.RECT) void {
         _ = w.SelectObject(dc, heading);
         text(dc, view.model.name, .{ .left = left, .top = mid - view.px(12), .right = right, .bottom = mid + view.px(18) }, 0xf2f2f2, w.DT_SINGLELINE | w.DT_CENTER | w.DT_END_ELLIPSIS);
         _ = w.SelectObject(dc, body);
-        if (view.loading) {
-            text(dc, L("Loading this room"), .{ .left = left, .top = mid + view.px(22), .right = right, .bottom = mid + view.px(52) }, 0x8a8a8a, w.DT_SINGLELINE | w.DT_CENTER);
-        } else {
-            text(dc, L("Start the conversation"), .{ .left = left, .top = mid + view.px(22), .right = right, .bottom = mid + view.px(52) }, 0x8a8a8a, w.DT_SINGLELINE | w.DT_CENTER);
-        }
+        if (!view.loading) text(dc, L("Start the conversation"), .{ .left = left, .top = mid + view.px(22), .right = right, .bottom = mid + view.px(52) }, 0x8a8a8a, w.DT_SINGLELINE | w.DT_CENTER);
     }
     for (view.model.messages) |message| {
         const member = message.author;
@@ -711,9 +724,7 @@ fn draw(view: *View, dc: w.HANDLE, bounds: w.RECT) void {
     smooth.fillRoundRect(dc, view.send_hit, view.px(18), rgb(0xf2f2f2));
     text(dc, L("↑"), view.send_hit, 0x111111, w.DT_SINGLELINE | w.DT_CENTER | w.DT_VCENTER);
     if (view.picker) drawPicker(view, dc, composer, body);
-    if (view.loading) {
-        text(dc, L("Loading saved room messages"), .{ .left = left, .top = height - view.px(94), .right = right, .bottom = height - view.px(76) }, 0x8a8a8a, w.DT_SINGLELINE);
-    } else if (view.result == .failed or view.result == .unsupported) text(dc, if (view.error_len > 0) view.error_text[0..view.error_len] else L("Could not send. Try again."), .{ .left = left, .top = height - view.px(94), .right = right, .bottom = height - view.px(76) }, 0xf5c26b, w.DT_SINGLELINE);
+    if (view.result == .failed or view.result == .unsupported) text(dc, if (view.error_len > 0) view.error_text[0..view.error_len] else L("Could not send. Try again."), .{ .left = left, .top = height - view.px(94), .right = right, .bottom = height - view.px(76) }, 0xf5c26b, w.DT_SINGLELINE);
 }
 
 fn matchSearch(value: []const u16, query: []const u16) bool {

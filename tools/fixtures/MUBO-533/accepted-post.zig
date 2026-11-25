@@ -59,7 +59,7 @@ fn load(highwater: u64) *OwnedModel {
 }
 
 fn receipt(allocator: std.mem.Allocator, room: []const u8, seq: u64, text: []const u8) std.json.Parsed(std.json.Value) {
-    const body = std.fmt.allocPrint(allocator, "{{\"event\":{{\"id\":\"%s\",\"room_id\":\"%s\",\"seq\":%d,\"type\":\"human\",\"text\":\"%s\"}}}}", .{ event_id, room, seq, text }) catch unreachable;
+    const body = std.fmt.allocPrint(allocator, "{{\"event\":{{\"id\":\"{s}\",\"room_id\":\"{s}\",\"seq\":{d},\"type\":\"human\",\"text\":\"{s}\"}}}}", .{ event_id, room, seq, text }) catch unreachable;
     defer allocator.free(body);
     return std.json.parseFromSlice(std.json.Value, allocator, body, .{}) catch unreachable;
 }

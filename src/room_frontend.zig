@@ -601,7 +601,7 @@ pub fn setAppliedLayout(bytes: []const u8) bool {
         if (route == null or !std.mem.eql(u8, &key, &route_key)) {
             if (!flushUi()) {
                 account_generation +%= 1;
-                if (created and front == .selected) view.showLoading();
+                if (created and front == .selected) view.showLoading(&front.selected.room_id);
                 return false;
             }
             clearModels();
@@ -610,7 +610,7 @@ pub fn setAppliedLayout(bytes: []const u8) bool {
             candidate_count = 0;
             account_generation +%= 1;
             if (controller) |*c| if (c.job == null) { controller = null; };
-            if (created and front == .selected) view.showLoading();
+            if (created and front == .selected) view.showLoading(&front.selected.room_id);
         }
     }
     return true;
@@ -2458,7 +2458,7 @@ pub fn select(location: RoomLocation) void {
     @import("workspaces.zig").updateMainWindowTitle();
     resize(app_state.g_main_hwnd);
     syncVisibility();
-    view.showLoading();
+    view.showLoading(&location.room_id);
     view.focus();
     if (!found) return;
     selection_waiting = true;

@@ -14,6 +14,18 @@ function declaration(source, marker) {
   assert.notEqual(end, -1, marker);
   return source.slice(start, end + 2) + (source[end + 2] === ';' ? ';' : '');
 }
+function method(source, signature) {
+  const start = source.indexOf(signature);
+  assert.notEqual(start, -1, signature);
+  const end = source.indexOf('\n    }', start);
+  assert.notEqual(end, -1, signature);
+  return source.slice(start, end + 6);
+}
+function lineDeclaration(source, name) {
+  const match = source.match(new RegExp(`^(?:pub )?const ${name} = .+;$`, 'm'));
+  assert.ok(match, `production declaration ${name}`);
+  return match[0];
+}
 function run(source, files = {}, expectedStatus = 0) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'room-reliability-'));
   try {
@@ -138,7 +150,7 @@ test "legacy requests remain valid and unknown capabilities or extra fields are 
 }
 const rewritten_draft = std.unicode.utf8ToUtf16LeStringLiteral("Hello rooms");
 fn sentRequest(buffer: []u8) []const u8 {
-    @memcpy(buffer, staged_record.?.request);
+    @memcpy(buffer[0..staged_record.?.request.len], staged_record.?.request);
     return buffer[0..staged_record.?.request.len];
 }
 test "a send the room may have accepted is confirmed before a changed draft replaces it" {
@@ -215,6 +227,116 @@ test('a saved room send is shown before the room is read again', () => {
   const hidden = frontend.replace('    loaded.value.messages = loaded.messages.items;\n', '');
   assert.notEqual(hidden, frontend);
   assert.match(run(`${fixture}\n${declaration(hidden, 'fn applyAcceptedPost(')}\n${declaration(hidden, 'fn wide(')}`, { 'room_post.zig': read('room_post.zig') }, 1), /a saved send is shown in the room before the room is read again[\s\S]*FAIL/);
+});
+
+test('a send pressed while a room opens is held for that room and never sent elsewhere', () => {
+  const source = read('room_view.zig');
+  const fixture = fs.readFileSync(path.join(__dirname, 'fixtures/MUBO-533/deferred-send.zig'), 'utf8');
+  const harness = `
+const std = @import("std");
+const w = struct {
+    pub const BOOL = i32;
+    pub const HANDLE = ?*anyopaque;
+    pub const RECT = extern struct { left: i32, top: i32, right: i32, bottom: i32 };
+    var composer_text: [256]u16 = @splat(0);
+    var composer_len: usize = 0;
+    fn compose(value: []const u16) void {
+        @memcpy(composer_text[0..value.len], value);
+        composer_len = value.len;
+    }
+    pub fn GetWindowTextLengthW(_: HANDLE) i32 {
+        return @intCast(composer_len);
+    }
+    pub fn GetWindowTextW(_: HANDLE, buffer: [*]u16, count: i32) i32 {
+        if (count <= 0) return 0;
+        const length = @min(composer_len, @as(usize, @intCast(count)));
+        @memcpy(buffer[0..length], composer_text[0..length]);
+        return @intCast(length);
+    }
+    pub fn InvalidateRect(_: HANDLE, _: ?*const RECT, _: BOOL) BOOL {
+        return 1;
+    }
+};
+const Member = struct { id: []const u8 };
+const ViewModel = struct {
+    room_id: []const u8,
+    name: []const u16 = &.{},
+    revision: u64 = 0,
+    members: []const Member = &.{},
+    candidates: []const Member = &.{},
+    messages: []const u8 = &.{},
+};
+${['ActionResult', 'ActionKind', 'ActionToken', 'Mode'].map(name => lineDeclaration(source, name)).join('\n')}
+${declaration(source, 'pub const Callbacks = struct {')}
+${declaration(source, 'fn sameRoom(')}
+${declaration(source, 'fn validModel(')}
+var sent: usize = 0;
+var sent_room: []const u8 = "";
+var sent_revision: u64 = 0;
+var sent_text: [256]u16 = @splat(0);
+var sent_len: usize = 0;
+var context: u8 = 0;
+fn onSubmit(_: *anyopaque, _: ActionToken, room_id: []const u8, revision: u64, text: []const u16) ActionResult {
+    sent += 1;
+    sent_room = room_id;
+    sent_revision = revision;
+    sent_len = text.len;
+    @memcpy(sent_text[0..text.len], text);
+    return .accepted;
+}
+fn onEntry(_: *anyopaque, _: ActionToken, _: []const u16, _: []const []const u8) ActionResult {
+    return .failed;
+}
+fn onEdit(_: *anyopaque, _: ActionToken, _: []const u8, _: u64, _: []const u16, _: []const []const u8) ActionResult {
+    return .failed;
+}
+fn onRestart(_: *anyopaque, _: ActionToken, _: []const u8, _: []const u8) ActionResult {
+    return .failed;
+}
+const callbacks = Callbacks{ .context = &context, .create = onEntry, .edit = onEdit, .submit = onSubmit, .restart = onRestart };
+fn reset() void {
+    sent = 0;
+    sent_room = "";
+    sent_revision = 0;
+    sent_len = 0;
+    w.compose(&.{});
+}
+const View = struct {
+    hwnd: w.HANDLE = null,
+    composer: w.HANDLE = null,
+    model: *const ViewModel,
+    callbacks: Callbacks,
+    mode: Mode = .room,
+    scroll: i32 = 0,
+    generation: u64 = 1,
+    serial: u64 = 0,
+    pending: ?ActionToken = null,
+    presented_revision: u64 = 0,
+    too_small: bool = false,
+    result: ?ActionResult = null,
+    start_failed: bool = false,
+    loading: bool = false,
+    deferred_submit: bool = false,
+    opening: [128]u8 = undefined,
+    opening_len: usize = 0,
+    error_text: [1024]u16 = undefined,
+    error_len: usize = 0,
+    selected_count: usize = 0,
+    picker: bool = false,
+    fn clearHits(_: *View) void {}
+    fn ownsFocus(_: *View) bool { return false; }
+    fn layout(_: *View) void {}
+    fn setFocus(_: *View, _: w.HANDLE) void {}
+${['pub fn setModel(', 'fn retire(', 'pub fn completeAction(', 'pub fn showLoading(', 'pub fn showError(', 'pub fn flushDeferred(', 'fn submit(', 'fn rejectSubmit(', 'fn token(', 'pub fn draft(', 'fn invalidate(', 'fn openingRoom('].map(signature => method(source, signature)).join('\n')}
+};
+${fixture}`;
+  run(harness, { 'diagnostics.zig': 'pub fn syncLog(_: []const u8) void {}\n' });
+  const alwaysSends = harness.replace('        if (w.GetWindowTextLengthW(self.composer) <= 0) return;\n', '');
+  assert.notEqual(alwaysSends, harness);
+  assert.match(run(alwaysSends, { 'diagnostics.zig': 'pub fn syncLog(_: []const u8) void {}\n' }, 1), /a held send whose draft was cleared sends nothing and shows no error[\s\S]*FAIL/);
+  const unscoped = harness.replace('        if (!self.openingRoom(room_id)) self.deferred_submit = false;\n', '');
+  assert.notEqual(unscoped, harness);
+  assert.match(run(unscoped, { 'diagnostics.zig': 'pub fn syncLog(_: []const u8) void {}\n' }, 1), /a held send never follows you into another room or back again[\s\S]*FAIL/);
 });
 
 test('a saved room send keeps the command identity the room store deduplicates on', () => {

@@ -12,4 +12,4 @@ After the room refuses a message, the next message sends instead of being blocke
 A message that was still being confirmed is sent once before your rewritten message, so nothing is lost or sent twice.
 A message you send appears in the room straight away instead of after the room reloads.
 Sending while a room is still opening waits for it instead of refusing your message.
-A room that is still opening says it is loading rather than reporting that it could not load.
+A room that is still opening no longer reports that it could not load before a read has failed.

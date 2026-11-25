@@ -239,7 +239,11 @@ with tempfile.TemporaryDirectory() as home:
         assert started.get('status') in ('started', 'already'), started
         query = dict(op='events', host_uuid=host, room_id=room, after=0, limit=200)
         deadline = time.monotonic() + 40
-        while bridge.store.db.execute("SELECT COUNT(*) FROM events WHERE room_id=? AND json_extract(body,'$.type')='agent_reply'", (room,)).fetchone()[0] < 2:
+        while True:
+            bridge.execute(query)
+            replies_in_store = bridge.store.db.execute("SELECT COUNT(*) FROM events WHERE room_id=? AND json_extract(body,'$.type')='agent_reply'", (room,)).fetchone()[0]
+            if replies_in_store >= 2:
+                break
             assert time.monotonic() < deadline, 'real host reply timeout without a room reader'
             time.sleep(0.1)
         page = bridge.store.execute(dict(op='events', room_id=room, after=0, limit=200))

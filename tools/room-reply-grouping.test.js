@@ -26,6 +26,7 @@ test('desktop replay groups reversed and paged room answers under their question
   const frontend = read('room_frontend.zig');
   const view = read('room_view.zig');
   const controller = read('rooms.zig');
+  const fixture = fs.readFileSync(path.join(__dirname, 'fixtures/igsh-1732/room-replay.zig'), 'utf8');
   const source = `
 const std = @import("std");
 const avatar = struct { pub const Appearance = struct { face: u8, color: u8 }; };
@@ -55,7 +56,7 @@ ${declaration(frontend, 'fn numberField(')}
 ${declaration(frontend, 'fn textField(')}
 ${declaration(frontend, 'fn wide(')}
 ${declaration(frontend, 'fn acceptEvents(')}
-${fs.readFileSync(path.join(__dirname, 'fixtures/igsh-1732/room-replay.zig'), 'utf8')}
+${fixture}
 `;
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'room-reply-grouping-'));
   try {
@@ -63,7 +64,15 @@ ${fs.readFileSync(path.join(__dirname, 'fixtures/igsh-1732/room-replay.zig'), 'u
     const run = spawnSync(process.env.ZIG || 'zig', ['test', 'replay.zig'], { cwd: dir, encoding: 'utf8', timeout: 120000 });
     assert.equal(run.error, undefined, run.error?.message);
     assert.equal(run.status, 0, `${run.stdout || ''}${run.stderr || ''}`);
-    assert.match(run.stderr, /All 1 tests passed/);
+    assert.match(run.stderr, /All 2 tests passed/);
+    assert.match(frontend, /else if \(!c\.events\(item\.value\.room_id, 0\)\)/, 'the room read replays every event from the first one');
+    assert.match(frontend, /\.highwater = seq \};/, 'the replay watermark comes from the room snapshot, not from a receipt');
+    const skipped = source.replace('const gap_after: u64 = 1;', 'const gap_after: u64 = 5;');
+    assert.notEqual(skipped, source);
+    fs.writeFileSync(path.join(dir, 'replay.zig'), skipped);
+    const red = spawnSync(process.env.ZIG || 'zig', ['test', 'replay.zig'], { cwd: dir, encoding: 'utf8', timeout: 120000 });
+    assert.equal(red.status, 1, `${red.stdout || ''}${red.stderr || ''}`);
+    assert.match(red.stderr, /a receipt preview cannot skip the events the room shows next\.\.\.FAIL/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

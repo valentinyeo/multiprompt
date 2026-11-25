@@ -37,6 +37,8 @@ const View = struct {
     pending: ?ActionToken,
     result: ?ActionResult = .pending,
     start_failed: bool = false,
+    loading: bool = false,
+    deferred_submit: bool = false,
     generation: u64 = 1,
     selected_count: usize = 0,
     scroll: i32 = 0,
