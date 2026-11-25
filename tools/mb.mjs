@@ -451,11 +451,13 @@ async function archiveSession(ctx, flags, archived) {
   if (host !== null && hostName === undefined) throw new Failure('host must be a configured slot');
   const name = clean(flags._[0]);
   const wanted = name.toLowerCase();
+  const openTabs = listingTabs(listing).map(({ tab }) => tab);
+  const archivedTabs = listing.archived_sessions || [];
   const matchesIn = items => items.filter(item => (hostName === null || item.host === hostName) &&
     (String(item.title || '').toLowerCase() === wanted || String(item.tmux || '').toLowerCase() === wanted));
-  const own = matchesIn(archived ? listingTabs(listing) : (listing.archived_sessions || []));
+  const own = matchesIn(archived ? openTabs : archivedTabs);
   if (!own.length) {
-    const other = matchesIn(archived ? (listing.archived_sessions || []) : listingTabs(listing));
+    const other = matchesIn(archived ? archivedTabs : openTabs);
     if (other.length > 1) throw new Failure('more than one tab matches; pass --host and the terminal session name');
     if (!other.length) throw new Failure(`no tab named '${name}'`);
     if (flags.json) ctx.out(JSON.stringify({ ok: true, verb, changed: false, title: other[0].title }));
