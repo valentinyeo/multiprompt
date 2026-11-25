@@ -154,6 +154,39 @@ function Shot([string]$Name) {
     [IO.File]::WriteAllText("$Evidence/$Name-visible.txt", $text)
     return $text
 }
+function Read-Crop([string]$Path, [string]$Name, [switch]$Light) {
+    $source = [Drawing.Bitmap]::new($Path)
+    $readable = $null
+    try {
+        $factor = [int][Math]::Min(6, [Math]::Max(1, [Math]::Ceiling(1600 / [Math]::Max(1, $source.Width))))
+        $readable = [Drawing.Bitmap]::new($source.Width * $factor, $source.Height * $factor, [Drawing.Imaging.PixelFormat]::Format24bppRgb)
+        $graphics = [Drawing.Graphics]::FromImage($readable)
+        $attributes = [Drawing.Imaging.ImageAttributes]::new()
+        try {
+            $graphics.InterpolationMode = [Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+            $graphics.PixelOffsetMode = [Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+            $matrix = [Drawing.Imaging.ColorMatrix]::new()
+            if ($Light) {
+                $matrix.Matrix00 = 2.392; $matrix.Matrix10 = 4.696; $matrix.Matrix20 = 0.912; $matrix.Matrix40 = -5.772
+                $matrix.Matrix01 = 2.392; $matrix.Matrix11 = 4.696; $matrix.Matrix21 = 0.912; $matrix.Matrix41 = -5.772
+                $matrix.Matrix02 = 2.392; $matrix.Matrix12 = 4.696; $matrix.Matrix22 = 0.912; $matrix.Matrix42 = -5.772
+            } else {
+                $matrix.Matrix00 = -0.897; $matrix.Matrix10 = -1.761; $matrix.Matrix20 = -0.342; $matrix.Matrix40 = 2.3
+                $matrix.Matrix01 = -0.897; $matrix.Matrix11 = -1.761; $matrix.Matrix21 = -0.342; $matrix.Matrix41 = 2.3
+                $matrix.Matrix02 = -0.897; $matrix.Matrix12 = -1.761; $matrix.Matrix22 = -0.342; $matrix.Matrix42 = 2.3
+            }
+            $attributes.SetColorMatrix($matrix)
+            $graphics.DrawImage($source, [Drawing.Rectangle]::new(0, 0, $readable.Width, $readable.Height), 0, 0, $source.Width, $source.Height, [Drawing.GraphicsUnit]::Pixel, $attributes)
+        } finally { $attributes.Dispose(); $graphics.Dispose() }
+        $readable.Save("$Evidence/$Name-readable.png", [Drawing.Imaging.ImageFormat]::Png)
+    } finally {
+        if ($null -ne $readable) { $readable.Dispose() }
+        $source.Dispose()
+    }
+    $readableLines = Invoke-ServerNative -FilePath $ocr -Arguments @("$Evidence/$Name-readable.png", 'stdout', '--psm', '11') -Evidence $Evidence -Name ("$Name-readable-ocr")
+    $rawLines = Invoke-ServerNative -FilePath $ocr -Arguments @($Path, 'stdout', '--psm', '11') -Evidence $Evidence -Name ("$Name-raw-ocr")
+    (($rawLines -join ' ') + ' ' + ($readableLines -join ' ')) -replace '\s+', ' '
+}
 function Picker-Shot([string]$Name) {
     [void](Shot $Name)
     $focus = [IntPtr]([ChatDeliveryDesktop]::Focus($main)[1])
@@ -169,9 +202,24 @@ function Picker-Shot([string]$Name) {
         $crop = $source.Clone([Drawing.Rectangle]::new([int]$bounds.Left, $top, [int]$bounds.Width, $height), $source.PixelFormat)
         try { $crop.Save("$Evidence/$Name-list.png", [Drawing.Imaging.ImageFormat]::Png) } finally { $crop.Dispose() }
     } finally { $source.Dispose() }
-    $text = Invoke-ServerNative -FilePath $ocr -Arguments @("$Evidence/$Name-list.png", 'stdout', '--psm', '11') -Evidence $Evidence -Name ("$Name-list-ocr")
-    $text = $text -replace '\s+', ' '
+    $text = Read-Crop "$Evidence/$Name-list.png" "$Name-list"
     [IO.File]::WriteAllText("$Evidence/$Name-list-visible.txt", $text)
+    return $text
+}
+function Dialog-Shot([string]$Name) {
+    [void](Shot $Name)
+    $roomBounds = [Windows.Automation.AutomationElement]::FromHandle((Room-Window)).Current.BoundingRectangle
+    $top = [int]($roomBounds.Bottom - 0.22 * $roomBounds.Height)
+    $height = [int](0.12 * $roomBounds.Height)
+    $left = [int]($roomBounds.Left + 0.5 * $roomBounds.Width)
+    if ($height -lt 1 -or $roomBounds.Right -le $left) { throw 'Room dialog footer has no readable area' }
+    $source = [Drawing.Bitmap]::new("$Evidence/$Name.png")
+    try {
+        $crop = $source.Clone([Drawing.Rectangle]::new($left, $top, [int]($roomBounds.Right - $left), $height), $source.PixelFormat)
+        try { $crop.Save("$Evidence/$Name-footer.png", [Drawing.Imaging.ImageFormat]::Png) } finally { $crop.Dispose() }
+    } finally { $source.Dispose() }
+    $text = Read-Crop "$Evidence/$Name-footer.png" "$Name-footer" -Light
+    [IO.File]::WriteAllText("$Evidence/$Name-footer-visible.txt", $text)
     return $text
 }
 function Shot-Room([string]$Name) {
@@ -359,7 +407,7 @@ Host remote-1
         Type-Text 'Alpha'
         [void](Wait-For 'Alpha available in the creation member results' { (Picker-Shot 'create-alpha') -match '\bAlpha\b' })
         Press @(0x0D) 'Enter: select Alpha as the first member'
-        [void](Wait-For 'one selected creation member' { (Shot 'create-selected') -match 'Create\s*[^0-9]{0,3}1\b' })
+        [void](Wait-For 'one selected creation member' { (Dialog-Shot 'create-selected') -match 'Create\s*[^0-9]{0,3}1\b' })
         [void](Shot 'create-before')
         Press @(0x11, 0x0D) 'Ctrl+Enter: create the room with its first member'
         [void](Wait-For 'room persisted' { (Room-Data (Snapshot 'create-poll')).Count -eq 1 })
