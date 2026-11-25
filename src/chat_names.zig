@@ -1,11 +1,13 @@
 const std = @import("std");
 const app_state = @import("app_state.zig");
 const chat_view = @import("chat_view.zig");
+const sidebar = @import("sidebar.zig");
+const workspaces = @import("workspaces.zig");
 
 const request_id: u32 = 0x7fff1865;
 const host_slots = 3;
 
-pub const Entry = struct { name: []const u8, tmux: []const u8, sid: []const u8 };
+pub const Entry = struct { name: []const u8, tmux: []const u8, sid: []const u8, workspace: []const u8 = "", group: []const u8 = "" };
 
 var last_hash: [host_slots]std.atomic.Value(u64) = @splat(std.atomic.Value(u64).init(0));
 var in_flight = std.atomic.Value(bool).init(false);
@@ -34,10 +36,16 @@ fn publishThread(job: *Job) void {
 pub fn publishIfChanged() void {
     if (in_flight.load(.acquire)) return;
     const a = std.heap.page_allocator;
+    const entries = a.alloc(Entry, app_state.MAX_SHELLS) catch return;
+    defer a.free(entries);
+    const names = a.alloc([192]u8, app_state.MAX_SHELLS) catch return;
+    defer a.free(names);
+    const ws_names = a.alloc([32]u8, app_state.MAX_SHELLS) catch return;
+    defer a.free(ws_names);
+    const group_names = a.alloc([192]u8, app_state.MAX_SHELLS) catch return;
+    defer a.free(group_names);
     var host: u8 = 0;
     while (host < host_slots) : (host += 1) {
-        var entries: [app_state.MAX_SHELLS]Entry = undefined;
-        var names: [app_state.MAX_SHELLS][192]u8 = undefined;
         var count: usize = 0;
         var i: u32 = 0;
         while (i < app_state.shell_count and count < entries.len) : (i += 1) {
@@ -47,7 +55,14 @@ pub fn publishIfChanged() void {
             const tmux = shell.tmux_session[0..shell.tmux_session_len];
             if (!chat_view.isLive(tmux)) continue;
             const n = std.unicode.utf16LeToUtf8(&names[count], shell.name[0..shell.name_len]) catch continue;
-            entries[count] = .{ .name = names[count][0..n], .tmux = tmux, .sid = shell.claude_sid[0..shell.claude_sid_len] };
+            const ws_name = workspaces.workspaceDisplayName(shell.workspace, &ws_names[count]);
+            const group_name: []const u8 = if (sidebar.findGroupIdx(shell.group_id)) |gi| blk: {
+                const group = &app_state.groups[gi];
+                if (group.name_len == 0 or group.name_len > group.name.len) break :blk "";
+                const glen = std.unicode.utf16LeToUtf8(&group_names[count], group.name[0..group.name_len]) catch 0;
+                break :blk group_names[count][0..glen];
+            } else "";
+            entries[count] = .{ .name = names[count][0..n], .tmux = tmux, .sid = shell.claude_sid[0..shell.claude_sid_len], .workspace = ws_name, .group = group_name };
             count += 1;
         }
         if (count == 0) continue;
@@ -78,10 +93,10 @@ pub fn publishIfChanged() void {
 
 test "IGSH-1865 the desktop names its live chats for the server in one request" {
     const entries = [_]Entry{
-        .{ .name = "Multi Bot Opus Lead", .tmux = "live-308b1fc", .sid = "11111111-2222-3333-4444-555555555555" },
+        .{ .name = "Multi Bot Opus Lead", .tmux = "live-308b1fc", .sid = "11111111-2222-3333-4444-555555555555", .workspace = "Studio", .group = "Core" },
         .{ .name = "Say \"hi\"", .tmux = "live-abc", .sid = "" },
     };
     const body = payload(std.testing.allocator, 1, &entries) orelse return error.TestUnexpectedResult;
     defer std.testing.allocator.free(body);
-    try std.testing.expectEqualStrings("{\"op\":\"chat_names\",\"id\":2147424357,\"host\":1,\"names\":[{\"name\":\"Multi Bot Opus Lead\",\"tmux\":\"live-308b1fc\",\"sid\":\"11111111-2222-3333-4444-555555555555\"},{\"name\":\"Say \\\"hi\\\"\",\"tmux\":\"live-abc\",\"sid\":\"\"}]}", body);
+    try std.testing.expectEqualStrings("{\"op\":\"chat_names\",\"id\":2147424357,\"host\":1,\"names\":[{\"name\":\"Multi Bot Opus Lead\",\"tmux\":\"live-308b1fc\",\"sid\":\"11111111-2222-3333-4444-555555555555\",\"workspace\":\"Studio\",\"group\":\"Core\"},{\"name\":\"Say \\\"hi\\\"\",\"tmux\":\"live-abc\",\"sid\":\"\",\"workspace\":\"\",\"group\":\"\"}]}", body);
 }

@@ -30,6 +30,8 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
+      - name: Install Zig 0.16.0
+        uses: ./.github/actions/setup-zig
       - name: Acquire application
         shell: pwsh
         env:
@@ -45,9 +47,6 @@ jobs:
             if ($line.Count -ne 1 -or (Get-FileHash bin/multiprompt-x64.exe -Algorithm SHA256).Hash.ToLower() -ne ($line[0] -split '\s+')[0].ToLower()) { throw 'Release checksum mismatch' }
             Move-Item bin/multiprompt-x64.exe bin/multiprompt.exe
           } else {
-            Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile "$env:RUNNER_TEMP/zig.zip"
-            if ((Get-FileHash "$env:RUNNER_TEMP/zig.zip" -Algorithm SHA256).Hash.ToLower() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
-            Expand-Archive "$env:RUNNER_TEMP/zig.zip" -DestinationPath $env:RUNNER_TEMP
             & "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0/zig.exe" build
             if ($LASTEXITCODE -ne 0) { throw 'Application build failed' }
             Copy-Item zig-out/bin/multiprompt.exe bin/multiprompt.exe

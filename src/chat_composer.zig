@@ -1269,7 +1269,7 @@ fn chatAcRank(text: []const u16, token: chat_complete.Token) void {
             query_buf[0 .. std.unicode.utf16LeToUtf8(&query_buf, text[token.start + 1 .. token.end]) catch 0]
         else
             "";
-        const rows = @import("chat_mention.zig").show(if (app_state.active_shell < app_state.shell_count) app_state.active_shell else null, query);
+        const rows = @import("chat_mention.zig").show(query);
         const same_query = app_state.g_chat_ac.query_len == query.len and std.mem.eql(u8, app_state.g_chat_ac.query[0..app_state.g_chat_ac.query_len], query);
         app_state.g_chat_ac.count = rows.len;
         for (0..rows.len) |i| app_state.g_chat_ac.idx[i] = @intCast(i);
@@ -2701,7 +2701,7 @@ pub fn chatDictationLiveFinish(owner: []const u8, words: []const u16) bool {
 
 pub fn chatDictationLiveDiscard() void {
     if (!live_draft.active) return;
-    live_draft.active = false;
+    chatLiveStripFromStore();
     live_draft.sealed = false;
     live_draft.shown_len = 0;
     live_draft.baseline_len = 0;
