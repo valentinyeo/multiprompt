@@ -743,7 +743,7 @@ jobs:
         if: matrix.feature == 'workspace-switch-ai'
         shell: pwsh
         run: |
-          zig cc -target x86_64-windows-gnu -municode -O2 tools/verify-workspace-switch-ai/zsb-wrapper.c -o verify-bin/zsb.exe
+          zig cc -target x86_64-windows-gnu -municode -O2 tools/verify-workspace-switch-ai/zsb-wrapper.c -o verify-bin/zsb.exe -lws2_32
           if ($LASTEXITCODE -ne 0) { throw 'zsb command-line wrapper build failed' }
       - name: Compile chat delivery remote-shell boundary
         if: env.FEATURE == 'session-actions' || env.FEATURE == 'chat-delivery' || env.FEATURE == 'chat-fresh-start' || env.FEATURE == 'chat-startup-failure' || env.FEATURE == 'chat-messages-only' || env.FEATURE == 'chat-full-history' || env.FEATURE == 'chat-newest' || env.FEATURE == 'chat-switch-speed' || env.FEATURE == 'chat-still' || env.FEATURE == 'tmux-binding' || env.FEATURE == 'server-shell-input' || env.FEATURE == 'chat-options' || env.FEATURE == 'chat-slash'

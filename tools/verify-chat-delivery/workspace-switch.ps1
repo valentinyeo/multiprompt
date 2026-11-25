@@ -164,25 +164,14 @@ Assert-WsHistory 'workspace chat two back on Claude' $claudeTwo $wsMarkers['ws-c
 Shot 'workspace-switch-claude'
 Save @{ agent = 1; chats = $claudeSids } "$caseDir/workspace-switch-claude.json"
 
-$pythonDir = Split-Path ((Get-Command python.exe).Source)
-$python3 = Join-Path $pythonDir 'python3.exe'
-if (-not (Test-Path -LiteralPath $python3)) {
-    try { New-Item -ItemType HardLink -Path $python3 -Target (Join-Path $pythonDir 'python.exe') -Force | Out-Null }
-    catch {
-        try { New-Item -ItemType SymbolicLink -Path $python3 -Target (Join-Path $pythonDir 'python.exe') -Force | Out-Null }
-        catch { throw 'The zsb command line needs a python3 executable beside python.exe' }
-    }
-}
 $zsbWrapper = Join-Path (Split-Path $Exe) 'zsb.exe'
-if (-not (Test-Path -LiteralPath $zsbWrapper)) { throw 'The zsb command-line wrapper was not built for this journey' }
+if (-not (Test-Path -LiteralPath $zsbWrapper)) { throw 'The zsb command-line stand-in was not built for this journey' }
 $port = Wait-For 'app-owned loopback listener port' {
     $found = [regex]::Match((Read-Shared "$settings/debug.log"), 'notify-listener: tunnel-inbound listening port=(\d+) err=0')
     if ($found.Success) { [int]$found.Groups[1].Value }
 } 30
 $env:ZSB_PORT = [string]$port
 $env:MULTIPROMPT_ZSB = $zsbWrapper
-$env:ZSB_WRAPPER_BASH = (Get-Command bash.exe).Source
-$env:ZSB_WRAPPER_SCRIPT = (Resolve-Path "$PSScriptRoot/../../src/mp_zsb.sh").Path
 $actions.Add(@{case=$plan.name; input='run the mb workspace switch-ai verb'; workspace='Verify workspace'; target='codex'; port=$port})
 $mbLines = & node "$PSScriptRoot/../mb.mjs" workspace switch-ai 'Verify workspace' codex --json
 $mbExit = $LASTEXITCODE

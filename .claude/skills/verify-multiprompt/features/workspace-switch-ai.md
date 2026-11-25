@@ -26,13 +26,13 @@ The saved tab, remote shell, tmux and provider CLI are fixture boundaries. Two s
 2. Press Ctrl+K, type `switch all chats antigravity`, Enter. Require two `switch-reply` rows with `status refused` and `reason unsupported_provider`, the painted notice, and both chats still saved on Claude with their original identities.
 3. Press Ctrl+K, type `switch all chats codex`, Enter. Require two `switched` replies, two Codex provider starts, the saved session holding the agent number and identity of every reply, and each copied conversation holding its earlier messages plus `Switched AI: Claude to Codex`.
 4. Press Ctrl+K, type `switch all chats claude`, Enter, and require the same for Claude with `Switched AI: Codex to Claude`.
-5. Read the app-owned loopback port, then run `node tools/mb.mjs workspace switch-ai "Verify workspace" codex --json` through a `zsb` wrapper that runs the shipped `src/mp_zsb.sh`. Require exit 0, `ok true`, `status complete`, `switched 2`, the saved identities equal to the reported ones, and the same visible conversations and Codex divider.
+5. Read the app-owned loopback port, then run `node tools/mb.mjs workspace switch-ai "Verify workspace" codex --json`. The workflow builds `verify-bin/zsb.exe`, a stand-in for the `zsb` command line that sends the app's own `ZSB:<session>:<base64 args>` frame to that loopback port, so `mb` runs its real verb loop and its real report against the real app listener. Require exit 0, `ok true`, `status complete`, `switched 2`, the saved identities equal to the reported ones, and the same visible conversations and Codex divider.
 6. Inspect `verify-workspace-switch-ai`: `journey.mp4`, `result.json`, `workspace-switch/` with `observation.json`, `workspace-switch.json`, `workspace-switch-mb.txt`, the `*-copied.txt` conversations, `stand-in/workspace-switch.jsonl`, `session-chat.json`, and the screenshots `workspace-switch-before.png`, `workspace-switch-antigravity-refused.png`, `workspace-switch-codex.png`, `workspace-switch-claude.png` and `workspace-switch-mb.png`.
 
 ## Gotchas
 
 The stand-in is not a real Codex or Claude process: the provider CLI start is replaced and no token, bill or model quality is exercised. The saved chats are seeded in the real session file; the reader keeps the production handover, divider, message store and identity rules.
 
-- `mb` needs a `python3` executable for the shipped `zsb` script, so the driver links one beside `python.exe` before the verb runs.
+- The `zsb` stand-in speaks the app's wire protocol instead of the shipped `src/mp_zsb.sh`, because that script reaches the app through the notify relay and needs an owner relay token a runner does not have. Below `mb` only the transport is replaced: `mb`'s argument parsing, per-chat loop, provider file and JSON report are the shipped code.
 - The Antigravity refusal is the server's current `HOST_SWITCH_TARGETS`; adding Antigravity (PR 1216) turns this journey red on purpose, and that step then moves to a real switch.
 - The workspace must be saved in single-window mode, because that is the only mode the app restores workspace names from.
