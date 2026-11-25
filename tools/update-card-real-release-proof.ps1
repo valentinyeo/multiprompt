@@ -474,6 +474,7 @@ function Invoke-CardProof {
     if ($null -ne $browserTarget) { $script:navigationSource = 'browser-target' }
     elseif ($releaseWindow -ne [IntPtr]::Zero -and $windowTitle -match [regex]::Escape("v$Offer")) { $script:navigationSource = 'window-title' }
     if ($script:navigationSource -eq '') { $null = Save-FailureEvidence 'no browser reached the release notes page'; throw 'See all did not reach the release notes page in a browser' }
+    if ($windowTitle -notmatch [regex]::Escape("v$Offer")) { $null = Save-FailureEvidence 'the release notes page is open but no browser window names the offered release'; throw 'No browser window shows the offered release, so the screenshot would not prove the destination' }
     if (-not (Show-BrowserForCapture $releaseWindow)) { $null = Save-FailureEvidence 'release notes browser did not take the foreground'; throw 'Could not bring the release notes browser to the front' }
     $releaseImage = Save-ScreenWindow $releaseWindow 'see-all-release'
     $cardProcess.Refresh()

@@ -104,9 +104,9 @@ test('the branch app names the real offered release change and its See all opens
   if (receipt.navigationSource === 'browser-target') assert.equal(receipt.browserTargetUrl, seeAllUrl);
   else assert.equal(receipt.navigationSource, 'window-title', `See all navigation source: ${receipt.navigationSource}`);
   assert.match(`${receipt.browserTargetTitle} ${receipt.browserTitle}`, /v0\.28\.1985/, 'no browser window named the offered release');
-  const release = JSON.parse(fs.readFileSync(path.join(evidence, 'see-all-release.json'), 'utf8'));
-  assert.equal(release.capture, 'screen');
-  assert.ok(release.width >= 400 && release.height >= 300, `release capture is ${release.width}x${release.height}`);
+  const capture = JSON.parse(fs.readFileSync(path.join(evidence, 'see-all-release.json'), 'utf8'));
+  assert.equal(capture.capture, 'screen');
+  assert.ok(capture.width >= 400 && capture.height >= 300, `release capture is ${capture.width}x${capture.height}`);
   assert.match(fs.readFileSync(path.join(evidence, 'debug.log'), 'utf8'), /\[update\] card view=collapsed n=1 /);
   for (const name of ['released-card.png', 'see-all-release.png']) {
     assert.ok(fs.statSync(path.join(evidence, name)).size > 20000, `${name} is not a real screenshot`);
