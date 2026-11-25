@@ -348,7 +348,7 @@ def host_owner_pid(config_path):
 
 def live_chats():
     root = state_root() / "agent-host"
-    names = published_names()
+    entries = published_entries()
     sessions = tmux_names()
     best = {}
     for config_path in sorted(root.glob("*.config.json")):
@@ -365,14 +365,16 @@ def live_chats():
         terminal = sessions is None or tmux in sessions
         if not hosted and not terminal:
             continue
-        shown = names.get(tmux)
+        entry = entries.get(tmux) or {}
+        shown = entry.get("name")
         started = state.get("started") if isinstance(state.get("started"), (int, float)) else 0
         if hosted:
             row_state = "busy" if state.get("inflight") else "idle"
         else:
             row_state = "stopped"
-        row = dict(name=shown, provider=provider, sid=sid, tmux=tmux, cwd=config.get("cwd"), state=row_state,
-                   started=started, hosted=hosted, link=link_token(shown, tmux))
+        row = dict(name=shown, workspace=entry.get("workspace"), provider=provider, sid=sid, tmux=tmux,
+                   cwd=config.get("cwd"), state=row_state, started=started, hosted=hosted,
+                   link=link_token(shown, tmux))
         if tmux not in best or (row["hosted"], row["started"]) >= (best[tmux]["hosted"], best[tmux]["started"]):
             best[tmux] = row
     rows = sorted(best.values(), key=lambda row: ((row["name"] or row["tmux"]).casefold(), row["tmux"]))
@@ -497,7 +499,7 @@ def squash(text):
 
 
 def describe(chats):
-    return "; ".join(label(chat) + " {" + chat["tmux"] + "}" for chat in chats)
+    return "; ".join(label(chat) + " {" + chat["tmux"] + "} in " + (chat.get("workspace") or "no workspace") for chat in chats)
 
 
 def resolve_chat(target, chats):

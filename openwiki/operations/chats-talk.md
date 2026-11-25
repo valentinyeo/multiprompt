@@ -77,14 +77,18 @@ Prints the newest assistant answer of a Claude, Codex or Pi chat. Names match as
 mp-send --to "Multi Bot Opus Lead" "Can you check the release build?"
 mp-send --to "multi bot" --wait "short prefix works when it is unique"
 mp-send --to "@Multi Bot Opus Lead{live-308b1fc}" "mention form from the @ pill"
+mp-sessions send --workspace "Studio" --to "Late Lead" "one chat only"
+mp-sessions send --workspace "Studio" "Late Lead please review" "the name in front sends to that chat only"
+mp-sessions send --workspace "Studio" --all "every chat in the workspace"
 ```
 
-- Matching ignores case. An exact name wins, then a unique prefix. Two matches stop with an error that lists them.
+- Matching ignores case. An exact name wins, then a unique prefix. Two matches stop with an error that lists each matching chat's name, terminal session and workspace, and nothing is sent.
 - `{live-...}` is the terminal session the @ pill appends. It is an exact key and needs no name.
 - The text sent starts with `From <your chat name>:`. The sender is found from `MULTIPROMPT_TAB`, then `TMUX_PANE`. Outside a chat, pass `--from NAME`.
 - A busy chat queues the message and takes it when its turn ends. `--wait` waits for acceptance. `--json` prints machine output.
 - Sending to your own chat is refused.
 - Loop cap: one chat takes at most 6 messages from other chats in a minute, and one sender sends at most 12 in a minute. Past a cap `mp-send` prints `slow down` and exits 5.
+- `mp-sessions send --workspace W --to NAME TEXT` reaches only NAME, which must be one chat inside W. `--workspace W TEXT` reaches every other running chat in W, and reaches only NAME when TEXT starts with the name of a chat in W. A sent name that two chats in W share stops with the error that lists them. `--all` always means every chat in the workspace, so `--workspace W --all TEXT` is the explicit broadcast.
 
 The old form `mp-send <provider> <sid> "text" --tmux <session>` still works.
 
