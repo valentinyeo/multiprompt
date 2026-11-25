@@ -298,6 +298,28 @@ class MpSessionsTest(unittest.TestCase):
             (runtime / name).symlink_to(target)
         return runtime / "mp-sessions"
 
+    def older_send_runtime(self):
+        runtime = self.home / ".multiprompt-runtime"
+        runtime.mkdir(parents=True, exist_ok=True)
+        for name, source in (("mp-sessions", ROOT / "src/mp_sessions.py"),
+                             ("mp-send", ROOT / "tools/fixtures/MUBO-558/mp-send-without-published-entries.py")):
+            body = source.read_text(encoding="utf-8")
+            target = hashlib.sha256(body.encode()).hexdigest() + "-" + name
+            (runtime / target).write_text(body, encoding="utf-8")
+            (runtime / name).symlink_to(target)
+        return runtime / "mp-sessions"
+
+    def test_MUBO_558_send_reaches_a_chat_with_an_older_mp_send_helper(self):
+        peer = self.parsed(self.run_sessions("start", "--name", "Peer", "--workspace", "Home"))
+        self.mark_running(peer)
+        sessions = self.older_send_runtime()
+        done = subprocess.run([sys.executable, str(sessions), "send", "Peer", "hello there"], capture_output=True,
+                              text=True, env=self.env(MULTIPROMPT_READER_SOURCE=str(READER)), timeout=60)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        sent = json.loads(done.stdout)
+        self.assertEqual(sent["sid"], peer["sid"])
+        self.assertRegex(sent.get("id") or "", r"\Amp-[0-9a-f]{32}\Z")
+
     def test_SOFT_3055_mixed_runtime_lists_without_desktop_helpers(self):
         sessions = self.legacy_runtime()
         for args in ([], ["list"], ["--json"], ["list", "--json"]):
