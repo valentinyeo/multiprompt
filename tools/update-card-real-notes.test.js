@@ -100,6 +100,7 @@ test('the branch app names the real offered release change and its See all opens
   assert.equal(receipt.seeAllUrl, seeAllUrl);
   assert.ok(receipt.seeAllOpened > 32, `See all shell open failed: ${receipt.seeAllOpened}`);
   assert.match(receipt.browserExe, /(?:msedge|chrome)\.exe$/i);
+  assert.equal(receipt.browserProfileConfirmed, true, `browser profile used for the destination: ${receipt.browserProfile}`);
   assert.ok(['user choice', 'proof fallback', 'proof fallback after shell open failed'].includes(receipt.associationSource), receipt.associationSource);
   if (receipt.navigationSource === 'browser-target') assert.equal(receipt.browserTargetUrl, seeAllUrl);
   else assert.equal(receipt.navigationSource, 'window-title', `See all navigation source: ${receipt.navigationSource}`);

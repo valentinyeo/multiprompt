@@ -16,7 +16,6 @@ $painted = $marker.Groups[2].Value
 $installed = '0.28.1984'
 $seeAll = "https://github.com/valentinyeo/multiprompt/releases/tag/v$Offer"
 $notesHash = (Get-FileHash $Notes -Algorithm SHA256).Hash.ToLowerInvariant()
-$shellIdentity = [Environment]::GetFolderPath('LocalApplicationData')
 $tempRoot = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { $env:TEMP }
 $disposable = Join-Path $tempRoot ('multiprompt-real-card-' + [guid]::NewGuid().ToString('N'))
 $cardExe = Join-Path $disposable 'card.exe'
@@ -24,6 +23,7 @@ $appData = Join-Path $disposable 'roaming'
 $localData = Join-Path $disposable 'local'
 $profileData = Join-Path $disposable 'profile'
 $readyPage = Join-Path $disposable 'ready.html'
+$warmLog = Join-Path $disposable 'warm-browser.log'
 New-Item -ItemType Directory -Force $disposable | Out-Null
 New-Item -ItemType Directory -Force $appData, $localData, $profileData, (Join-Path $appData 'ZigShell') | Out-Null
 Copy-Item -LiteralPath $Exe -Destination $cardExe
@@ -188,6 +188,55 @@ function Get-BrowserProcesses {
         @{ pid = [int]$_.ProcessId; parent = [int]$_.ParentProcessId; name = $_.Name; commandLine = [string]$_.CommandLine }
     })
 }
+function Initialize-BrowserProfile([string]$ProfileRoot) {
+    New-Item -ItemType Directory -Force $ProfileRoot | Out-Null
+    New-Item -ItemType Directory -Force (Join-Path $ProfileRoot 'Default') | Out-Null
+    $sentinel = Join-Path $ProfileRoot 'First Run'
+    if (-not (Test-Path -LiteralPath $sentinel)) { [IO.File]::WriteAllText($sentinel, '') }
+    $preferences = Join-Path (Join-Path $ProfileRoot 'Default') 'Preferences'
+    if (Test-Path -LiteralPath $preferences) { return }
+    $state = @{
+        browser = @{ has_seen_welcome_page = $true; check_default_browser = $false }
+        distribution = @{
+            skip_first_run_ui = $true
+            suppress_first_run_default_browser_prompt = $true
+            suppress_first_run_bubble = $true
+            show_welcome_page = $false
+            make_chrome_default = $false
+            make_chrome_default_for_user = $false
+            import_bookmarks = $false
+            import_history = $false
+            import_search_engine = $false
+            import_home_page = $false
+            do_not_create_desktop_shortcut = $true
+            do_not_create_quick_launch_shortcut = $true
+            do_not_launch_chrome = $true
+            do_not_register_for_update_launch = $true
+        }
+    }
+    [IO.File]::WriteAllText($preferences, ($state | ConvertTo-Json -Depth 4))
+}
+function Test-BrowserUsesProfile([string]$ProfilePath) {
+    if ($ProfilePath.Length -eq 0) { return $false }
+    $quoted = '--user-data-dir="' + $ProfilePath + '"'
+    $bare = '--user-data-dir=' + $ProfilePath
+    foreach ($browserProcess in @(Get-BrowserProcesses)) {
+        $command = [string]$browserProcess.commandLine
+        if ($command.Contains($quoted) -or $command.Contains($bare)) { return $true }
+    }
+    return $false
+}
+function Get-WarmBrowserReport {
+    $text = ''
+    if (Test-Path -LiteralPath $warmLog) { $text = [string](Get-Content -LiteralPath $warmLog -Raw -ErrorAction SilentlyContinue) }
+    if ($text.Length -gt 2000) { $text = $text.Substring($text.Length - 2000) }
+    return @{
+        pid = $(if ($browser) { $browser.Id } else { 0 })
+        exited = $(if ($browser) { $browser.HasExited } else { $true })
+        exitCode = $(if ($browser -and $browser.HasExited) { $browser.ExitCode } else { -1 })
+        log = $text
+    }
+}
 function Get-BrowserWindows {
     $browserIds = @(Get-Process -Name 'msedge', 'chrome' -ErrorAction SilentlyContinue | ForEach-Object { [uint32]$_.Id })
     if ($browserIds.Count -eq 0) { return @() }
@@ -205,13 +254,14 @@ function Get-CdpVersion {
 function Resolve-DefaultBrowser {
     $progId = ''
     try { $progId = [string](Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice' -ErrorAction Stop).ProgId } catch { $progId = '' }
+    $appLocal = [IO.Path]::GetFullPath($env:LOCALAPPDATA)
     $programFiles = @($env:ProgramFiles, ${env:ProgramFiles(x86)}) | Where-Object { $_ }
     $chrome = @($programFiles | ForEach-Object { Join-Path $_ 'Google\Chrome\Application\chrome.exe' }) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
     $edge = @($programFiles | ForEach-Object { Join-Path $_ 'Microsoft\Edge\Application\msedge.exe' }) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-    if ($progId -eq 'ChromeHTML' -and $chrome) { return @{ progId = $progId; exe = $chrome; profile = (Join-Path (Join-Path $shellIdentity 'Google\Chrome') 'User Data'); source = 'user choice' } }
-    if ($progId -eq 'MSEdgeHTM' -and $edge) { return @{ progId = $progId; exe = $edge; profile = (Join-Path (Join-Path $shellIdentity 'Microsoft\Edge') 'User Data'); source = 'user choice' } }
-    if ($edge) { return @{ progId = $progId; exe = $edge; profile = (Join-Path (Join-Path $shellIdentity 'Microsoft\Edge') 'User Data'); source = 'proof fallback' } }
-    if ($chrome) { return @{ progId = $progId; exe = $chrome; profile = (Join-Path (Join-Path $shellIdentity 'Google\Chrome') 'User Data'); source = 'proof fallback' } }
+    if ($progId -eq 'ChromeHTML' -and $chrome) { return @{ progId = $progId; exe = $chrome; profile = (Join-Path (Join-Path $appLocal 'Google\Chrome') 'User Data'); source = 'user choice' } }
+    if ($progId -eq 'MSEdgeHTM' -and $edge) { return @{ progId = $progId; exe = $edge; profile = (Join-Path (Join-Path $appLocal 'Microsoft\Edge') 'User Data'); source = 'user choice' } }
+    if ($edge) { return @{ progId = $progId; exe = $edge; profile = (Join-Path (Join-Path $appLocal 'Microsoft\Edge') 'User Data'); source = 'proof fallback' } }
+    if ($chrome) { return @{ progId = $progId; exe = $chrome; profile = (Join-Path (Join-Path $appLocal 'Google\Chrome') 'User Data'); source = 'proof fallback' } }
     throw 'No installed browser can carry the release notes proof'
 }
 function Set-UrlHandler([string]$BrowserExe) {
@@ -241,7 +291,7 @@ function Start-WarmBrowser {
         '--window-size=900,640',
         $readyPage
     )
-    $script:browser = Start-Process -FilePath $browserExe -ArgumentList $arguments -PassThru
+    $script:browser = Start-Process -FilePath $browserExe -ArgumentList $arguments -PassThru -RedirectStandardError $warmLog
     $deadline = [DateTime]::UtcNow.AddSeconds(90)
     do {
         if ($null -ne (Get-CdpVersion)) { return $true }
@@ -311,6 +361,9 @@ function Save-FailureEvidence([string]$Reason) {
         associationSource = $associationSource
         browserPid = $(if ($browser) { $browser.Id } else { 0 })
         browserExited = $(if ($browser) { $browser.HasExited } else { $true })
+        browserProfileInAppEnvironment = $(if ($browserProfilePath) { $browserProfilePath.StartsWith([IO.Path]::GetFullPath($env:LOCALAPPDATA), [StringComparison]::OrdinalIgnoreCase) } else { $false })
+        browserProfileConfirmed = (Test-BrowserUsesProfile $browserProfilePath)
+        warmBrowser = $(Get-WarmBrowserReport)
         browserProcesses = @(Get-BrowserProcesses)
         browserWindows = @(Get-BrowserWindows)
         cdpPort = $browserPort
@@ -347,6 +400,9 @@ function Invoke-CardProof {
         $script:browserProfilePath = $browserChoice.profile
         $script:associationSource = $browserChoice.source
         if ($script:associationSource -eq 'proof fallback') { Set-UrlHandler $script:browserExe }
+        $appRoot = [IO.Path]::GetFullPath($env:LOCALAPPDATA)
+        if (-not $script:browserProfilePath.StartsWith($appRoot, [StringComparison]::OrdinalIgnoreCase)) { throw "Browser profile $($script:browserProfilePath) is outside the app environment $appRoot" }
+        Initialize-BrowserProfile $script:browserProfilePath
         $script:cdpUp = Start-WarmBrowser
         if ($script:cdpUp) {
             $warmIds = [uint32[]]@(Get-OwnedTree $browser.Id | ForEach-Object { [uint32]$_ })
@@ -475,6 +531,7 @@ function Invoke-CardProof {
     elseif ($releaseWindow -ne [IntPtr]::Zero -and $windowTitle -match [regex]::Escape("v$Offer")) { $script:navigationSource = 'window-title' }
     if ($script:navigationSource -eq '') { $null = Save-FailureEvidence 'no browser reached the release notes page'; throw 'See all did not reach the release notes page in a browser' }
     if ($windowTitle -notmatch [regex]::Escape("v$Offer")) { $null = Save-FailureEvidence 'the release notes page is open but no browser window names the offered release'; throw 'No browser window shows the offered release, so the screenshot would not prove the destination' }
+    if (-not (Test-BrowserUsesProfile $script:browserProfilePath)) { $null = Save-FailureEvidence 'no browser used the app environment profile'; throw 'No browser used the app environment profile, so the destination browser was not the one the app launches' }
     if (-not (Show-BrowserForCapture $releaseWindow)) { $null = Save-FailureEvidence 'release notes browser did not take the foreground'; throw 'Could not bring the release notes browser to the front' }
     $releaseImage = Save-ScreenWindow $releaseWindow 'see-all-release'
     $cardProcess.Refresh()
@@ -498,6 +555,8 @@ function Invoke-CardProof {
         browserExe = $browserExe
         browserProgId = $browserProgId
         browserProfile = $browserProfilePath
+        browserProfileConfirmed = $true
+        browserWarmPid = $(if ($browser) { $browser.Id } else { 0 })
         associationSource = $associationSource
         browserPort = $browserPort
         cdpAvailable = $script:cdpUp
