@@ -73,7 +73,6 @@ test('IGSH-1973 slow call lines need more than one clock tick', () => {
   assert.match(slow, /if \(elapsed < SLOW_CALL_LOG_MS\) return;/);
 });
 
-
 function workerBody(source, name) {
   const start = source.indexOf(`fn ${name}(`);
   assert.ok(start >= 0, `${name} must exist`);
