@@ -100,11 +100,14 @@ test('the branch app names the real offered release change and its See all opens
   assert.equal(receipt.seeAllUrl, seeAllUrl);
   assert.ok(receipt.seeAllOpened > 32, `See all shell open failed: ${receipt.seeAllOpened}`);
   assert.match(receipt.browserExe, /(?:msedge|chrome)\.exe$/i);
+  assert.ok(['HKLM', 'HKCU'].includes(receipt.browserFirstRunPolicyScope), `browser first-run policy: ${receipt.browserFirstRunPolicyScope}`);
+  assert.match(receipt.browserProbeTitle, /Multiprompt browser proof ready/, 'the configured browser did not render a page in the app environment');
+  assert.equal(receipt.releaseWindowBeforeClick, false, 'a browser window named the release before the click');
   assert.equal(receipt.browserProfileConfirmed, true, `browser profile used for the destination: ${receipt.browserProfile}`);
   assert.ok(['user choice', 'proof fallback', 'proof fallback after shell open failed'].includes(receipt.associationSource), receipt.associationSource);
-  if (receipt.navigationSource === 'browser-target') assert.equal(receipt.browserTargetUrl, seeAllUrl);
-  else assert.equal(receipt.navigationSource, 'window-title', `See all navigation source: ${receipt.navigationSource}`);
-  assert.match(`${receipt.browserTargetTitle} ${receipt.browserTitle}`, /v0\.28\.1985/, 'no browser window named the offered release');
+  assert.match(receipt.browserLaunchCommand, /releases\/tag\/v0\.28\.1985/, `the click did not hand the release address to a browser: ${receipt.browserLaunchCommand}`);
+  assert.equal(receipt.navigationSource, 'window-title', `See all navigation source: ${receipt.navigationSource}`);
+  assert.match(receipt.browserTitle, /v0\.28\.1985/, 'no browser window named the offered release');
   const capture = JSON.parse(fs.readFileSync(path.join(evidence, 'see-all-release.json'), 'utf8'));
   assert.equal(capture.capture, 'screen');
   assert.ok(capture.width >= 400 && capture.height >= 300, `release capture is ${capture.width}x${capture.height}`);
@@ -123,6 +126,7 @@ test('the branch app names the real offered release change and its See all opens
     assert.deepEqual(cleanup.remainingPids, [], `${directory} left test-created processes running`);
     assert.equal(cleanup.disposableRemoved, true, `${directory} kept its disposable folder`);
     assert.equal(cleanup.success, true, `${directory} cleanup failed`);
+    assert.equal(cleanup.browserPolicyRestored, true, `${directory} left the browser first-run policy behind`);
   }
   console.log(`REAL_RELEASE_CARD notes=${receipt.notesSha256} before=${path.join(beforeEvidence, 'before-card.png')} after=${path.join(evidence, 'released-card.png')} release=${path.join(evidence, 'see-all-release.png')}`);
 });

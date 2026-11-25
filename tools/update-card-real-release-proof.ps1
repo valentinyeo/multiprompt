@@ -22,8 +22,7 @@ $cardExe = Join-Path $disposable 'card.exe'
 $appData = Join-Path $disposable 'roaming'
 $localData = Join-Path $disposable 'local'
 $profileData = Join-Path $disposable 'profile'
-$readyPage = Join-Path $disposable 'ready.html'
-$warmLog = Join-Path $disposable 'warm-browser.log'
+$proofPage = Join-Path $disposable 'browser-proof.html'
 New-Item -ItemType Directory -Force $disposable | Out-Null
 New-Item -ItemType Directory -Force $appData, $localData, $profileData, (Join-Path $appData 'ZigShell') | Out-Null
 Copy-Item -LiteralPath $Exe -Destination $cardExe
@@ -34,7 +33,7 @@ New-Item -ItemType Directory -Force "$cardExe.update" | Out-Null
 Copy-Item -LiteralPath $Notes -Destination "$cardExe.update/release-notes.json" -Force
 if ((Get-FileHash $Notes -Algorithm SHA256).Hash -ne (Get-FileHash "$cardExe.update/release-notes.json" -Algorithm SHA256).Hash) { throw 'Staged notes differ from the downloaded production asset' }
 [IO.File]::WriteAllText("$cardExe.update/ready.txt", "MPVERSION=$Offer;multiprompt-x64.exe")
-[IO.File]::WriteAllText($readyPage, '<html><head><title>Multiprompt release proof ready</title></head><body>ready</body></html>')
+[IO.File]::WriteAllText($proofPage, '<html><head><title>Multiprompt browser proof ready</title></head><body>ready</body></html>')
 $env:APPDATA = $appData
 $env:LOCALAPPDATA = $localData
 $env:USERPROFILE = $profileData
@@ -46,10 +45,13 @@ $browserExe = ''
 $browserProgId = ''
 $browserProfilePath = ''
 $associationSource = ''
-$browserPort = 0
-$cdpUp = $false
-$browserTargetUrl = ''
-$browserTargetTitle = ''
+$browserFirstRunPolicyScope = ''
+$browserProbeTitle = ''
+$browserLaunchCommand = ''
+$browserPidsBeforeClick = @()
+$shellBrowserIds = @()
+$browserPolicyChanges = @()
+$browserPolicyRestored = $false
 $browserWindowTitle = ''
 $navigationSource = ''
 $openedValue = 0
@@ -188,33 +190,35 @@ function Get-BrowserProcesses {
         @{ pid = [int]$_.ProcessId; parent = [int]$_.ParentProcessId; name = $_.Name; commandLine = [string]$_.CommandLine }
     })
 }
-function Initialize-BrowserProfile([string]$ProfileRoot) {
-    New-Item -ItemType Directory -Force $ProfileRoot | Out-Null
-    New-Item -ItemType Directory -Force (Join-Path $ProfileRoot 'Default') | Out-Null
-    $sentinel = Join-Path $ProfileRoot 'First Run'
-    if (-not (Test-Path -LiteralPath $sentinel)) { [IO.File]::WriteAllText($sentinel, '') }
-    $preferences = Join-Path (Join-Path $ProfileRoot 'Default') 'Preferences'
-    if (Test-Path -LiteralPath $preferences) { return }
-    $state = @{
-        browser = @{ has_seen_welcome_page = $true; check_default_browser = $false }
-        distribution = @{
-            skip_first_run_ui = $true
-            suppress_first_run_default_browser_prompt = $true
-            suppress_first_run_bubble = $true
-            show_welcome_page = $false
-            make_chrome_default = $false
-            make_chrome_default_for_user = $false
-            import_bookmarks = $false
-            import_history = $false
-            import_search_engine = $false
-            import_home_page = $false
-            do_not_create_desktop_shortcut = $true
-            do_not_create_quick_launch_shortcut = $true
-            do_not_launch_chrome = $true
-            do_not_register_for_update_launch = $true
+function Set-BrowserFirstRunPolicy {
+    $settings = @(
+        @{ name = 'HideFirstRunExperience'; value = 1 },
+        @{ name = 'SyncDisabled'; value = 1 }
+    )
+    foreach ($scope in @('HKLM:', 'HKCU:')) {
+        $root = $scope + '\SOFTWARE\Policies\Microsoft\Edge'
+        $previous = @()
+        try {
+            if (-not (Test-Path $root)) { New-Item -Path $root -Force -ErrorAction Stop | Out-Null }
+            foreach ($setting in $settings) {
+                $existing = Get-ItemProperty -Path $root -Name $setting.name -ErrorAction SilentlyContinue
+                $previous += @{ root = $root; name = $setting.name; existed = ($null -ne $existing); value = $(if ($null -ne $existing) { $existing.($setting.name) } else { 0 }) }
+                New-ItemProperty -Path $root -Name $setting.name -Value $setting.value -PropertyType DWord -Force -ErrorAction Stop | Out-Null
+            }
+            $script:browserPolicyChanges = $previous
+            return $scope.TrimEnd(':')
+        } catch { $previous = @() }
+    }
+    throw 'This machine refused the documented browser first-run policy, so a first-run page would replace the release notes'
+}
+function Restore-BrowserFirstRunPolicy {
+    foreach ($change in @($script:browserPolicyChanges)) {
+        if ($change.existed) {
+            New-ItemProperty -Path $change.root -Name $change.name -Value $change.value -PropertyType DWord -Force -ErrorAction SilentlyContinue | Out-Null
+        } else {
+            Remove-ItemProperty -Path $change.root -Name $change.name -Force -ErrorAction SilentlyContinue
         }
     }
-    [IO.File]::WriteAllText($preferences, ($state | ConvertTo-Json -Depth 4))
 }
 function Test-BrowserUsesProfile([string]$ProfilePath) {
     if ($ProfilePath.Length -eq 0) { return $false }
@@ -226,17 +230,6 @@ function Test-BrowserUsesProfile([string]$ProfilePath) {
     }
     return $false
 }
-function Get-WarmBrowserReport {
-    $text = ''
-    if (Test-Path -LiteralPath $warmLog) { $text = [string](Get-Content -LiteralPath $warmLog -Raw -ErrorAction SilentlyContinue) }
-    if ($text.Length -gt 2000) { $text = $text.Substring($text.Length - 2000) }
-    return @{
-        pid = $(if ($browser) { $browser.Id } else { 0 })
-        exited = $(if ($browser) { $browser.HasExited } else { $true })
-        exitCode = $(if ($browser -and $browser.HasExited) { $browser.ExitCode } else { -1 })
-        log = $text
-    }
-}
 function Get-BrowserWindows {
     $browserIds = @(Get-Process -Name 'msedge', 'chrome' -ErrorAction SilentlyContinue | ForEach-Object { [uint32]$_.Id })
     if ($browserIds.Count -eq 0) { return @() }
@@ -245,11 +238,28 @@ function Get-BrowserWindows {
         @{ handle = $handle.ToInt64(); title = [RealCardProof]::Title($handle) }
     } | Where-Object { $_.title.Length -gt 0 })
 }
-function Get-CdpTargets {
-    try { return @(Invoke-RestMethod -Uri "http://127.0.0.1:$browserPort/json/list" -TimeoutSec 3 -ErrorAction Stop) } catch { return @() }
+function Get-BrowserProcessIds {
+    return @(Get-Process -Name 'msedge', 'chrome' -ErrorAction SilentlyContinue | ForEach-Object { [int]$_.Id })
 }
-function Get-CdpVersion {
-    try { return Invoke-RestMethod -Uri "http://127.0.0.1:$browserPort/json/version" -TimeoutSec 3 -ErrorAction Stop } catch { return $null }
+function Get-OwnedWindows([int[]]$Roots) {
+    $ids = @()
+    foreach ($root in @($Roots)) { if ($root -gt 0) { $ids += @(Get-OwnedTree $root) } }
+    $unique = [uint32[]]@($ids | Select-Object -Unique | ForEach-Object { [uint32]$_ })
+    if ($unique.Count -eq 0) { return @() }
+    return @([RealCardProof]::VisibleWindows($unique) | ForEach-Object {
+        $handle = [IntPtr]$_
+        @{ handle = $handle; title = [RealCardProof]::Title($handle) }
+    } | Where-Object { $_.title.Length -gt 0 })
+}
+function Wait-OwnedWindowTitle([int[]]$Roots, [string]$Pattern, [int]$Seconds) {
+    $deadline = [DateTime]::UtcNow.AddSeconds($Seconds)
+    do {
+        foreach ($candidate in @(Get-OwnedWindows $Roots)) {
+            if ($candidate.title -match $Pattern) { return $candidate }
+        }
+        if ([DateTime]::UtcNow -gt $deadline) { return $null }
+        Start-Sleep -Milliseconds 250
+    } while ($true)
 }
 function Resolve-DefaultBrowser {
     $progId = ''
@@ -274,30 +284,14 @@ function Set-UrlHandler([string]$BrowserExe) {
         Set-Item -Path $command -Value ('"' + $BrowserExe + '" "%1"') -Force
     }
 }
-function Start-WarmBrowser {
-    $script:browserPort = Get-Random -Minimum 9300 -Maximum 9899
-    $arguments = @(
-        ('--user-data-dir="' + $browserProfilePath + '"'),
-        '--profile-directory=Default',
-        '--no-first-run',
-        '--no-default-browser-check',
-        '--disable-notifications',
-        '--disable-background-mode',
-        '--disable-gpu',
-        '--disable-session-crashed-bubble',
-        '--hide-crash-restore-bubble',
-        ('--remote-debugging-port=' + $script:browserPort),
-        '--window-position=0,0',
-        '--window-size=900,640',
-        $readyPage
-    )
-    $script:browser = Start-Process -FilePath $browserExe -ArgumentList $arguments -PassThru -RedirectStandardError $warmLog
-    $deadline = [DateTime]::UtcNow.AddSeconds(90)
-    do {
-        if ($null -ne (Get-CdpVersion)) { return $true }
-        if ($script:browser.HasExited -or [DateTime]::UtcNow -gt $deadline) { return $false }
-        Start-Sleep -Milliseconds 250
-    } while ($true)
+function Start-ProofBrowser([string]$Page) {
+    $script:browser = Start-Process -FilePath $browserExe -ArgumentList ('"' + $Page + '"') -PassThru
+    $probe = Wait-OwnedWindowTitle ([int[]]@($script:browser.Id)) 'Multiprompt browser proof ready' 90
+    if ($null -eq $probe) { throw 'The browser did not render a page in the app environment, so its first-run setup would replace the release notes' }
+    $script:browserProbeTitle = $probe.title
+    $stopped = @(Stop-OwnedTree $script:browser.Id)
+    $alive = @(Wait-ProcessGone ([int[]]@($stopped | Select-Object -Unique)) 20)
+    if ($alive.Count -gt 0) { throw 'The configured proof browser did not stop before the See all click' }
 }
 function Invoke-SeeAllClick([int]$HintX, [int]$HintY) {
     $dpiContext = [RealCardProof]::SetThreadDpiAwarenessContext([IntPtr](-4))
@@ -345,8 +339,6 @@ function Save-FailureEvidence([string]$Reason) {
     if ($text.Length -gt 0) { Copy-Item -LiteralPath $log -Destination (Join-Path $Evidence 'debug.log') -Force -ErrorAction SilentlyContinue }
     $desktop = ''
     try { $desktop = Save-Desktop 'failure-desktop' } catch { $desktop = '' }
-    $targets = @()
-    try { $targets = Get-CdpTargets } catch { $targets = @() }
     Save-Json @{
         reason = $Reason
         before = [bool]$Before
@@ -359,16 +351,15 @@ function Save-FailureEvidence([string]$Reason) {
         browserProgId = $browserProgId
         browserProfile = $browserProfilePath
         associationSource = $associationSource
+        browserFirstRunPolicyScope = $browserFirstRunPolicyScope
+        browserProbeTitle = $browserProbeTitle
+        browserLaunchCommand = $browserLaunchCommand
         browserPid = $(if ($browser) { $browser.Id } else { 0 })
         browserExited = $(if ($browser) { $browser.HasExited } else { $true })
         browserProfileInAppEnvironment = $(if ($browserProfilePath) { $browserProfilePath.StartsWith([IO.Path]::GetFullPath($env:LOCALAPPDATA), [StringComparison]::OrdinalIgnoreCase) } else { $false })
         browserProfileConfirmed = (Test-BrowserUsesProfile $browserProfilePath)
-        warmBrowser = $(Get-WarmBrowserReport)
         browserProcesses = @(Get-BrowserProcesses)
         browserWindows = @(Get-BrowserWindows)
-        cdpPort = $browserPort
-        cdpAvailable = $cdpUp
-        cdpTargets = $targets
         desktopPng = $(if ($desktop) { Split-Path $desktop -Leaf } else { '' })
     } 'see-all-diagnostics.json'
 }
@@ -402,13 +393,8 @@ function Invoke-CardProof {
         if ($script:associationSource -eq 'proof fallback') { Set-UrlHandler $script:browserExe }
         $appRoot = [IO.Path]::GetFullPath($env:LOCALAPPDATA)
         if (-not $script:browserProfilePath.StartsWith($appRoot, [StringComparison]::OrdinalIgnoreCase)) { throw "Browser profile $($script:browserProfilePath) is outside the app environment $appRoot" }
-        Initialize-BrowserProfile $script:browserProfilePath
-        $script:cdpUp = Start-WarmBrowser
-        if ($script:cdpUp) {
-            $warmIds = [uint32[]]@(Get-OwnedTree $browser.Id | ForEach-Object { [uint32]$_ })
-            $warmWindow = @([RealCardProof]::VisibleWindows([uint32[]]$warmIds) | Where-Object { [RealCardProof]::Title($_) -match '^Multiprompt release proof ready' }) | Select-Object -First 1
-            if ($null -ne $warmWindow) { [void][RealCardProof]::ShowWindow($warmWindow, 6) }
-        }
+        $script:browserFirstRunPolicyScope = Set-BrowserFirstRunPolicy
+        Start-ProofBrowser ([uri]$proofPage).AbsoluteUri
     }
     $script:process = Start-Process $cardExe -ArgumentList "--update-ready $eventName" -PassThru
     if (-not $event.WaitOne(20000)) { throw 'Real card app did not report readiness' }
@@ -468,6 +454,10 @@ function Invoke-CardProof {
     $cardProcess.Refresh()
     $cardImage = Save-CardWindow $cardProcess.MainWindowHandle 'released-card'
     $paintedAt = $cardText.Length
+    $script:browserPidsBeforeClick = @(Get-BrowserProcessIds)
+    foreach ($staleWindow in @(Get-OwnedWindows $script:browserPidsBeforeClick)) {
+        if ($staleWindow.title -match [regex]::Escape("v$Offer")) { throw 'A browser window already named the offered release before the click' }
+    }
     Invoke-SeeAllClick ([int]$more.Groups[1].Value) ([int]$more.Groups[2].Value)
     $script:openedValue = Wait-SeeAllOpen $paintedAt
     $script:firstShellOpen = $script:openedValue
@@ -480,58 +470,28 @@ function Invoke-CardProof {
         $script:openedValue = Wait-SeeAllOpen $paintedAt
         if ($script:openedValue -le 32) { $null = Save-FailureEvidence "See all shell open failed with code $script:openedValue"; throw "See all shell open failed with code $script:openedValue" }
     }
-    $browserTarget = $null
     $releaseWindow = [IntPtr]::Zero
     $windowTitle = ''
-    if ($script:cdpUp) {
-        $deadline = [DateTime]::UtcNow.AddSeconds(60)
-        do {
-            foreach ($target in @(Get-CdpTargets)) {
-                if ($null -eq $target) { continue }
-                if ($target.type -cne 'page') { continue }
-                if ($target.url -cne $seeAll) { continue }
-                $browserTarget = $target
-                $browserTargetUrl = [string]$target.url
-                $browserTargetTitle = [string]$target.title
-                break
-            }
-            if ($null -ne $browserTarget) { break }
-            if ([DateTime]::UtcNow -gt $deadline) { break }
-            Start-Sleep -Milliseconds 250
-        } while ($true)
-    }
-    if ($null -ne $browserTarget -and $null -ne $browser) {
-        $browserIds = [uint32[]]@(Get-OwnedTree $browser.Id | ForEach-Object { [uint32]$_ })
-        $fallbackWindow = [IntPtr]::Zero
-        $fallbackTitle = ''
-        foreach ($candidate in @([RealCardProof]::VisibleWindows([uint32[]]$browserIds))) {
-            $text = [RealCardProof]::Title($candidate)
-            if ($text.Length -eq 0) { continue }
-            if ($text -match [regex]::Escape("v$Offer")) { $releaseWindow = $candidate; $windowTitle = $text; break }
-            if ($fallbackWindow -eq [IntPtr]::Zero) { $fallbackWindow = $candidate; $fallbackTitle = $text }
+    $deadline = [DateTime]::UtcNow.AddSeconds(90)
+    do {
+        $script:shellBrowserIds = @(Get-BrowserProcessIds | Where-Object { $script:browserPidsBeforeClick -notcontains $_ })
+        if ($script:browserLaunchCommand -eq '') {
+            $launch = @(Get-BrowserProcesses | Where-Object { $script:browserPidsBeforeClick -notcontains $_.pid -and ([string]$_.commandLine).Contains($seeAll) })
+            if ($launch.Count -gt 0) { $script:browserLaunchCommand = [string]$launch[0].commandLine }
         }
-        if ($releaseWindow -eq [IntPtr]::Zero -and $fallbackWindow -ne [IntPtr]::Zero) { $releaseWindow = $fallbackWindow; $windowTitle = $fallbackTitle }
-    }
-    if ($null -eq $browserTarget) {
-        $deadline = [DateTime]::UtcNow.AddSeconds(60)
-        do {
-            foreach ($candidate in @(Get-BrowserWindows)) {
-                if ($candidate.title -match [regex]::Escape("v$Offer")) { $releaseWindow = [IntPtr]$candidate.handle; $windowTitle = $candidate.title; break }
-            }
-            if ($releaseWindow -ne [IntPtr]::Zero) { break }
-            if ([DateTime]::UtcNow -gt $deadline) { break }
-            Start-Sleep -Milliseconds 500
-        } while ($true)
-    }
-    if ($releaseWindow -eq [IntPtr]::Zero) {
-        foreach ($candidate in @(Get-BrowserWindows)) { $releaseWindow = [IntPtr]$candidate.handle; $windowTitle = $candidate.title; break }
-    }
+        foreach ($candidate in @(Get-OwnedWindows $script:shellBrowserIds)) {
+            if ($candidate.title -match [regex]::Escape("v$Offer")) { $releaseWindow = [IntPtr]$candidate.handle; $windowTitle = $candidate.title; break }
+        }
+        if ($releaseWindow -ne [IntPtr]::Zero) { break }
+        if ([DateTime]::UtcNow -gt $deadline) { break }
+        Start-Sleep -Milliseconds 500
+    } while ($true)
     $script:browserWindowTitle = $windowTitle
-    if ($null -ne $browserTarget) { $script:navigationSource = 'browser-target' }
-    elseif ($releaseWindow -ne [IntPtr]::Zero -and $windowTitle -match [regex]::Escape("v$Offer")) { $script:navigationSource = 'window-title' }
-    if ($script:navigationSource -eq '') { $null = Save-FailureEvidence 'no browser reached the release notes page'; throw 'See all did not reach the release notes page in a browser' }
+    if ($script:browserLaunchCommand -eq '') { $null = Save-FailureEvidence 'no browser process carried the See all address'; throw 'No browser process carried the See all address, so the click did not reach a browser' }
+    if ($releaseWindow -eq [IntPtr]::Zero) { $null = Save-FailureEvidence 'no browser window rendered the release notes page'; throw 'See all did not reach the release notes page in a browser' }
     if ($windowTitle -notmatch [regex]::Escape("v$Offer")) { $null = Save-FailureEvidence 'the release notes page is open but no browser window names the offered release'; throw 'No browser window shows the offered release, so the screenshot would not prove the destination' }
-    if (-not (Test-BrowserUsesProfile $script:browserProfilePath)) { $null = Save-FailureEvidence 'no browser used the app environment profile'; throw 'No browser used the app environment profile, so the destination browser was not the one the app launches' }
+    if (-not (Test-BrowserUsesProfile $script:browserProfilePath) -and -not (Test-Path (Join-Path $script:browserProfilePath 'Default\Preferences'))) { $null = Save-FailureEvidence 'no browser used the app environment profile'; throw 'No browser used the app environment profile, so the destination browser was not the one the app launches' }
+    $script:navigationSource = 'window-title'
     if (-not (Show-BrowserForCapture $releaseWindow)) { $null = Save-FailureEvidence 'release notes browser did not take the foreground'; throw 'Could not bring the release notes browser to the front' }
     $releaseImage = Save-ScreenWindow $releaseWindow 'see-all-release'
     $cardProcess.Refresh()
@@ -556,12 +516,11 @@ function Invoke-CardProof {
         browserProgId = $browserProgId
         browserProfile = $browserProfilePath
         browserProfileConfirmed = $true
-        browserWarmPid = $(if ($browser) { $browser.Id } else { 0 })
+        browserFirstRunPolicyScope = $browserFirstRunPolicyScope
+        browserProbeTitle = $script:browserProbeTitle
+        browserLaunchCommand = $script:browserLaunchCommand
+        releaseWindowBeforeClick = $false
         associationSource = $associationSource
-        browserPort = $browserPort
-        cdpAvailable = $script:cdpUp
-        browserTargetUrl = $browserTargetUrl
-        browserTargetTitle = $browserTargetTitle
         browserTitle = $script:browserWindowTitle
         cardPng = 'released-card.png'
         releasePng = 'see-all-release.png'
@@ -581,6 +540,8 @@ function Invoke-CardProof {
         commit = [string]$env:GITHUB_SHA
         browserExe = $browserExe
         browserProgId = $browserProgId
+        browserFirstRunPolicyScope = $browserFirstRunPolicyScope
+        browserProbeTitle = $script:browserProbeTitle
         associationSource = $associationSource
     } 'provenance.json'
     Write-Output ('REAL_CARD_RECEIPT=' + [Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $Evidence 'released-card.json'))))
@@ -600,8 +561,10 @@ try {
     $stopped = @()
     if ($null -ne $process -and -not $process.HasExited) { $stopped += @(Stop-OwnedTree $process.Id) }
     if ($null -ne $browser -and -not $browser.HasExited) { $stopped += @(Stop-OwnedTree $browser.Id) }
+    foreach ($rootId in @($shellBrowserIds)) { if ($rootId -gt 0) { $stopped += @(Stop-OwnedTree $rootId) } }
     $remaining = @()
     if ($stopped.Count -gt 0) { $remaining = @(Wait-ProcessGone ([int[]]@($stopped | Select-Object -Unique)) 20) }
+    try { Restore-BrowserFirstRunPolicy; $browserPolicyRestored = $true } catch { $browserPolicyRestored = $false }
     $disposableRemoved = $false
     for ($attempt = 0; $attempt -lt 10 -and -not $disposableRemoved; $attempt++) {
         Remove-Item -LiteralPath $disposable -Recurse -Force -ErrorAction SilentlyContinue
@@ -615,6 +578,7 @@ try {
             disposableRemoved = $disposableRemoved
             browserProfile = $browserProfilePath
             browserProfileRetained = $(if ($browserProfilePath) { Test-Path -LiteralPath $browserProfilePath } else { $false })
+            browserPolicyRestored = $browserPolicyRestored
             evidenceFiles = @(Get-ChildItem -LiteralPath $Evidence -File | ForEach-Object { $_.Name })
             success = ($remaining.Count -eq 0 -and $disposableRemoved)
         } 'cleanup.json'
