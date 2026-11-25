@@ -894,7 +894,15 @@ except OSError:
 raw = b"".join(chunks).decode(errors="replace")
 if not raw.strip():
     holders = pane_holders() if not endpoint else []
-    if holders and not bridge_holds_port(holders):
+    if holders and bridge_holds_port(holders):
+        pid, command = holders[0]
+        message = (f"multiprompt app not reachable: pane port {port} is held by the pane bridge pid {pid} "
+                   f"({command or 'unknown process'}), which accepted the request but closed without a reply, "
+                   "so the desktop is offline or the app stopped. " + fix)
+        fail("empty_reply", message,
+             {"ok": False, "error": "empty_reply", "message": message, "session": session, "port": pane_port(),
+              "holder": {"pid": pid, "command": command}})
+    if holders:
         fail_port_conflict(holders)
     fail("empty_reply", "multiprompt app not reachable: tunnel accepted the request but closed without a reply (app stopped or bridge changed). " + fix)
 # The app's pane handoff and WebView2 actions use a literal acknowledgement.

@@ -217,7 +217,7 @@ test('missing owner broker is reported with its socket path', { skip: process.pl
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('a stale process on the pane port is named, not called a tunnel', { skip: process.platform === 'win32' }, async () => {
+test('a relay that answers nothing is a bridge failure, not a port conflict', { skip: process.platform === 'win32' }, async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zsb-stale-port-'));
   process.title = 'python3 /home/inne/.local/share/zigshell/mp_notify_relay.py';
   const server = net.createServer(socket => {
@@ -240,13 +240,13 @@ test('a stale process on the pane port is named, not called a tunnel', { skip: p
     });
     assert.equal(code, 1, stdout + stderr);
     const reply = JSON.parse(stdout);
-    assert.equal(reply.error, 'port_conflict');
+    assert.equal(reply.error, 'empty_reply');
     assert.equal(reply.holder.pid, process.pid);
     assert.match(reply.message, new RegExp(String(port)));
-    assert.match(reply.message, /not by the Multiprompt SSH tunnel/);
     assert.match(reply.message, /mp_notify_relay\.py/);
+    assert.match(reply.message, /desktop is offline|app stopped/);
     assert.match(stderr, /multiprompt app not reachable/);
-    assert.doesNotMatch(stdout, /tunnel_down/);
+    assert.doesNotMatch(stdout, /port_conflict|tunnel_down/);
   } finally {
     process.title = TUNNEL_TITLE;
     await new Promise(resolve => server.close(resolve));
