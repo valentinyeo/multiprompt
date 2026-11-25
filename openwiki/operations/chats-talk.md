@@ -130,3 +130,7 @@ mp-shell open --workspace Research --group Ops --host remote-1 --name "VPS shell
 ## Where names come from
 
 The desktop publishes each live chat's tab name to the server through the reader (`chat_names` request). The reader merges them into `~/.local/state/multiprompt/chat-names.json`, keyed by terminal session. The desktop sends the list when tabs, names or workspaces change. Until a desktop with this feature has connected, chats show without names.
+
+A hosted chat keeps one entry, under the host's current chat name, and the entry records the current conversation (`conversation`) next to the stable host id (`sid`).
+A publish from an old tab of that chat moves the entry instead of adding a second one, and entries for chats with neither a live host nor a live terminal session are dropped.
+When Claude starts a new conversation after a clear, the reader moves the chat's tab in the account layout and the name entry to that conversation.

@@ -5922,10 +5922,14 @@ def host_claude_event(provider, sid, tmux, session, event):
                     host_log(provider, sid, "model_settings_mismatch",
                              dict(requested=settings["model"], actual=actual or "unknown"))
             if isinstance(event.get("session_id"), str):
+                previous = session["state"].get("native_session") or session["state"].get("context_session")
                 session["state"]["native_session"] = event["session_id"]
                 config = host_config(provider, sid)
                 if config is not None:
                     host_write(host_paths(provider, sid)["config"], dict(config, native_session=event["session_id"]))
+                if event["session_id"] != previous:
+                    host_layout_publish_conversation(provider, sid, event["session_id"])
+                    chat_names_follow(provider, sid, event["session_id"])
             host_state_write(provider, sid, session["state"])
             host_log(provider, sid, "init", dict(session=event.get("session_id")))
             host_event(provider, sid, tmux, session, "host.status", dict(state="ready"))
@@ -7519,46 +7523,126 @@ def chat_names_path():
     return HOME / ".local/state/multiprompt/chat-names.json"
 
 
+def chat_names_read():
+    try:
+        known = json.loads(chat_names_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError, UnicodeError):
+        known = {}
+    return known if isinstance(known, dict) else {}
+
+
+def chat_names_write(known):
+    path = chat_names_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + "." + str(os.getpid()) + ".tmp")
+    temporary.write_text(json.dumps(known, separators=(",", ":")), encoding="utf-8")
+    os.replace(temporary, path)
+
+
+def chat_names_conversation(provider, sid):
+    native = host_session_state(provider, sid).get("native_session")
+    return native if isinstance(native, str) and SESSION_ID.fullmatch(native) else sid
+
+
+def chat_names_hosts():
+    hosts = {}
+    for chat in host_chats(include_terminal=True):
+        hosts[chat["name"]] = dict(tmux=chat["name"], sid=chat["sid"], provider=chat["provider"])
+    return hosts
+
+
+def chat_names_sessions():
+    try:
+        done = subprocess.run(["tmux", "list-sessions", "-F", "#{session_name}"],
+                              capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return set(done.stdout.split()) if done.returncode == 0 else None
+
+
+def chat_names_entry(hosts, tmux, sid):
+    host = hosts.get(tmux)
+    if host is None and isinstance(sid, str):
+        host = next((candidate for candidate in hosts.values() if candidate["sid"] == sid), None)
+    return host
+
+
+def chat_names_prune(known, published, hosts):
+    current = {host["sid"]: host["tmux"] for host in hosts.values()}
+    sessions = False
+    for key in list(known):
+        if key in published:
+            continue
+        stored = known[key]
+        if not isinstance(stored, dict) or not isinstance(stored.get("name"), str):
+            continue
+        stored_sid = stored.get("sid")
+        if isinstance(stored_sid, str) and current.get(stored_sid) not in (None, key):
+            del known[key]
+            continue
+        if key in hosts:
+            continue
+        if sessions is False:
+            sessions = chat_names_sessions()
+        if sessions is not None and key not in sessions:
+            del known[key]
+
+
+def chat_names_scope(record, entry):
+    for field in ("workspace", "group"):
+        value = entry.get(field)
+        if not isinstance(value, str):
+            continue
+        value = value.strip()
+        if value and len(value) <= 64 and not any(ord(c) < 32 for c in value):
+            record[field] = value
+    return record
+
+
 def chat_names_publish(entries):
     if not isinstance(entries, list) or len(entries) > 256:
         return dict(status="refused", reason="invalid_names")
-    path = chat_names_path()
-    try:
-        known = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        known = {}
-    if not isinstance(known, dict):
-        known = {}
+    known = chat_names_read()
+    hosts = chat_names_hosts()
     now = time.time()
-    count = 0
+    published = {}
     for entry in entries:
         if not isinstance(entry, dict):
             continue
-        tmux, name = entry.get("tmux"), entry.get("name")
+        tmux, name, sid = entry.get("tmux"), entry.get("name"), entry.get("sid")
         if not isinstance(tmux, str) or CHAT_NAME_TMUX.match(tmux) is None or not isinstance(name, str):
             continue
         name = name.strip()
         if not name or len(name) > 192 or any(ord(c) < 32 for c in name):
             continue
-        sid = entry.get("sid")
-        record = dict(name=name, at=now, sid=sid if isinstance(sid, str) and len(sid) <= 80 else None)
-        workspace = entry.get("workspace")
-        if isinstance(workspace, str):
-            workspace = workspace.strip()
-            if workspace and len(workspace) <= 64 and not any(ord(c) < 32 for c in workspace):
-                record["workspace"] = workspace
-        group = entry.get("group")
-        if isinstance(group, str):
-            group = group.strip()
-            if group and len(group) <= 64 and not any(ord(c) < 32 for c in group):
-                record["group"] = group
-        known[tmux] = record
-        count += 1
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(path.name + "." + str(os.getpid()) + ".tmp")
-    temporary.write_text(json.dumps(known, separators=(",", ":")), encoding="utf-8")
-    os.replace(temporary, path)
-    return dict(status="ok", count=count)
+        record = chat_names_scope(dict(name=name, at=now, sid=sid if isinstance(sid, str) and len(sid) <= 80 else None), entry)
+        host = chat_names_entry(hosts, tmux, sid)
+        if host is None:
+            published[tmux] = record
+        else:
+            record.update(sid=host["sid"], conversation=chat_names_conversation(host["provider"], host["sid"]))
+            published[host["tmux"]] = record
+    chat_names_prune(known, published, hosts)
+    known.update(published)
+    chat_names_write(known)
+    return dict(status="ok", count=len(published))
+
+
+def chat_names_follow(provider, sid, conversation):
+    config = host_config(provider, sid) or {}
+    tmux = config.get("tmux")
+    if not isinstance(tmux, str) or CHAT_NAME_TMUX.match(tmux) is None:
+        return False
+    known = chat_names_read()
+    entry = known.get(tmux)
+    if not isinstance(entry, dict) or entry.get("sid") not in (sid, None, ""):
+        return False
+    entry.update(sid=sid, conversation=conversation)
+    for key in [key for key, value in known.items()
+                if key != tmux and isinstance(value, dict) and value.get("sid") == sid]:
+        del known[key]
+    chat_names_write(known)
+    return True
 
 
 def host_adopt(provider, sid, tmux, cwd=None, mode=None):
