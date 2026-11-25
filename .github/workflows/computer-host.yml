@@ -1,0 +1,34 @@
+name: Computer host
+on:
+  workflow_call:
+    inputs:
+      revision:
+        required: false
+        type: string
+      public_key:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  host:
+    name: disposable linux desktop host
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.revision || github.sha }}
+          persist-credentials: false
+      - name: Run the disposable desktop host behind the free tunnel
+        id: host
+        timeout-minutes: 42
+        env:
+          HOST_PUBLIC_KEY: ${{ inputs.public_key }}
+        run: bash tools/verify-computer/host.sh "$RUNNER_TEMP/computer-host" "$GITHUB_OUTPUT" "$HOST_PUBLIC_KEY"
+      - name: Report the host identity
+        if: always()
+        run: |
+          echo "host ready=${{ steps.host.outputs.host_ready }} port=${{ steps.host.outputs.host_port }} user=${{ steps.host.outputs.host_user }}"
