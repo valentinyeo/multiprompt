@@ -16,10 +16,10 @@ const SharedReader = struct {
 };
 
 var shared_reader: ?SharedReader = null;
-var shared_reader_mutex: std.Thread.Mutex = .{};
+var shared_reader_mutex: app_state.SpinMutex = .{};
 
 fn bundleReader() ?SharedReader {
-    shared_reader_mutex.lock();
+    while (!shared_reader_mutex.tryLock()) std.atomic.spinLoopHint();
     defer shared_reader_mutex.unlock();
     if (shared_reader) |cached| return cached;
     const source = @import("chat_session.zig").chatReaderBundle(std.heap.page_allocator) orelse return null;
