@@ -13,7 +13,7 @@ jobs:
   host:
     name: disposable linux desktop host
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 105
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -21,7 +21,7 @@ jobs:
           persist-credentials: false
       - name: Run the disposable desktop host behind the free tunnels
         id: host
-        timeout-minutes: 42
+        timeout-minutes: 100
         run: bash tools/verify-computer/host.sh "$RUNNER_TEMP/computer-host" "$GITHUB_OUTPUT"
       - name: Report the host identity
         if: always()

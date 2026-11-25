@@ -222,7 +222,7 @@ try {
         Invoke-JourneyCommand 'Move to Group' -Confirm {
             Press @(0x0D) 'Enter: Move to Group'
         }
-        Type-Text 'computer host'
+        Type-Text 'new group'
         Press @(0x0D) 'Enter: create the isolated group'
         Wait-Until {
             $state = Read-Session
@@ -258,10 +258,14 @@ try {
         Invoke-JourneyCommand 'Computer: Show or hide' -Confirm {
             Press @(0x0D) 'Enter: show the Computer pane'
         }
-        try { Wait-PaneState @('live') 120 'computer pane reached Live for the disposable host' } catch {
-            throw ('the pane never reached Live: ' + (Get-PaneSymptom))
-        }
+        try {
+            Wait-Until {
+                $trace = Read-PaneTrace
+                $trace -match '\[computer\] state live' -or $trace -match '\[computer\] state lost'
+            } 'the pane reported Live or Lost for the disposable host' 120
+        } catch { throw ('the pane never reported a connection state: ' + (Get-PaneSymptom)) }
         $trace = Read-PaneTrace
+        if ($trace -notmatch '\[computer\] state live') { throw ('the pane settled in Lost instead of showing the server screen: ' + (Get-PaneSymptom)) }
         if ($trace -notmatch ('found display :\d+, viewer port ' + $script:computerHost.viewerPort)) { throw ('The app did not accept the host desktop discovery: ' + (Get-PaneSymptom)) }
         if ($trace -match '\[computer\] control on') { throw 'The pane started in control instead of view-only' }
         $picture = Measure-PaneMarker 'computer-pane' 0.55 0.40
@@ -278,7 +282,11 @@ try {
         Save-Json @{ picture = $picture; pointerBefore = $pointer; pointerAfterViewOnlyClick = $afterClick; screenshot = 'computer-pane.png' } 'computer-pane-live.json'
         Set-ItemVerdict '1' 'proven' ('state live, the app accepted display :0 with viewer port ' + $script:computerHost.viewerPort + ', ' + ($picture.share * 100) + '% of the pane is the host marker colour, and a view-only click left the host pointer at ' + $pointer.x + ',' + $pointer.y)
         Record 'Item 1 proven: the pane shows the server screen and starts view-only'
-    } catch { Stop-Journey '1' $_.Exception.Message }
+    } catch {
+        try { Snapshot 'computer-pane-failure' } catch { }
+        try { Copy-Item -LiteralPath $paneLog (Join-Path $Evidence 'computer-pane-debug.log') -ErrorAction Stop } catch { }
+        Stop-Journey '1' $_.Exception.Message
+    }
 
     Write-Host 'Computer pane: full width keeps the window controls'
     try {

@@ -216,7 +216,7 @@ if [ "$tunnel_port" -eq 0 ]; then
 fi
 echo "public tunnel port ${tunnel_port}"
 
-enroll_deadline=$(( $(date +%s) + 1500 ))
+enroll_deadline=$(( $(date +%s) + 3300 ))
 while [ "$(date +%s)" -lt "$enroll_deadline" ]; do
     if [ -s "$work/enrolled_keys" ]; then break; fi
     sleep 5
@@ -248,7 +248,7 @@ done
     echo "host_viewer_port=$viewer_port"
 } >>"$output"
 
-deadline=$(( $(date +%s) + 2000 ))
+deadline=$(( $(date +%s) + 3000 ))
 while [ "$(date +%s)" -lt "$deadline" ]; do
     if [ -f "$done_file" ]; then echo 'client signalled completion'; break; fi
     if ! kill -0 "$(cat "$work/bore.pid")" 2>/dev/null; then echo 'public tunnel exited before the client finished'; exit 1; fi
