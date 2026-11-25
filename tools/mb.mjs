@@ -16,6 +16,8 @@ commands:
   list [--json]
   open --kind shell|chat --tmux <name> --workspace <name> [--group <group>] [--title <text>] [--host N] [--folder DIR] [--star] [--face N] [--color N] [--photo FILE]
   close <name> [--host N]
+  archive <name> [--host N] [--json]
+  unarchive <name> [--host N] [--json]
   pin <name> [--host N] [--json]
   unpin <name> [--host N] [--json]
   rename <name> <title> [--host N]
@@ -437,6 +439,43 @@ async function pinSession(ctx, flags, pinned) {
   const word = pinned ? 'pinned' : 'unpinned';
   if (flags.json) ctx.out(JSON.stringify({ ok: true, verb, changed, tab: tab.id, pinned }));
   else ctx.out(`${changed ? word : 'already ' + word} ${tab.title}`);
+}
+
+async function archiveSession(ctx, flags, archived) {
+  const verb = archived ? 'archive' : 'unarchive';
+  const word = archived ? 'archived' : 'unarchived';
+  if (flags._.length !== 1) throw new Failure(`${verb} needs one tab name`);
+  const host = flags.host === undefined ? null : hostSlot(flags.host);
+  const listing = zsbCall(ctx, ['workspace-list']);
+  const hostName = host === null ? null : (listing.hosts || [])[host];
+  if (host !== null && hostName === undefined) throw new Failure('host must be a configured slot');
+  const name = clean(flags._[0]);
+  const wanted = name.toLowerCase();
+  const openTabs = listingTabs(listing).map(({ tab }) => tab);
+  const archivedTabs = listing.archived_sessions || [];
+  const matchesIn = items => items.filter(item => (hostName === null || item.host === hostName) &&
+    (String(item.title || '').toLowerCase() === wanted || String(item.tmux || '').toLowerCase() === wanted));
+  const own = matchesIn(archived ? openTabs : archivedTabs);
+  if (!own.length) {
+    const other = matchesIn(archived ? archivedTabs : openTabs);
+    if (other.length > 1) throw new Failure('more than one tab matches; pass --host and the terminal session name');
+    if (!other.length) throw new Failure(`no tab named '${name}'`);
+    if (flags.json) ctx.out(JSON.stringify({ ok: true, verb, changed: false, title: other[0].title }));
+    else ctx.out(`already ${word} ${other[0].title}`);
+    return;
+  }
+  if (own.length > 1) throw new Failure('more than one tab matches; pass --host and the terminal session name');
+  const target = own[0];
+  if (archived) {
+    if (!target.tmux) throw new Failure(`tab '${target.title}' has no terminal session to archive`);
+    zsbCall(ctx, ['session-archive', '--tab', String(target.id)]);
+    if (flags.json) ctx.out(JSON.stringify({ ok: true, verb, changed: true, tab: target.id, title: target.title }));
+    else ctx.out(`${word} ${target.title}`);
+    return;
+  }
+  zsbCall(ctx, ['session-unarchive', '--tmux', String(target.tmux), '--host', String(target.host)]);
+  if (flags.json) ctx.out(JSON.stringify({ ok: true, verb, changed: true, tmux: target.tmux, title: target.title }));
+  else ctx.out(`${word} ${target.title}`);
 }
 
 async function releaseOwned(ctx, owners, owned) {
@@ -971,6 +1010,11 @@ export async function run(argv, overrides = {}) {
   const [command, ...rest] = argv;
   if (!command || command === 'help' || command === '--help') { out(USAGE.trimEnd()); return command ? 0 : 2; }
   try {
+    if (command === 'archive' || command === 'unarchive') {
+      const flags = parse(rest);
+      await archiveSession({ env, out, err }, flags, command === 'archive');
+      return 0;
+    }
     if (command === 'pin' || command === 'unpin') {
       const flags = parse(rest);
       await pinSession({ env, out, err }, flags, command === 'pin');

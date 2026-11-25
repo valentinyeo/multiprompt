@@ -1318,11 +1318,10 @@ fn zsbWorkerThread(ctx_ptr: usize) void {
         "get-text",         "insert",         "key",            "links",
         "navigate",         "open",           "pane-info",      "reload",
         "reset",            "resolve-window", "routing-audit",  "screenshot",
-        "script",           "session-close",  "session-move",   "session-open",
-        "session-rebind",   "session-rename", "session-status", "shell-open",
+        "script",           "session-archive", "session-close", "session-move",
+        "session-open",     "session-pin",     "session-rebind", "session-rename",
+        "session-status",   "session-unarchive", "session-unpin", "shell-open",
         "shoturl",
-        "session-pin",
-        "session-unpin",
         "sidebar",          "snapshot",       "status",         "tab",
         "tabs",             "text",           "type",           "url",
         "version",          "workspace-list",
@@ -2597,6 +2596,35 @@ fn zsbTabMove(argv: []const []const u8, out: []u8, comptime ops: type) usize {
     return zsbTabReply(out, "moved", args.tab, null);
 }
 
+fn zsbTabArchive(argv: []const []const u8, out: []u8, comptime ops: type) usize {
+    const args = parseZsbTabArgs(argv, .{ .verb = "session-archive", .allowed = &.{.tab}, .required = &.{.tab} }) catch |err| return zsbTabParseError(out, err);
+    const idx = zsbShellIndexForTab(args.tab) orelse return zsbWorkspaceError(out, "unknown_tab");
+    @import("archive.zig").archiveTabAt(idx);
+    if (zsbShellIndexForTab(args.tab) != null) return zsbWorkspaceError(out, "archive_failed");
+    ops.persist();
+    return zsbTabReply(out, "archived", args.tab, null);
+}
+
+fn zsbSessionUnarchive(argv: []const []const u8, out: []u8, comptime ops: type) usize {
+    const args = parseZsbTabArgs(argv, .{ .verb = "session-unarchive", .allowed = &.{ .tmux, .host }, .required = &.{.tmux} }) catch |err| return zsbTabParseError(out, err);
+    const tmux = args.tmux.?;
+    @import("archive.zig").loadArchiveFromDisk(true);
+    var host: ?u8 = null;
+    for (@import("archive.zig").loadArchivedEntries()) |entry| {
+        if (!std.mem.eql(u8, entry.tmux_session[0..entry.tmux_session_len], tmux)) continue;
+        if (args.host) |requested| {
+            if (!std.mem.eql(u8, tmuxSshTarget(entry.tmux_host), requested)) continue;
+        }
+        host = entry.tmux_host;
+        break;
+    }
+    const archived_host = host orelse return zsbWorkspaceError(out, "unknown_archived_session");
+    if (!@import("archive.zig").resurrectArchivedByKey(app_state.g_main_hwnd, archived_host, tmux)) return zsbWorkspaceError(out, "unarchive_failed");
+    ops.persist();
+    const text = std.fmt.bufPrint(out, "{{\"ok\":true,\"unarchived\":true,\"tmux\":\"{s}\"}}\n", .{tmux}) catch return 0;
+    return text.len;
+}
+
 fn zsbTabPin(argv: []const []const u8, out: []u8, comptime ops: type, comptime pinned: bool) usize {
     const args = parseZsbTabArgs(argv, .{ .verb = if (pinned) "session-pin" else "session-unpin", .allowed = &.{.tab}, .required = &.{.tab} }) catch |err| return zsbTabParseError(out, err);
     const idx = zsbShellIndexForTab(args.tab) orelse return zsbWorkspaceError(out, "unknown_tab");
@@ -2686,6 +2714,7 @@ const ZsbTabOps = struct {
 fn zsbIsTabVerb(verb: []const u8) bool {
     return std.mem.eql(u8, verb, "session-close") or std.mem.eql(u8, verb, "session-rebind") or
         std.mem.eql(u8, verb, "session-rename") or std.mem.eql(u8, verb, "session-move") or
+        std.mem.eql(u8, verb, "session-archive") or std.mem.eql(u8, verb, "session-unarchive") or
         std.mem.eql(u8, verb, "session-pin") or std.mem.eql(u8, verb, "session-unpin");
 }
 
@@ -2693,6 +2722,8 @@ fn zsbTabCommand(args: []const []const u8, out: []u8, comptime ops: type) usize 
     if (std.mem.eql(u8, args[0], "session-close")) return zsbTabClose(args, out, ops);
     if (std.mem.eql(u8, args[0], "session-rebind")) return zsbTabRebind(args, out, ops);
     if (std.mem.eql(u8, args[0], "session-rename")) return zsbTabRename(args, out, ops);
+    if (std.mem.eql(u8, args[0], "session-archive")) return zsbTabArchive(args, out, ops);
+    if (std.mem.eql(u8, args[0], "session-unarchive")) return zsbSessionUnarchive(args, out, ops);
     if (std.mem.eql(u8, args[0], "session-pin")) return zsbTabPin(args, out, ops, true);
     if (std.mem.eql(u8, args[0], "session-unpin")) return zsbTabPin(args, out, ops, false);
     return zsbTabMove(args, out, ops);

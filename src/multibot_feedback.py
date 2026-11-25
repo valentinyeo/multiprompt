@@ -30,6 +30,7 @@ VOTE = 'multibot-feedback-vote:v1'
 LABELS = {'Multiprompt', 'Agent Feedback'}
 QUEUE_CUTOFF = 1795550400
 TITLE_WORDS = 10
+UNWRITTEN_FIX = 'to be written'
 
 
 class BoardError(Exception):
@@ -421,8 +422,8 @@ def wish_title(row):
 
 def wish_description(row):
     details = 'App version %s. Session type %s.' % (row['app_version'], row['provider'])
-    return ('Wish from a Multibot chat.\n\nWhat you want:\n\n> %s\n\nWhy:\n\n> %s\n\nDetails:\n\n> %s\n'
-            % (html.escape(row['want']), html.escape(row['why'] or 'No reason given.'), html.escape(details)))
+    return ('Wish from a Multibot chat.\n\nProblem:\n\n> %s\n\nWhy:\n\n> %s\n\nFix:\n\n> %s\n\nDetails:\n\n> %s\n'
+            % (html.escape(row['want']), html.escape(row['why'] or 'No reason given.'), UNWRITTEN_FIX, html.escape(details)))
 
 
 def submit(row, snapshots):
