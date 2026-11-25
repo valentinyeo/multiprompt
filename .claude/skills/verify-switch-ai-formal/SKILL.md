@@ -35,6 +35,8 @@ One logical chat address, at most two pending switch requests, five successful s
 
 ## Coverage and sync
 
+MUBO-221 refuses a busy switch before taking the per-chat `.dispatch` flock at `19e65cb339ea68a7e172e52e48041a0bde604099`. `host_switch_ai` now asks `host_turn_busy` before the flock and again inside `host_switch_ai_locked`, so a chat that is replying is refused promptly instead of waiting behind the dispatch that is holding the flock, while a switch that does queue behind a dispatch still refuses after it. No switch decision, bound, replay or planted mutation changes; the reader hash moves. Require fresh hosted self-tests.
+
 MUBO-221 merges master `2d3eeee17b4fe6dd433b110577c42df91b96be9c` (MUBO-528) and serializes `host_switch_ai` with `message_dispatch` via `message_dispatch_lock_path` at `7c73d53491a5bbdedc4c1145c0e4acfcbfe0b999`, moving the switch body into `host_switch_ai_locked` while preserving busy refusal, failed-start abort, locator replacement, queued-message migration and all six planted mutation targets; `tools/chat-switch-ai.test.js` adds hosted race regressions for an incoming send after idle during handoff and busy refusal behind an active dispatch. The reader and switch-test hashes move; the model, bounds, decision table, replays and mutations are unchanged and Antigravity remains excluded from the formal provider set. Require fresh hosted self-tests.
 
 MUBO-221 integrates fresh-start master `8474aabb7a55a11595ab33e008c32c00624ce1b5` at `257df205bcc2804ea897b65a0259163eebe52afc`. The covered reader functions are unchanged from the previous reviewed branch head. The incoming `message_expire` and `message_worker` changes retain sends while a fresh-start phase is pending; that phase is outside the fixed-session model. Both fresh-start and Antigravity desktop journeys remain selected independently. The reader and reader-test hashes move, with no model, bound, decision probe, replay or mutation-control changes. Require fresh hosted self-tests and current-base desktop proof.
@@ -43,7 +45,7 @@ MUBO-221 merges master `91d6d9e9cb27aa29ecc58a2e8473013e0de18cc0` at `8e6e1237fb
 
 MUBO-221 reviews `1a59f4ad97899f924ca18a24a5568caf5519d134`. The reader's only change since the preceding PR head selects Neon 4 in `host_antigravity_argv`; none of the covered switch, history, usage-limit, or auto-switch functions changed. The reader hash and sync commit move, while the model, bounds, decisions, probes, and mutation controls stay unchanged. Hosted self-tests must rerun; model selection and rendered-history continuity remain separate desktop proof.
 
-Last reviewed source/model sync commit is `7c73d53491a5bbdedc4c1145c0e4acfcbfe0b999`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
+Last reviewed source/model sync commit is `19e65cb339ea68a7e172e52e48041a0bde604099`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
 
 SOFT-2681 publishes Claude's current native session and changes transcript selection. All twelve covered reader functions are unchanged from the prior sync, as are every other covered file, the model, bounds, decisions, probes and mutations. Only the reader hash and sync commit move. Hosted CI must rerun the full self-test and native replay; this review does not extend the model to transcript rotation.
 
