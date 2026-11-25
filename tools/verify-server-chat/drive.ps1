@@ -59,6 +59,7 @@ function Copy-Chat([string]$Name) {
     Type-Text 'chat view select all'
     [void](Wait-For 'select all messages command' { (Log-Text).Substring($offset) -match '\[palette\] ready chars=20 count=\d+ target=6364(?:\s|$)' })
     Press @(0x0D) 'Enter: select rendered messages'
+    [Windows.Forms.Clipboard]::Clear()
     Press @(0x11, 0x43) 'Ctrl+C: copy rendered messages'
     $text = [Windows.Forms.Clipboard]::GetText()
     [IO.File]::WriteAllText("$Evidence/$Name.txt", $text)
@@ -110,11 +111,33 @@ try {
     $result.cases += @{ name = 'open'; passed = $true; detail = 'Copied the host-persisted seed reply from the real UI' }
     foreach ($case in @(@{ name = 'send'; text = 'windows send proof' }, @{ name = 'clear'; text = '/clear' }, @{ name = 'after-clear'; text = 'windows after clear' })) {
         Send-Line $case.text
-        $wireText = if ($case.name -eq 'clear') { '/clear ' } else { $case.text }
-        [void](Wait-For ('server receipt for ' + $case.name) { $snapshot = Server-Snapshot ($case.name + '-server'); @($snapshot.inputs | Where-Object { $_.text -ceq $wireText }).Count -eq 1 })
-        [void](Wait-For ('painted reply for ' + $case.name) { (Copy-Chat ($case.name + '-copied')).Contains('Server received: ' + $case.text) } 30)
-        Shot $case.name
-        $result.cases += @{ name = $case.name; passed = $true; detail = 'Exactly one provider receipt over real SSH and a copied rendered reply' }
+        if ($case.name -eq 'clear') {
+            [void](Wait-For 'new empty server conversation' {
+                $snapshot = Server-Snapshot 'clear-server'
+                $snapshot.host.state.context_session -and $snapshot.host.state.context_session -ne 'a1b2c3d4-2567-4000-8000-000000002567' -and
+                    $snapshot.host.state.native_session -eq $snapshot.host.state.context_session -and
+                    @($snapshot.inputs | Where-Object { $_.text.Trim() -eq '/clear' }).Count -eq 0
+            })
+            [void](Wait-For 'empty Chat View after clear' { (Copy-Chat 'clear-copied').Trim() -eq '' } 30)
+            Shot 'clear'
+            $offset = (Log-Text).Length
+            Press @(0x11, 0x4B) 'Ctrl+K: reload chat'
+            [void](Wait-For 'reload palette ready' { (Log-Text).Substring($offset) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
+            Type-Text 'chat view resync chat'
+            [void](Wait-For 'reload command ready' { (Log-Text).Substring($offset) -match '\[palette\] ready chars=21 count=\d+ target=\d+' })
+            Press @(0x0D) 'Enter: reload messages from the server'
+            [void](Wait-For 'empty Chat View after reload' { (Copy-Chat 'clear-reloaded-copied').Trim() -eq '' } 30)
+            Shot 'clear-reloaded'
+        } else {
+            [void](Wait-For ('server receipt for ' + $case.name) { $snapshot = Server-Snapshot ($case.name + '-server'); @($snapshot.inputs | Where-Object { $_.text -ceq $case.text }).Count -eq 1 })
+            [void](Wait-For ('painted reply for ' + $case.name) {
+                $copied = Copy-Chat ($case.name + '-copied')
+                $copied.Contains('Server received: ' + $case.text) -and -not $copied.Contains('Not sent')
+            } 30)
+            if ($case.name -eq 'after-clear' -and ((Copy-Chat 'after-clear-copied').Contains('server seed') -or (Copy-Chat 'after-clear-copied').Contains('windows send proof'))) { throw 'Old messages returned after clear' }
+            Shot $case.name
+        }
+        $result.cases += @{ name = $case.name; passed = $true; detail = 'Clear leaves an empty view after reload; ordinary sends reach the provider once with no Not sent' }
     }
     Save @{ pid = $app.Id; hwnd = $main.ToInt64(); exe = $app.Path; sha256 = $ExpectedHash; visible = $true } "$Evidence/doctor.json"
     $result.status = 'passed'

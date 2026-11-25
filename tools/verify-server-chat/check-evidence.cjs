@@ -13,12 +13,19 @@ assert.equal(result.cleanup.activeAfterStop, 0);
 assert.equal(result.keyRemoved, true);
 assert.ok(Array.isArray(json('video.json').streams) && json('video.json').streams.length === 1);
 assert.ok(text('open-copied.txt').includes('Server received: server seed'));
-for (const [name, message] of [['send', 'windows send proof'], ['clear', '/clear'], ['after-clear', 'windows after clear']]) {
-  const wireText = name === 'clear' ? '/clear ' : message;
+for (const [name, message] of [['send', 'windows send proof'], ['after-clear', 'windows after clear']]) {
+  const wireText = message;
   assert.equal(json(`${name}-server.json`).inputs.filter(row => row.text === wireText).length, 1);
   assert.ok(text(`${name}-copied.txt`).includes(`Server received: ${message}`));
   assert.ok(fs.statSync(path.join(root, `${name}.png`)).size > 1000);
 }
+assert.equal(text('clear-copied.txt').trim(), '');
+assert.equal(text('clear-reloaded-copied.txt').trim(), '');
+assert.ok(json('clear-server.json').host.state.context_session);
+assert.equal(json('clear-server.json').host.state.context_session, json('clear-server.json').host.state.native_session);
+assert.equal(json('after-clear-server.json').inputs.filter(row => row.text.trim() === '/clear').length, 0);
+assert.doesNotMatch(text('after-clear-copied.txt'), /Not sent|server seed|windows send proof/);
+assert.ok(fs.statSync(path.join(root, 'clear.png')).size > 1000);
 const acl = json('key-acl.json');
 assert.equal(acl.protected, true);
 assert.equal(acl.rules.length, 1);
