@@ -50,6 +50,7 @@ for ($i = 0; $i -lt 20 -and -not $observation.dots; $i++) {
     Start-Sleep -Milliseconds 100
 }
 if (-not $observation.dots) { throw 'Fresh start never showed the reloading dots' }
+Shot 'fresh-start-pending'
 [void](Wait-For 'the reloading reply reaches the live subscription' {
     foreach ($line in ((Read-Shared "$state/working-host.jsonl") -split "`n")) {
         if (-not $line.Trim()) { continue }
