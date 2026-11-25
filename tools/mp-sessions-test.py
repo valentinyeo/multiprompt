@@ -45,6 +45,11 @@ if sys.argv[1] == "workspace-list":
         listing["workspaces"][0]["tabs"] = state["tabs"]
     print(json.dumps(listing))
 elif sys.argv[1] == "session-open":
+    host = sys.argv[sys.argv.index("--host") + 1]
+    hosts = json.loads(os.environ.get("MP_SESSIONS_TEST_LIST", "{}")).get("hosts", [])
+    if host not in hosts:
+        print(json.dumps(dict(ok=False, error="unknown_host", valid_names=hosts)))
+        sys.exit(1)
     tmux = sys.argv[sys.argv.index("--tmux") + 1]
     state.setdefault("tabs", [])
     state["tabs"].append(dict(id=55, title=sys.argv[sys.argv.index("--name") + 1], host="remote-1", tmux=tmux))
@@ -726,6 +731,35 @@ class MpSessionsTest(unittest.TestCase):
         self.assertEqual(stored["live-1111aaaa"]["group"], "Core")
         self.assertEqual(stored["live-3333cccc"]["workspace"], "Studio")
         self.assertNotIn("group", stored["live-3333cccc"])
+
+    def test_MUBO_566_saved_chat_uses_its_slots_current_desktop_name(self):
+        fixture = ROOT / "tools/fixtures/MUBO-566"
+        desktop = json.loads((fixture / "listing-current-desktop.json").read_text())
+        config = json.loads((fixture / "saved-chat.json").read_text())
+        config["cwd"] = str(self.work)
+        self.host.mkdir(parents=True, exist_ok=True)
+        key = hashlib.sha256((config["provider"] + ":" + config["sid"]).encode()).hexdigest()[:32]
+        (self.host / (key + ".config.json")).write_text(json.dumps(config))
+        for command in (("start", "--name", config["spawn_display"], "--workspace", "Multiprompt", "--provider", "codex"),
+                        ("restart", config["spawn_display"])):
+            with self.subTest(command=command):
+                self.state_file.write_text("{}")
+                started = self.parsed(self.run_sessions(*command, MP_SESSIONS_TEST_LIST=json.dumps(desktop)))
+                self.assertTrue(started["visible"], started)
+                self.assertEqual(started["sid"], config["sid"])
+                opened = [call for call in self.events("zsb") if call[0] == "session-open"][-1]
+                self.assertEqual(opened[opened.index("--host") + 1], desktop["hosts"][config["spawn_host"]])
+                self.assertNotEqual(opened[opened.index("--host") + 1], desktop["hosts"][0])
+
+    def test_MUBO_566_fresh_chat_uses_the_live_desktop_host_list(self):
+        desktop = json.loads((ROOT / "tools/fixtures/MUBO-566/listing-current-desktop.json").read_text())
+        started = self.parsed(self.run_sessions("start", "--name", "Fresh Codex", "--workspace", "Multiprompt",
+                                               "--provider", "codex", MULTIPROMPT_HOST="1",
+                                               MP_SESSIONS_TEST_LIST=json.dumps(desktop)))
+        self.assertTrue(started["visible"], started)
+        self.assertEqual(started["host"], desktop["hosts"][1])
+        opened = [call for call in self.events("zsb") if call[0] == "session-open"][-1]
+        self.assertEqual(opened[opened.index("--host") + 1], desktop["hosts"][1])
 
     def test_MUBO_566_start_names_the_hop_that_could_not_reach_the_desktop(self):
         fixture = ROOT / "tools" / "fixtures" / "MUBO-566"

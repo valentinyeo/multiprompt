@@ -1,0 +1,11 @@
+{
+  "provider": "codex",
+  "sid": "56600000-0000-4000-8000-000000000001",
+  "tmux": "live-mubo566-saved",
+  "enabled": false,
+  "spawn_name": "valentin test codex",
+  "spawn_display": "Valentin Test Codex",
+  "spawn_workspace": "Multiprompt",
+  "spawn_host": 1,
+  "spawn_host_name": "remote-2"
+}
