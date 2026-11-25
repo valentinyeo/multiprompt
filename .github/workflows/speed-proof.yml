@@ -172,7 +172,8 @@ jobs:
         with:
           pattern: speed-proof-live-${{ github.run_id }}-*
           path: evidence
-          merge-multiple: true
+      - name: Show the downloaded evidence
+        run: find evidence -name 'idle.json' | sort
       - name: Verdict against the one megabyte per hour bar
         run: |
           set +e

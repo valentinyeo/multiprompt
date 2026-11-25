@@ -13,7 +13,11 @@ MB/hour on both builds and burns more CPU after (4.5% -> 8.1% of one core, highe
 
 - Full run, 3 quiet rounds and 5 streaming rounds, 600 s a side, alternating order:
   https://github.com/valentinyeo/multiprompt/actions/runs/45539704572
-- Harness branch: `proof/mubo-idle-stream` at `c7118761`, not on master.
+- Harness branch: `proof/mubo-idle-stream`, not on master.
+- The verdict job in that run downloaded all eight round artifacts but merged them
+  into one folder, where identically named round folders collide, so it scored an
+  empty evidence set. The table above is the same script run over the downloaded
+  artifacts. The merge is now off; the report job lists the files it found.
 
 ## Table
 
