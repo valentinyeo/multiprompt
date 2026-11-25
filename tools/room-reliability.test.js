@@ -119,7 +119,7 @@ const journal = struct {
     }
 };
 ${frontend.includes('fn rejectPost(') ? declaration(frontend, 'fn rejectPost(') : ''}
-${['fn postRequest(', 'fn beginPost('].map(marker => declaration(frontend, marker)).join('\n')}
+${['fn postRequest(', 'fn resumeSavedSend(', 'fn beginPost('].map(marker => declaration(frontend, marker)).join('\n')}
 test "legacy requests remain valid and unknown capabilities or extra fields are rejected" {
     defer reset();
     try std.testing.expectEqual(room_view.ActionResult.pending, beginPost(test_token, test_room, 1, draft));
@@ -414,17 +414,20 @@ test('a saved room send keeps the command identity the room store deduplicates o
   assert.ok(service.includes("result = json.loads(previous['receipt'])"), 'an identical retry returns the original receipt instead of a second message');
 });
 
-test('a room send the room never confirmed is resumed with its own identity instead of locking the composer', () => {
+test('a room send the room never confirmed is retried from the journal instead of locking the composer', () => {
   const frontend = read('room_frontend.zig');
   assert.ok(frontend.includes('fn stillWorking('), 'the view asks the room frontend whether a saved action is still running');
   assert.ok(frontend.includes('.still_working = stillWorking'), 'the production view receives that answer');
-  assert.ok(frontend.includes('resumeSavedSend(c)'), 'a saved send whose transport stopped is resumed rather than refused forever');
-  assert.ok(frontend.includes('c.launchPrepared(item.kind, &item.id, &item.room_id, item.revision) catch return false;'), 'the resume reuses the saved command identity and body so the room cannot store the message twice');
-  assert.ok(frontend.includes('rejectPost("command_confirming"'), 'the resume tells the user the earlier message is still being confirmed');
-  assert.ok(frontend.includes('rejectPost("command_awaiting_transport"'), 'a send saved while the room host is gone is recovered rather than refused');
+  assert.ok(frontend.includes('resumeSavedSend(c)'), 'a saved send whose transport stopped is retried rather than refused forever');
+  assert.ok(frontend.includes('@memcpy(&item.id, record.command_id);'), 'the retry reloads the saved command identity so the room cannot store the message twice');
+  assert.ok(frontend.includes('item.request = try a.dupe(u8, record.request);'), 'the retry reloads the saved body so a rewritten draft is never sent in its place');
+  assert.ok(frontend.includes('rejectPost("command_confirming"'), 'the retry tells the user the earlier message is still being confirmed');
   const resumed = frontend.slice(frontend.indexOf('fn resumeSavedSend('), frontend.indexOf('fn beginPost('));
-  assert.ok(!/journal\.abandon|newCommandId/.test(resumed), 'a resumed send never abandons the saved command or takes a new identity');
-  assert.equal((frontend.match(/if \(!startSnapshot\(value\)\) _ = w\.SetTimer\(/g) || []).length, 2, 'reopening a room restarts its polling when the read cannot start at once');
+  assert.ok(!/journal\.abandon|newCommandId|launchPrepared|SetTimer|dropDraft/.test(resumed), 'a resumed send neither abandons the saved command nor launches or times a copy of its own');
+  const retry = frontend.slice(frontend.indexOf('pub fn retryCommand('), frontend.indexOf('pub fn retryCommandEvidence('));
+  assert.ok(retry.includes('if (pending_command) |item| {\n        if (item.evidence != null) return error.CommandBusy;\n        releaseCommandAction(item, false);\n        freePending(item);'), 'the retry takes over the saved copy so the saved journal command can lead it');
+  assert.ok(!/journal\.abandon|newCommandId|dropDraft/.test(retry), 'the retry keeps both the journal record and the draft');
+  assert.ok(frontend.includes('fn stopPoll(c: *const rooms.Controller) void {\n    if (c.job != null or savedSendAwaitingOutcome()) return;'), 'room polling keeps running while a reply or a saved send is outstanding');
 });
 
 test('a saved room send that the frontend no longer runs does not keep the composer locked', () => {
@@ -467,13 +470,13 @@ const ViewModel = struct {
     messages: []const u8 = &.{},
 };
 var sent: usize = 0;
-var working = true;
+var send_in_flight = true;
 var context: u8 = 0;
 fn onSubmit(_: *anyopaque, _: ActionToken, _: []const u8, _: u64, _: []const u16) ActionResult { sent += 1; return .pending; }
 fn onEntry(_: *anyopaque, _: ActionToken, _: []const u16, _: []const []const u8) ActionResult { return .failed; }
 fn onEdit(_: *anyopaque, _: ActionToken, _: []const u8, _: u64, _: []const u16, _: []const []const u8) ActionResult { return .failed; }
 fn onRestart(_: *anyopaque, _: ActionToken, _: []const u8, _: []const u8) ActionResult { return .failed; }
-fn stillWorking(_: *anyopaque, _: ActionToken) bool { return working; }
+fn stillWorking(_: *anyopaque, _: ActionToken) bool { return send_in_flight; }
 const callbacks = Callbacks{ .context = &context, .create = onEntry, .edit = onEdit, .submit = onSubmit, .restart = onRestart, .still_working = stillWorking };
 ${roomView.view({ source, stub: stubs })}
 test "a send the frontend still runs keeps the composer waiting" {
@@ -483,12 +486,12 @@ test "a send the frontend still runs keeps the composer waiting" {
     w.compose(std.unicode.utf8ToUtf16LeStringLiteral("First room message"));
     view.submit();
     try std.testing.expectEqual(@as(usize, 1), sent);
-    working = true;
+    send_in_flight = true;
     w.compose(std.unicode.utf8ToUtf16LeStringLiteral("Second room message"));
     view.submit();
     try std.testing.expectEqual(@as(usize, 1), sent);
     try std.testing.expectEqual(ActionResult.failed, view.result.?);
-    working = false;
+    send_in_flight = false;
     view.submit();
     try std.testing.expectEqual(@as(usize, 2), sent);
 }

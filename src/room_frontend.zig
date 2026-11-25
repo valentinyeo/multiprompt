@@ -647,6 +647,16 @@ fn armPoll() void {
     _ = w.SetTimer(app_state.g_main_hwnd, TIMER_ROOM, 250, null);
 }
 
+fn savedSendAwaitingOutcome() bool {
+    const item = pending_command orelse return false;
+    return item.evidence == null;
+}
+
+fn stopPoll(c: *const rooms.Controller) void {
+    if (c.job != null or savedSendAwaitingOutcome()) return;
+    _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM);
+}
+
 fn clearStoreDiscovery() void {
     for (&store_discovery) |*entry| if (entry.*) |probe| {
         probe.controller.shutdown();
@@ -1500,7 +1510,7 @@ fn finishMetadata(c: *rooms.Controller, fresh: bool, payload: ?std.json.Value) v
             }
         }
     }
-    if (!scheduleMetadata(c)) _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM);
+    if (!scheduleMetadata(c)) stopPoll(c);
 }
 
 fn freePending(item: *PendingCommand) void {
@@ -1516,6 +1526,15 @@ fn releaseCommandAction(item: *const PendingCommand, accepted: bool) void {
     view.completeAction(item.token, if (accepted) .accepted else .failed);
 }
 
+fn releaseSavedSend() void {
+    const item = pending_command orelse return;
+    if (item.evidence != null) return;
+    diagnostics.syncLog("[rooms] releasing the saved message so the journal retries it with its own identity");
+    releaseCommandAction(item, false);
+    freePending(item);
+    journal_checked_generation = null;
+}
+
 fn commandVisible(item: *const PendingCommand) bool {
     if (!created or selection_generation != item.generation or view.pending == null or !std.meta.eql(view.pending.?, item.token) or commandScope(item.location) == null) return false;
     return if (item.kind == .create) front == .create else front == .selected and std.mem.eql(u8, &front.selected.room_id, &item.room_id);
@@ -1523,7 +1542,7 @@ fn commandVisible(item: *const PendingCommand) bool {
 
 fn stillWorking(_: *anyopaque, token: room_view.ActionToken) bool {
     const item = pending_command orelse return false;
-    return item.evidence == null and std.meta.eql(item.token, token);
+    return item.evidence == null and controller != null and std.meta.eql(item.token, token);
 }
 
 fn replyPending(item: *const OwnedModel) bool {
@@ -1676,13 +1695,13 @@ fn finishCommand(c: *rooms.Controller, completion: rooms.Completion, fresh: bool
         if (item.kind != .create and front == .selected and std.mem.eql(u8, &front.selected.room_id, &item.room_id)) selection_waiting = true;
         if (!startSnapshot(c)) {
             selection_waiting = false;
-            if (!pumpRefresh(c)) _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM);
+            if (!pumpRefresh(c)) stopPoll(c);
         }
     } else if (fresh and conflict and visible and item.kind != .create) {
         if (item.kind == .edit) conflict_refresh = .{ .selection = selection_generation, .view_generation = item.token.generation };
         selection_waiting = true;
-        if (!startSnapshot(c)) { selection_waiting = false; if (!pumpRefresh(c)) _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); }
-    } else if (fresh and !startSnapshot(c) and !nextStatus(c) and !scheduleMetadata(c)) _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM);
+        if (!startSnapshot(c)) { selection_waiting = false; if (!pumpRefresh(c)) stopPoll(c); }
+    } else if (fresh and !startSnapshot(c) and !nextStatus(c) and !scheduleMetadata(c)) stopPoll(c);
     freePending(item);
 }
 
@@ -1787,8 +1806,8 @@ fn launchQueuedCommand(c: *rooms.Controller, completion: rooms.Completion, fresh
         freePending(item);
         journal_checked_generation = null;
         scheduleDiscovery(c);
+        stopPoll(c);
         controller = null;
-        _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM);
         return true;
     };
     _ = w.SetTimer(app_state.g_main_hwnd, TIMER_ROOM, 250, null);
@@ -1845,11 +1864,18 @@ pub fn pollTimer(id: usize) bool {
     pollStoreDiscovery();
     defer if (storeDiscoveryPending()) armPoll();
     const c = if (controller) |*value| value else {
-        if (pending_command != null) diagnostics.syncLog("[rooms] room polling stopped with a pending command and no controller");
+        if (savedSendAwaitingOutcome()) {
+            diagnostics.syncLog("[rooms] room polling found no controller with a saved message; the journal keeps it");
+            releaseSavedSend();
+        }
         _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM);
         return true;
     };
-    const completion = c.poll() orelse { if (!startSnapshot(c) and !scheduleMetadata(c)) _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); return true; };
+    const completion = c.poll() orelse {
+        if (resumeSavedSend(c)) return true;
+        if (!startSnapshot(c) and !scheduleMetadata(c)) stopPoll(c);
+        return true;
+    };
     if (completion == .pending) return true;
     const current_route = configuredRoute(route_slot);
     const current_key = if (current_route) |route| routeKey(route) else @as([64]u8, @splat(0));
@@ -1858,7 +1884,7 @@ pub fn pollTimer(id: usize) bool {
     const mutation = switch (completion) { .failed => |failure| rooms.isMutation(failure.kind), .finished => |result| rooms.isMutation(result.kind), .pending => false };
     if (mutation and pending_command != null) {
         finishCommand(c, completion, fresh);
-        if (!fresh) { discardBuilding(); clearCatalog(); controller = null; _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); accountReady(); }
+        if (!fresh) { discardBuilding(); clearCatalog(); stopPoll(c); controller = null; accountReady(); }
         return true;
     }
     if (!fresh) {
@@ -1874,8 +1900,8 @@ pub fn pollTimer(id: usize) bool {
         }
         discardBuilding();
         clearCatalog();
+        stopPoll(c);
         controller = null;
-        _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM);
         accountReady();
         return true;
     }
@@ -1891,14 +1917,14 @@ pub fn pollTimer(id: usize) bool {
             if (failure.kind == .snapshot or failure.kind == .events) {
                 if (building_model) |old| freeOwned(old);
                 building_model = null;
-                if (!startSnapshot(c)) { showFailure(failure); armReplyWatch(); if (!scheduleMetadata(c)) _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); }
+                if (!startSnapshot(c)) { showFailure(failure); armReplyWatch(); if (!scheduleMetadata(c)) stopPoll(c); }
             } else if (failure.kind != .status and failure.kind != .members) {
                 if (failure.kind == .catalog) finishRefresh(c, false);
                 if (failure.kind == .capabilities or failure.kind == .catalog) scheduleDiscovery(c);
-                clearCatalog(); controller = null; _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM);
+                clearCatalog(); stopPoll(c); controller = null;
             } else {
                 if (front == .selected and owned_model != null and c.has_host_uuid and std.mem.eql(u8, &front.selected.store.store_uuid, &c.host_uuid) and std.mem.eql(u8, owned_model.?.value.room_id, &front.selected.room_id)) selection_waiting = true;
-                if (!startSnapshot(c) and !nextStatus(c) and !scheduleMetadata(c)) _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM);
+                if (!startSnapshot(c) and !nextStatus(c) and !scheduleMetadata(c)) stopPoll(c);
             }
         },
         .finished => |finished| {
@@ -1909,34 +1935,34 @@ pub fn pollTimer(id: usize) bool {
                 finishMetadata(c, fresh, payload orelse .null);
                 return true;
             }
-            if (result.value.value != .object) { if (result.kind == .catalog) finishRefresh(c, false); if (result.kind == .capabilities or result.kind == .catalog) scheduleDiscovery(c); discardBuilding(); controller = null; _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); return true; }
+            if (result.value.value != .object) { if (result.kind == .catalog) finishRefresh(c, false); if (result.kind == .capabilities or result.kind == .catalog) scheduleDiscovery(c); discardBuilding(); stopPoll(c); controller = null; return true; }
             if ((result.kind == .snapshot or result.kind == .events) and read_generation != selection_generation) {
                 discardBuilding();
-                if (!startSnapshot(c) and !scheduleMetadata(c)) _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM);
+                if (!startSnapshot(c) and !scheduleMetadata(c)) stopPoll(c);
                 return true;
             }
-            const payload = result.value.value.object.get("result") orelse { if (result.kind == .catalog) finishRefresh(c, false); if (result.kind == .capabilities or result.kind == .catalog) scheduleDiscovery(c); discardBuilding(); controller = null; _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); return true; };
-            if (payload != .object) { if (result.kind == .catalog) finishRefresh(c, false); if (result.kind == .capabilities or result.kind == .catalog) scheduleDiscovery(c); discardBuilding(); controller = null; _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); return true; }
+            const payload = result.value.value.object.get("result") orelse { if (result.kind == .catalog) finishRefresh(c, false); if (result.kind == .capabilities or result.kind == .catalog) scheduleDiscovery(c); discardBuilding(); stopPoll(c); controller = null; return true; };
+            if (payload != .object) { if (result.kind == .catalog) finishRefresh(c, false); if (result.kind == .capabilities or result.kind == .catalog) scheduleDiscovery(c); discardBuilding(); stopPoll(c); controller = null; return true; }
             if (result.kind == .snapshot) {
-                if (!acceptSnapshot(payload)) { discardBuilding(); last_failure = .{ .kind = .snapshot, .reason = .parse }; view.showUnavailable(); if (!scheduleMetadata(c)) _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); return true; }
+                if (!acceptSnapshot(payload)) { discardBuilding(); last_failure = .{ .kind = .snapshot, .reason = .parse }; view.showUnavailable(); if (!scheduleMetadata(c)) stopPoll(c); return true; }
                 const item = building_model.?;
                 if (item.highwater == 0) {
                     if (!publishModel()) { discardBuilding(); view.showUnavailable(); }
-                    if (!scheduleMetadata(c)) _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM);
+                    if (!scheduleMetadata(c)) stopPoll(c);
                 } else if (!c.events(item.value.room_id, 0)) {
-                    discardBuilding(); view.showUnavailable(); if (!scheduleMetadata(c)) _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM);
+                    discardBuilding(); view.showUnavailable(); if (!scheduleMetadata(c)) stopPoll(c);
                 }
                 return true;
             }
             if (result.kind == .events) {
-                if (!acceptEvents(payload)) { discardBuilding(); last_failure = .{ .kind = .events, .reason = .parse }; view.showUnavailable(); if (!scheduleMetadata(c)) _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); return true; }
+                if (!acceptEvents(payload)) { discardBuilding(); last_failure = .{ .kind = .events, .reason = .parse }; view.showUnavailable(); if (!scheduleMetadata(c)) stopPoll(c); return true; }
                 const item = building_model.?;
                 if (item.after == item.highwater) {
                     const advanced = numberField(payload, "next_after").? > item.highwater;
                     if (!publishModel()) { discardBuilding(); view.showUnavailable(); } else if (advanced) selection_waiting = true;
-                    if (!scheduleMetadata(c)) _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM);
+                    if (!scheduleMetadata(c)) stopPoll(c);
                 } else if (!c.events(item.value.room_id, item.after)) {
-                    discardBuilding(); view.showUnavailable(); if (!scheduleMetadata(c)) _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM);
+                    discardBuilding(); view.showUnavailable(); if (!scheduleMetadata(c)) stopPoll(c);
                 }
                 return true;
             }
@@ -1948,7 +1974,7 @@ pub fn pollTimer(id: usize) bool {
                 const uuid = payload.object.get("host_uuid") orelse .null;
                 const modes_agree = store == .bool and live == .bool and store.bool == !live.bool and (if (live == .bool and live.bool) (reply == .integer and reply.integer == 1) else reply == .null);
                 if (version != .integer or version.integer != 1 or !modes_agree or uuid != .string or !c.bindHost(uuid.string) or !savePin(&route_key, uuid.string)) {
-                    scheduleDiscovery(c); controller = null; _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); return true;
+                    scheduleDiscovery(c); stopPoll(c); controller = null; return true;
                 }
                 const features = payload.object.get("room_features") orelse .null;
                 c.room_features = features == .array and features.array.items.len == 1 and features.array.items[0] == .integer and features.array.items[0].integer == 1;
@@ -1956,19 +1982,19 @@ pub fn pollTimer(id: usize) bool {
                 if (!c.live_send and created and front != .hidden) view.showError("The room helper did not run on this server. Retry, and restart a chat on this server if it keeps failing.");
                 clearCatalog();
                 if (c.catalog(0, null)) { diagnostics.syncLog("[rooms] catalog request sent"); return true; }
-                scheduleDiscovery(c); controller = null; _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); return true;
+                scheduleDiscovery(c); stopPoll(c); controller = null; return true;
             } else if (result.kind == .catalog) {
                 if (!applyCatalogPage(payload)) {
                     last_failure = .{ .kind = .catalog, .reason = .parse };
                     finishRefresh(c, false);
                     scheduleDiscovery(c);
-                    clearCatalog(); controller = null; _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); return true;
+                    clearCatalog(); stopPoll(c); controller = null; return true;
                 }
                 if (catalog_after < catalog_through.?) {
                     if (c.catalog(catalog_after, catalog_through)) return true;
                     finishRefresh(c, false);
                     scheduleDiscovery(c);
-                    clearCatalog(); controller = null; _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); return true;
+                    clearCatalog(); stopPoll(c); controller = null; return true;
                 }
                 discovery_attempts = 0;
                 discovery_waiting = false;
@@ -2004,10 +2030,7 @@ pub fn pollTimer(id: usize) bool {
                 }
                 if (front == .selected and owned_model != null and c.has_host_uuid and std.mem.eql(u8, &front.selected.store.store_uuid, &c.host_uuid) and std.mem.eql(u8, owned_model.?.value.room_id, &front.selected.room_id)) selection_waiting = true;
             }
-            if (!startSnapshot(c) and !nextStatus(c) and !scheduleMetadata(c)) {
-                if (pending_command != null) diagnostics.syncLog("[rooms] room polling stopped with a pending command");
-                _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM);
-            }
+            if (!startSnapshot(c) and !nextStatus(c) and !scheduleMetadata(c)) stopPoll(c);
         },
     }
     return true;
@@ -2070,10 +2093,14 @@ pub fn restoreCommand(location: StoreLocation) !?journal.Entry {
 }
 
 pub fn retryCommand(location: StoreLocation) !void {
-    if (pending_command != null) return error.CommandBusy;
     const scope = commandScope(location) orelse return error.InvalidScope;
     const c = if (controller) |*value| value else return error.InvalidScope;
     if (c.job != null) return error.CommandBusy;
+    if (pending_command) |item| {
+        if (item.evidence != null) return error.CommandBusy;
+        releaseCommandAction(item, false);
+        freePending(item);
+    }
     var entry = (try journal.load(scope)) orelse return error.NotFound;
     defer entry.deinit();
     const record = entry.record();
@@ -2224,10 +2251,10 @@ fn rejectPost(reason: []const u8, message: []const u8) room_view.ActionResult {
 
 fn resumeSavedSend(c: *rooms.Controller) bool {
     const item = pending_command orelse return false;
-    if (item.kind != .post or item.evidence != null or item.awaiting_launch or c.job != null or commandScope(item.location) == null) return false;
-    diagnostics.syncLog("[rooms] resending the saved message the room never confirmed");
-    c.launchPrepared(item.kind, &item.id, &item.room_id, item.revision) catch return false;
-    _ = w.SetTimer(app_state.g_main_hwnd, TIMER_ROOM, 250, null);
+    if (item.kind != .post or item.evidence != null or c.job != null) return false;
+    const location = item.location;
+    diagnostics.syncLog("[rooms] retrying the saved message the room never confirmed");
+    retryCommand(location) catch return false;
     return true;
 }
 
@@ -2235,16 +2262,7 @@ fn beginPost(token: room_view.ActionToken, room_id: []const u8, revision: u64, v
     if (!enabled or !created) return rejectPost("view_unavailable", "Rooms are not ready. Reopen the room and try again.");
     if (front != .selected or room_id.len != 36) return rejectPost("room_not_selected", "Open the room before sending.");
     if (revision == 0) return rejectPost("revision_missing", "This room has not loaded yet. Reopen it and try again.");
-    if (controller == null) {
-        if (pending_command) |stuck| if (stuck.evidence == null and stuck.kind == .post and !stuck.awaiting_launch) {
-            releaseCommandAction(stuck, false);
-            freePending(stuck);
-            beginSelectedStore();
-            return rejectPost("command_awaiting_transport", "The earlier message is still being confirmed with the room. Your draft is kept. Send it again in a moment.");
-        };
-        return rejectPost("controller_missing", "The room host is not ready. Reopen the room and try again.");
-    }
-    const c = if (controller) |*active| active else unreachable;
+    const c = if (controller) |*active| active else return rejectPost("controller_missing", "The room host is not ready. Reopen the room and try again.");
     if (!c.live_send or !c.room_features) {
         return rejectPost("helper_unavailable", "The room helper did not run on this server. Retry, and restart a chat on this server if it keeps failing.");
     }
@@ -2479,7 +2497,7 @@ pub fn select(location: RoomLocation) void {
         selection_generation +%= 1;
         selection_waiting = true;
         if (c) |value| {
-            if (!startSnapshot(value)) _ = w.SetTimer(app_state.g_main_hwnd, TIMER_ROOM, 250, null);
+            _ = startSnapshot(value);
         } else beginSelectedStore();
         return;
     }
@@ -2499,7 +2517,7 @@ pub fn select(location: RoomLocation) void {
     if (!found) return;
     selection_waiting = true;
     if (c) |value| {
-        if (!startSnapshot(value)) _ = w.SetTimer(app_state.g_main_hwnd, TIMER_ROOM, 250, null);
+        _ = startSnapshot(value);
     } else beginSelectedStore();
 }
 
