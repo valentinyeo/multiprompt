@@ -9,6 +9,30 @@ const source = fs.readFileSync(path.join(root, 'src/chat_history_reader.py'), 'u
 const fixtureDir = path.join(__dirname, 'fixtures', 'SOFT-3050');
 const streamLines = fs.readFileSync(path.join(fixtureDir, 'agy-stream.ndjson'), 'utf8').trim().split('\n');
 
+test('rendered switch-back proof keeps every message and divider in order', () => {
+  const { verifyCopiedHistory } = require('./chat-antigravity-proof.cjs');
+  const rows = ['earlier claude question', 'Claude stand-in answer.',
+    '---\nSwitched AI: Claude to Antigravity\n---', 'Antigravity stand-in reply 1.',
+    'after the switch', 'Antigravity stand-in reply.',
+    '---\nSwitched AI: Antigravity to Claude\n---'];
+  const rendered = ['earlier claude question', 'Claude stand-in answer.',
+    '--- Switched AI: Claude to Antigravity ---', 'Antigravity stand-in reply 1.',
+    'after the switch', 'Antigravity stand-in reply.',
+    '--- Switched AI: Antigravity to Claude ---'];
+  assert.doesNotThrow(() => verifyCopiedHistory(rendered.join('\r\n\r\n'), rows));
+  assert.throws(() => verifyCopiedHistory('', rows), /lost or reordered/);
+  for (let i = 0; i < rendered.length; i++) {
+    assert.throws(() => verifyCopiedHistory(rendered.filter((_, at) => at !== i).join('\n\n'), rows), /lost or reordered/);
+    assert.throws(() => verifyCopiedHistory(rendered.map((text, at) => at === i ? 'altered row' : text).join('\n\n'), rows), /lost or reordered/);
+    if (i + 1 < rendered.length) {
+      const reordered = [...rendered];
+      [reordered[i], reordered[i + 1]] = [reordered[i + 1], reordered[i]];
+      assert.throws(() => verifyCopiedHistory(reordered.join('\n\n'), rows), /lost or reordered/);
+    }
+  }
+  assert.throws(() => verifyCopiedHistory('original multi-line reply', ['original\nmulti-line reply']), /lost or reordered/);
+});
+
 test('antigravity host adapter registers agy and stream-json argv', () => {
   assert.match(source, /HOST_PROVIDERS = \(.*'antigravity'/);
   assert.match(source, /'antigravity': 'agy'/);

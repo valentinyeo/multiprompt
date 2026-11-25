@@ -4,6 +4,18 @@ const path = require('node:path');
 
 const pngMagic = '89504e470d0a1a0a';
 
+function verifyCopiedHistory(copiedBack, backTexts) {
+  copiedBack = copiedBack.replace(/\r\n/g, '\n');
+  let copiedOffset = 0;
+  for (const text of backTexts.filter(Boolean)) {
+    const displayed = text.replace(/\r\n/g, '\n')
+      .replace(/^---\n(Switched AI: (?:Claude to Antigravity|Antigravity to Claude))\n---$/, '--- $1 ---');
+    const position = copiedBack.indexOf(displayed, copiedOffset);
+    assert.ok(position >= 0, `the rendered switch back lost or reordered ${text}`);
+    copiedOffset = position + displayed.length;
+  }
+}
+
 function verify(root) {
   const dir = path.join(root, 'antigravity-chats');
   const read = name => fs.readFileSync(path.join(dir, name), 'utf8');
@@ -93,13 +105,7 @@ function verify(root) {
     'Switched AI: Claude to Antigravity', 'Switched AI: Antigravity to Claude']) {
     assert.ok(backTexts.some(row => row.includes(text)), `the switch back to Claude lost ${text}`);
   }
-  const copiedBack = read('switch-back-copied.txt').replace(/\r\n/g, '\n');
-  let copiedOffset = 0;
-  for (const text of backTexts.filter(Boolean)) {
-    const position = copiedBack.indexOf(text.replace(/\r\n/g, '\n'), copiedOffset);
-    assert.ok(position >= 0, `the rendered switch back lost or reordered ${text}`);
-    copiedOffset = position + text.replace(/\r\n/g, '\n').length;
-  }
+  verifyCopiedHistory(read('switch-back-copied.txt'), backTexts);
   const back = json('switch-back.json');
   assert.equal(back.provider, 'claude');
   assert.equal(back.switchedFrom, 'antigravity');
@@ -141,7 +147,7 @@ function verify(root) {
   };
 }
 
-module.exports = { verify };
+module.exports = { verify, verifyCopiedHistory };
 if (require.main === module) {
   const root = process.argv[2];
   try {
