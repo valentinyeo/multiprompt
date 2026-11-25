@@ -70,3 +70,4 @@ Run `feature=rooms` for the desktop gate in [Rooms](rooms.md), including fresh c
 ## Gotchas
 - The member catalog comes from the host, including unopened chats. Account names override server session names by host and tmux identity; closing a tab keeps its known name for the current account. The create path logs dialog opening, deferred discovery, each request kind, bridge spawn, reply counts and failures to `debug.log`. A missing failure line alone does not prove that the bridge never ran.
 - Offline CMD workspace proof does not cover Rooms, sync, or remote agents. Room reply checks are [diagnostic](../diagnostics/room-reply-grouping.md), not a completed desktop journey.
+- A chat that was already running when the app published its room helper loads that helper from the published runtime, so a send does not need the chat restarted. A host that still reports no room features is running an older helper; restart that chat.

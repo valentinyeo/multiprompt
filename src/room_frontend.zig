@@ -2245,14 +2245,24 @@ fn beginPost(token: room_view.ActionToken, room_id: []const u8, revision: u64, v
     @memcpy(&item.room_id, room_id);
     var existing = (journal.load(scope) catch |err| return rejectPost(@errorName(err), "Could not read the saved room action on this computer. Reopen the room and try again."));
     defer if (existing) |*entry| entry.deinit();
+    var unresolved = false;
     if (existing) |*entry| {
         const record = entry.record();
         if (record.state == .prepared or record.state == .uncertain) {
             if (record.kind != .post or record.revision != revision or !std.mem.eql(u8, record.room_id, room_id)) return rejectPost("unresolved_command", "The previous room action needs to finish. Reopen the room to retry it.");
             @memcpy(&item.id, record.command_id);
+            unresolved = true;
         } else item.id = journal.newCommandId() orelse return rejectPost("command_id_unavailable", "Could not prepare this message on this computer. Try again.");
     } else item.id = journal.newCommandId() orelse return rejectPost("command_id_unavailable", "Could not prepare this message on this computer. Try again.");
     item.request = postRequest(a, &location.store_uuid, &item.id, room_id, revision, text, picked[0..count]) catch |err| return rejectPost(@errorName(err), "Could not prepare this message on this computer. Try again.");
+    if (existing) |*entry| {
+        if (unresolved and !std.mem.eql(u8, entry.record().request, item.request)) {
+            diagnostics.syncLog("[rooms] cleared an unresolved post for this room");
+            journal.abandon(scope, &item.id) catch |err| return rejectPost(@errorName(err), "Could not clear the previous room action on this computer. Reopen the room and try again.");
+            item.id = journal.newCommandId() orelse return rejectPost("command_id_unavailable", "Could not prepare this message on this computer. Try again.");
+            item.request = postRequest(a, &location.store_uuid, &item.id, room_id, revision, text, picked[0..count]) catch |err| return rejectPost(@errorName(err), "Could not prepare this message on this computer. Try again.");
+        }
+    }
     journal.prepare(scope, .post, &item.id, room_id, revision, item.request, item.bindings) catch |err| return rejectPost(@errorName(err), "Could not save this message on this computer. Your draft is kept. Try again.");
     item.awaiting_launch = c.job != null;
     if (!item.awaiting_launch) c.launchPrepared(.post, &item.id, room_id, revision) catch |err| return rejectPost(@errorName(err), "Could not start this room send. Your draft is kept. Reopen the room and try again.");

@@ -106,32 +106,63 @@ def runtime_ready():
     return isinstance(active, dict) and active.get('sha256') == marker['active']
 
 
+PUBLISH_LOCK = 'publish.lock'
+
+
+def publish_lock():
+    import fcntl
+    if not STORE_DIRECTORY:
+        return None
+    try:
+        fd = os.open(Path(STORE_DIRECTORY, PUBLISH_LOCK), os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    except OSError:
+        return None
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+    except OSError:
+        os.close(fd)
+        return None
+    return fd
+
+
 def publish_runtime():
     if not RUNTIME_SOURCE or not STORE_DIRECTORY:
         return False
+    lock = publish_lock()
     try:
-        selected_reader()
-    except RoomError:
-        pass
-    else:
-        return False
-    bootstrap = "import base64,sys;s=base64.b64decode(sys.stdin.buffer.readline()).decode();exec(compile(s,'<room-runtime>','exec'),dict(__name__='__main__',READER_SOURCE=s))"
-    try:
-        subprocess.run([sys.executable, '-u', '-c', bootstrap, 'host', 'list'], input=base64.b64encode(RUNTIME_SOURCE) + b'\n', stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5, check=False)
-    except (OSError, subprocess.TimeoutExpired) as error:
-        sys.stderr.write('[room_bridge] publish failed %s\n' % type(error).__name__)
-        return False
-    active = active_runtime()
-    digest = active.get('sha256') if isinstance(active, dict) else None
-    if not isinstance(digest, str) or not DIGEST.fullmatch(digest):
-        sys.stderr.write('[room_bridge] publish failed no published runtime\n')
-        return False
-    remember_published(runtime_fingerprint(), digest)
-    if not runtime_ready():
-        sys.stderr.write('[room_bridge] publish failed runtime did not validate\n')
-        return False
-    sys.stderr.write('[room_bridge] published runtime %s\n' % digest[:12])
-    return True
+        if runtime_ready():
+            sys.stderr.write('[room_bridge] runtime already published %s\n' % runtime_digest()[:12])
+            return False
+        try:
+            selected_reader()
+        except RoomError:
+            pass
+        else:
+            return False
+        bootstrap = "import base64,sys;s=base64.b64decode(sys.stdin.buffer.readline()).decode();exec(compile(s,'<room-runtime>','exec'),dict(__name__='__main__',READER_SOURCE=s))"
+        try:
+            subprocess.run([sys.executable, '-u', '-c', bootstrap, 'host', 'list'], input=base64.b64encode(RUNTIME_SOURCE) + b'\n', stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5, check=False)
+        except (OSError, subprocess.TimeoutExpired) as error:
+            sys.stderr.write('[room_bridge] publish failed %s\n' % type(error).__name__)
+            return False
+        active = active_runtime()
+        digest = active.get('sha256') if isinstance(active, dict) else None
+        if not isinstance(digest, str) or not DIGEST.fullmatch(digest):
+            sys.stderr.write('[room_bridge] publish failed no published runtime\n')
+            return False
+        remember_published(runtime_fingerprint(), digest)
+        if not runtime_ready():
+            sys.stderr.write('[room_bridge] publish failed runtime did not validate\n')
+            return False
+        sys.stderr.write('[room_bridge] published runtime %s\n' % digest[:12])
+        return True
+    finally:
+        if lock is not None:
+            import fcntl
+            try:
+                fcntl.flock(lock, fcntl.LOCK_UN)
+            finally:
+                os.close(lock)
 
 
 def runtime_gap():

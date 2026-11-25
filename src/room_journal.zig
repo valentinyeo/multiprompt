@@ -356,6 +356,21 @@ pub fn prepare(scope: Scope, kind: Kind, command_id: []const u8, room_id: []cons
     try persist(scope, .{ .account_digest = &scope.account_digest, .store_uuid = &scope.store_uuid, .kind = kind, .command_id = command_id, .room_id = room_id, .revision = revision, .request = request, .bindings = bindings, .state = .prepared, .evidence = "" });
 }
 
+pub fn abandon(scope: Scope, command_id: []const u8) !void {
+    var guard = try lock(scope);
+    defer guard.deinit();
+    var entry = (try load(scope)) orelse return error.NotFound;
+    defer entry.deinit();
+    const record = entry.record();
+    if (record.state != .prepared and record.state != .uncertain) return error.TerminalCommand;
+    if (!std.mem.eql(u8, record.command_id, command_id)) return error.WrongCommand;
+    var path_buf: [700]u8 = undefined;
+    const path = try pathFor(scope, &path_buf);
+    var path_wide: [800]u16 = undefined;
+    const path_w = file_io.win32WidePath(&path_wide, path) orelse return error.InvalidPath;
+    if (w.DeleteFileW(path_w.ptr) == 0) return error.WriteFailed;
+}
+
 pub fn update(scope: Scope, command_id: []const u8, state: State, evidence: []const u8) !void {
     var guard = try lock(scope);
     defer guard.deinit();
