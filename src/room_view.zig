@@ -47,6 +47,7 @@ pub const Callbacks = struct {
     submit: *const fn (*anyopaque, ActionToken, []const u8, u64, []const u16) ActionResult,
     restart: *const fn (*anyopaque, ActionToken, []const u8, []const u8) ActionResult,
     draft_changed: ?*const fn (*anyopaque) void = null,
+    still_working: ?*const fn (*anyopaque, ActionToken) bool = null,
 };
 
 const StoredId = struct {
@@ -524,7 +525,12 @@ pub const View = struct {
     }
 
     fn submit(self: *View) void {
-        if (self.pending != null) { self.rejectSubmit("command_pending", "Wait for the current room action to finish, then try again."); return; }
+        if (self.pending) |pending| {
+            const working = if (self.callbacks.still_working) |check| check(self.callbacks.context, pending) else true;
+            if (working) { self.rejectSubmit("command_pending", "Wait for the current room action to finish, then try again."); return; }
+            self.pending = null;
+            self.result = null;
+        }
         if (self.too_small) { self.rejectSubmit("window_too_small", "Make this window larger before sending."); return; }
         if (self.presented_revision == 0) {
             self.deferred_submit = true;

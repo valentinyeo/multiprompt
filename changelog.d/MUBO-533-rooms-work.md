@@ -15,3 +15,5 @@ Sending while a room is still opening waits for it instead of refusing your mess
 A room that is still opening no longer reports that it could not load before a read has failed.
 A send the room accepted releases the room's send control, so your next message sends instead of waiting for an action that already finished.
 A room no longer shows a message that was sent somewhere else.
+Reopening a room that stopped refreshing loads its messages again.
+A room send that never reached a decision no longer leaves the send control waiting forever.

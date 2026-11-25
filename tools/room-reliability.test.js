@@ -414,6 +414,87 @@ test('a saved room send keeps the command identity the room store deduplicates o
   assert.ok(service.includes("result = json.loads(previous['receipt'])"), 'an identical retry returns the original receipt instead of a second message');
 });
 
+test('a room send the room never confirmed is resumed with its own identity instead of locking the composer', () => {
+  const frontend = read('room_frontend.zig');
+  assert.ok(frontend.includes('fn stillWorking('), 'the view asks the room frontend whether a saved action is still running');
+  assert.ok(frontend.includes('.still_working = stillWorking'), 'the production view receives that answer');
+  assert.ok(frontend.includes('resumeSavedSend(c)'), 'a saved send whose transport stopped is resumed rather than refused forever');
+  assert.ok(frontend.includes('c.launchPrepared(item.kind, &item.id, &item.room_id, item.revision) catch return false;'), 'the resume reuses the saved command identity and body so the room cannot store the message twice');
+  assert.ok(frontend.includes('rejectPost("command_confirming"'), 'the resume tells the user the earlier message is still being confirmed');
+  assert.ok(frontend.includes('rejectPost("command_awaiting_transport"'), 'a send saved while the room host is gone is recovered rather than refused');
+  const resumed = frontend.slice(frontend.indexOf('fn resumeSavedSend('), frontend.indexOf('fn beginPost('));
+  assert.ok(!/journal\.abandon|newCommandId/.test(resumed), 'a resumed send never abandons the saved command or takes a new identity');
+  assert.equal((frontend.match(/if \(!startSnapshot\(value\)\) _ = w\.SetTimer\(/g) || []).length, 2, 'reopening a room restarts its polling when the read cannot start at once');
+});
+
+test('a saved room send that the frontend no longer runs does not keep the composer locked', () => {
+  const source = read('room_view.zig');
+  const stubs = {
+    draft: `    fn draft(_: *View, buffer: []u16) ?[]const u16 {
+        if (w.composer_len == 0 or w.composer_len >= buffer.len) return null;
+        @memcpy(buffer[0..w.composer_len], w.composer_text[0..w.composer_len]);
+        return buffer[0..w.composer_len];
+    }`,
+  };
+  run(`
+const std = @import("std");
+const w = struct {
+    pub const BOOL = i32;
+    pub const HANDLE = ?*anyopaque;
+    pub const RECT = extern struct { left: i32, top: i32, right: i32, bottom: i32 };
+    var composer_text: [256]u16 = @splat(0);
+    var composer_len: usize = 0;
+    fn compose(value: []const u16) void {
+        @memcpy(composer_text[0..value.len], value);
+        composer_len = value.len;
+    }
+    pub fn GetWindowTextLengthW(_: HANDLE) i32 { return @intCast(composer_len); }
+    pub fn GetWindowTextW(_: HANDLE, buffer: [*]u16, count: i32) i32 {
+        if (count <= 0) return 0;
+        const length = @min(composer_len, @as(usize, @intCast(count)));
+        @memcpy(buffer[0..length], composer_text[0..length]);
+        return @intCast(length);
+    }
+    pub fn InvalidateRect(_: HANDLE, _: ?*const RECT, _: BOOL) BOOL { return 1; }
+};
+const Member = struct { id: []const u8 };
+const ViewModel = struct {
+    room_id: []const u8,
+    name: []const u16 = &.{},
+    revision: u64 = 0,
+    members: []const Member = &.{},
+    candidates: []const Member = &.{},
+    messages: []const u8 = &.{},
+};
+var sent: usize = 0;
+var working = true;
+var context: u8 = 0;
+fn onSubmit(_: *anyopaque, _: ActionToken, _: []const u8, _: u64, _: []const u16) ActionResult { sent += 1; return .pending; }
+fn onEntry(_: *anyopaque, _: ActionToken, _: []const u16, _: []const []const u8) ActionResult { return .failed; }
+fn onEdit(_: *anyopaque, _: ActionToken, _: []const u8, _: u64, _: []const u16, _: []const []const u8) ActionResult { return .failed; }
+fn onRestart(_: *anyopaque, _: ActionToken, _: []const u8, _: []const u8) ActionResult { return .failed; }
+fn stillWorking(_: *anyopaque, _: ActionToken) bool { return working; }
+const callbacks = Callbacks{ .context = &context, .create = onEntry, .edit = onEdit, .submit = onSubmit, .restart = onRestart, .still_working = stillWorking };
+${roomView.view({ source, stub: stubs })}
+test "a send the frontend still runs keeps the composer waiting" {
+    const room = ViewModel{ .room_id = "room-a", .revision = 4 };
+    var view = View{ .model = &room, .callbacks = callbacks };
+    try std.testing.expect(view.setModel(&room));
+    w.compose(std.unicode.utf8ToUtf16LeStringLiteral("First room message"));
+    view.submit();
+    try std.testing.expectEqual(@as(usize, 1), sent);
+    working = true;
+    w.compose(std.unicode.utf8ToUtf16LeStringLiteral("Second room message"));
+    view.submit();
+    try std.testing.expectEqual(@as(usize, 1), sent);
+    try std.testing.expectEqual(ActionResult.failed, view.result.?);
+    working = false;
+    view.submit();
+    try std.testing.expectEqual(@as(usize, 2), sent);
+}
+`, { 'diagnostics.zig': 'pub fn syncLog(_: []const u8) void {}\n' });
+});
+
 test('shown-name mentions support spaces, case, legacy aliases and reject ambiguous names', () => {
   run(`
 const std = @import("std");

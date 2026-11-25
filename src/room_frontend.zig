@@ -1521,6 +1521,11 @@ fn commandVisible(item: *const PendingCommand) bool {
     return if (item.kind == .create) front == .create else front == .selected and std.mem.eql(u8, &front.selected.room_id, &item.room_id);
 }
 
+fn stillWorking(_: *anyopaque, token: room_view.ActionToken) bool {
+    const item = pending_command orelse return false;
+    return item.evidence == null and std.meta.eql(item.token, token);
+}
+
 fn replyPending(item: *const OwnedModel) bool {
     for (item.human_events.items) |human| {
         for (human.recipients) |recipient| {
@@ -1636,6 +1641,8 @@ fn finishCommand(c: *rooms.Controller, completion: rooms.Completion, fresh: bool
         .pending => return,
     }
     const visible = fresh and commandVisible(item);
+    var outcome: [192]u8 = undefined;
+    diagnostics.syncLog(std.fmt.bufPrint(&outcome, "[rooms] command finished kind={s} state={s} fresh={} visible={}", .{ @tagName(item.kind), @tagName(state), fresh, visible }) catch unreachable);
     if (state == .accepted and item.kind == .post) {
         dropSubmittedDraft(item);
     }
@@ -1837,7 +1844,11 @@ pub fn pollTimer(id: usize) bool {
     if (id != TIMER_ROOM) return false;
     pollStoreDiscovery();
     defer if (storeDiscoveryPending()) armPoll();
-    const c = if (controller) |*value| value else { _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); return true; };
+    const c = if (controller) |*value| value else {
+        if (pending_command != null) diagnostics.syncLog("[rooms] room polling stopped with a pending command and no controller");
+        _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM);
+        return true;
+    };
     const completion = c.poll() orelse { if (!startSnapshot(c) and !scheduleMetadata(c)) _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); return true; };
     if (completion == .pending) return true;
     const current_route = configuredRoute(route_slot);
@@ -1993,7 +2004,10 @@ pub fn pollTimer(id: usize) bool {
                 }
                 if (front == .selected and owned_model != null and c.has_host_uuid and std.mem.eql(u8, &front.selected.store.store_uuid, &c.host_uuid) and std.mem.eql(u8, owned_model.?.value.room_id, &front.selected.room_id)) selection_waiting = true;
             }
-            if (!startSnapshot(c) and !nextStatus(c) and !scheduleMetadata(c)) _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM);
+            if (!startSnapshot(c) and !nextStatus(c) and !scheduleMetadata(c)) {
+                if (pending_command != null) diagnostics.syncLog("[rooms] room polling stopped with a pending command");
+                _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM);
+            }
         },
     }
     return true;
@@ -2208,11 +2222,29 @@ fn rejectPost(reason: []const u8, message: []const u8) room_view.ActionResult {
     return .failed;
 }
 
+fn resumeSavedSend(c: *rooms.Controller) bool {
+    const item = pending_command orelse return false;
+    if (item.kind != .post or item.evidence != null or item.awaiting_launch or c.job != null or commandScope(item.location) == null) return false;
+    diagnostics.syncLog("[rooms] resending the saved message the room never confirmed");
+    c.launchPrepared(item.kind, &item.id, &item.room_id, item.revision) catch return false;
+    _ = w.SetTimer(app_state.g_main_hwnd, TIMER_ROOM, 250, null);
+    return true;
+}
+
 fn beginPost(token: room_view.ActionToken, room_id: []const u8, revision: u64, value: []const u16) room_view.ActionResult {
     if (!enabled or !created) return rejectPost("view_unavailable", "Rooms are not ready. Reopen the room and try again.");
     if (front != .selected or room_id.len != 36) return rejectPost("room_not_selected", "Open the room before sending.");
     if (revision == 0) return rejectPost("revision_missing", "This room has not loaded yet. Reopen it and try again.");
-    const c = if (controller) |*active| active else return rejectPost("controller_missing", "The room host is not ready. Reopen the room and try again.");
+    if (controller == null) {
+        if (pending_command) |stuck| if (stuck.evidence == null and stuck.kind == .post and !stuck.awaiting_launch) {
+            releaseCommandAction(stuck, false);
+            freePending(stuck);
+            beginSelectedStore();
+            return rejectPost("command_awaiting_transport", "The earlier message is still being confirmed with the room. Your draft is kept. Send it again in a moment.");
+        };
+        return rejectPost("controller_missing", "The room host is not ready. Reopen the room and try again.");
+    }
+    const c = if (controller) |*active| active else unreachable;
     if (!c.live_send or !c.room_features) {
         return rejectPost("helper_unavailable", "The room helper did not run on this server. Retry, and restart a chat on this server if it keeps failing.");
     }
@@ -2233,7 +2265,10 @@ fn beginPost(token: room_view.ActionToken, room_id: []const u8, revision: u64, v
     var picked: [room_post.max_recipients][]const u8 = undefined;
     const count = room_post.namedRecipients(text, names[0..current.bindings.items.len], &picked) orelse 0;
     if (pending_command) |item| {
-        if (item.evidence == null or item.kind != .post) return rejectPost("command_pending", "Wait for the current room action to finish, then try again.");
+        if (item.evidence == null or item.kind != .post) {
+            if (resumeSavedSend(c)) return rejectPost("command_confirming", "The earlier message is still being confirmed with the room. Your draft is kept. Send it again in a moment.");
+            return rejectPost("command_pending", "Wait for the current room action to finish, then try again.");
+        }
         const bytes = postRequest(std.heap.page_allocator, &item.location.store_uuid, &item.id, room_id, revision, text, picked[0..count]) catch |err| return rejectPost(@errorName(err), "Could not prepare this message on this computer. Try again.");
         defer std.heap.page_allocator.free(bytes);
         const matches = revision == item.revision and std.mem.eql(u8, room_id, &item.room_id) and commandScope(item.location) != null and selection_generation == item.generation and sameLocation(front.selected, .{ .store = item.location, .room_id = item.room_id }) and std.mem.eql(u8, bytes, item.request);
@@ -2443,7 +2478,9 @@ pub fn select(location: RoomLocation) void {
     if (found and front == .selected and sameLocation(front.selected, location)) {
         selection_generation +%= 1;
         selection_waiting = true;
-        if (c) |value| { _ = startSnapshot(value); } else beginSelectedStore();
+        if (c) |value| {
+            if (!startSnapshot(value)) _ = w.SetTimer(app_state.g_main_hwnd, TIMER_ROOM, 250, null);
+        } else beginSelectedStore();
         return;
     }
     if (!saveDraft()) return;
@@ -2461,7 +2498,9 @@ pub fn select(location: RoomLocation) void {
     view.focus();
     if (!found) return;
     selection_waiting = true;
-    if (c) |value| { _ = startSnapshot(value); } else beginSelectedStore();
+    if (c) |value| {
+        if (!startSnapshot(value)) _ = w.SetTimer(app_state.g_main_hwnd, TIMER_ROOM, 250, null);
+    } else beginSelectedStore();
 }
 
 pub fn cancelRestoreForUser() void {
@@ -2524,7 +2563,7 @@ pub fn restoreAfterOverlay() bool {
 pub fn init(parent: w.HANDLE) void {
     if (!enabled or created or !ui_store.bindOwner()) return;
     if (account_len > 0 and !ui_ready and !ui_dirty) _ = loadUiAccount();
-    created = view.create(parent, &model, .{ .context = &context, .create = createRoom, .edit = editRoom, .submit = submit, .restart = restart, .draft_changed = draftChanged });
+    created = view.create(parent, &model, .{ .context = &context, .create = createRoom, .edit = editRoom, .submit = submit, .restart = restart, .draft_changed = draftChanged, .still_working = stillWorking });
 }
 pub fn resize(parent: w.HANDLE) void {
     if (!enabled or !created) return;
