@@ -6769,6 +6769,83 @@ class HostWorkerDeliveryTest(AgentHostFixture, unittest.TestCase):
         self.assertFalse(worker.is_alive(), 'delivery worker must stop after becoming idle')
 
 
+class MUBO_452_FreshStartBusyTest(unittest.TestCase):
+    tmux = 'mubo-452-fresh-chat'
+    token = 'mubo_452_message_0001'
+    text = 'message typed while the fresh start reloads'
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name)
+        self.addCleanup(patch.stopall)
+        patch.object(reader, 'HOME', self.home).start()
+        patch.object(reader, 'resolve_tmux_agent', return_value=None).start()
+        patch.object(reader, 'host_owned', return_value=True).start()
+        patch.object(reader, 'host_dispatch_switch', return_value=True).start()
+        patch.object(reader, 'host_dispatch_start', return_value={'status': 'owned'}).start()
+        self.sid = str(uuid.uuid4())
+        self.delivered = []
+        self.busy = True
+        patch.object(reader, 'host_deliver', side_effect=self.deliver).start()
+        reader.host_write(reader.host_paths('claude', self.sid)['config'], dict(enabled=True, tmux=self.tmux))
+        self.write_state(fresh=True)
+        db = reader.message_store_db(self.tmux)
+        with db:
+            db.execute("INSERT OR IGNORE INTO message_chats(provider,sid,epoch,seq) VALUES ('claude',?,0,0)", (self.sid,))
+        db.close()
+
+    def write_state(self, fresh):
+        state = dict(provider='claude', sid=self.sid, tmux=self.tmux)
+        if fresh:
+            state['fresh_start'] = dict(phase='handover', started=time.time())
+        reader.host_state_write('claude', self.sid, state)
+
+    def deliver(self, provider, sid, token, attempt, epoch, text, room_scope=None):
+        if self.busy:
+            return dict(status='busy', reason='fresh_start_pending')
+        self.delivered.append(token)
+        return dict(status='sent')
+
+    def request(self, op, **values):
+        return reader.message_store_request(dict(message_protocol=1, tmux=self.tmux, provider='claude',
+                                                 sid=self.sid, op='message_' + op, **values))
+
+    def message(self):
+        return self.request('status', message_id=self.token)['message']
+
+    def age(self):
+        db = reader.message_store_db(self.tmux)
+        with db:
+            db.execute("UPDATE shared_messages SET deadline=?, created=? WHERE id=?",
+                       (time.time() - 1, time.time() - 700, self.token))
+        db.close()
+
+    def stop_ageing(self):
+        db = reader.message_store_db(self.tmux)
+        with db:
+            db.execute("UPDATE shared_messages SET created=? WHERE id=?", (time.time() - 60, self.token))
+        db.close()
+
+    def test_a_pending_fresh_start_holds_a_message_until_it_lands_exactly_once(self):
+        self.assertEqual(self.request('submit', message_id=self.token, text=self.text)['message']['state'], 'queued')
+        self.assertIsNone(self.request('dispatch')['message'])
+        self.assertEqual(self.message()['state'], 'queued')
+        self.age()
+        waiting = self.message()
+        self.assertEqual((waiting['state'], waiting['receipt']), ('queued', None))
+        self.assertIsNone(self.request('dispatch')['message'])
+        self.assertEqual(self.message()['state'], 'queued')
+        self.stop_ageing()
+        self.busy = False
+        self.write_state(fresh=False)
+        self.request('dispatch')
+        self.assertEqual(self.delivered, [self.token])
+        self.assertEqual(self.message()['state'], 'sent')
+        self.request('dispatch')
+        self.assertEqual(self.delivered, [self.token], 'the held message reached the chat twice')
+
+
 class EmptyHostedChatTest(unittest.TestCase):
     sid = 'empty-hosted-session'
     tmux = 'empty-hosted-chat'

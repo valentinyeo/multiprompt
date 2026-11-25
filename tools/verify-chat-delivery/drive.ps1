@@ -67,6 +67,7 @@ if ($Feature -eq 'antigravity-chats') {
     $plans = @(@{name='antigravity-chats'; mode='idle'; text='antigravity switch draft'})
 }
 if ($env:CHAT_WORKING_LIVE_PROOF -eq '1') { $plans = @(@{name='working-live'; mode='busy'; text='/teach Show the hosted working indicator'}, @{name='steady-live'; mode='idle'; text='Read while a reply streams'}) }
+if ($env:CHAT_FRESH_START_PROOF -eq '1') { $plans = @(@{name='fresh-start-live'; mode='busy'; text='message sent during the reload'}) }
 $queueTexts = @{a='shell queued alpha'; b='chat queued beta'; a2='shell queued alpha edited'; shellDraft='shell draft gamma'; chatDraft='chat draft delta'; agentPaste="agent report line one`nagent report line two"; suggestion='Try asking about the next step'}
 if ($env:CHAT_CANCEL_PROOF -eq '1') { $plans = @(@{name='cancel-held'; mode='busy'; text='cancel keep one'}) }
 if ($env:CHAT_RECALL_PROOF -eq '1') { $plans = @(@{name='recall-handed'; mode='idle'; text='recall keep one'}) }
@@ -561,6 +562,7 @@ foreach ($plan in $plans) {
     $isNotes = $plan.name -eq 'session-notes'
     $isSending = $env:CHAT_SENDING_PROOF -eq '1'
     $isLiveDelivery = $plan.name -eq 'live-delivery'
+    $isFreshStart = $plan.name -eq 'fresh-start-live'
     $isInstant = $plan.name -eq 'instant-chat'
     $isModel = $plan.name -eq 'model-settings'
     $isAntigravity = $plan.name -eq 'antigravity-chats'
@@ -579,12 +581,12 @@ foreach ($plan in $plans) {
         $env:USERPROFILE = "$profile/home"
         $env:HOME = "$profile/home"
         $env:MP_VERIFY_STATE = $state
-        if ($isAntigravity -or $isModel -or $isRecall -or $plan.name -in @('working-live', 'steady-live')) {
+        if ($isAntigravity -or $isModel -or $isRecall -or $isFreshStart -or $plan.name -in @('working-live', 'steady-live')) {
             $socketTemp = Join-Path ([IO.Path]::GetPathRoot($profile)) ('mp' + [guid]::NewGuid().ToString('N').Substring(0, 12))
             New-Item -ItemType Directory $socketTemp | Out-Null
             $env:MP_VERIFY_SOCKET_TEMP = $socketTemp
         }
-        if ($plan.name -in @('working-live', 'steady-live')) {
+        if ($plan.name -in @('working-live', 'steady-live', 'fresh-start-live')) {
             New-Item -ItemType Directory -Force "$profile/home/.local/state/multiprompt/agent-host", "$socketTemp/mp-agent-host-0" | Out-Null
         }
         [IO.File]::WriteAllText("$settings/ssh-path.txt", $Ssh)
@@ -652,7 +654,7 @@ foreach ($plan in $plans) {
         if ($env:CHAT_STARTUP_FAILURE_PROOF -eq '1') { $savedSession.tabs[0].csid = 'a1b2c3d4-1593-4000-8000-000000001593' }
         if ($isAntigravity -or $isModel -or $isRecall) { $savedSession.tabs[0].csid = $sid }
         if ($isAntigravity) { $savedSession.tabs[0].ccwd = '/verify/work' }
-        if ($env:CHAT_WORKING_LIVE_PROOF -eq '1') { $savedSession.tabs[0].csid = 'a1b2c3d4-1668-4000-8000-000000001668' }
+        if ($env:CHAT_WORKING_LIVE_PROOF -eq '1' -or $isFreshStart) { $savedSession.tabs[0].csid = 'a1b2c3d4-1668-4000-8000-000000001668' }
         if ($isNotes) { $savedSession.tabs[0].name = 'Mini Boss CEO' }
         if ($isHax) {
             $savedSession.tabs = @($standIn.sessions | ForEach-Object { @{kind='tmux'; name=$_; manual=$true; tmux_host=0; tmux_session=$_; cv=$false; pid=0} })
@@ -699,7 +701,9 @@ foreach ($plan in $plans) {
         $composer = Wait-For 'native Chat View composer' { $h = [ChatDeliveryDesktop]::Composer($main); if ($h -ne [IntPtr]::Zero) { $h } } 20
         [void](Wait-For 'composer typing focus' { $f = [ChatDeliveryDesktop]::Focus($main); $f[0] -eq $main.ToInt64() -and $f[1] -eq $composer.ToInt64() })
         Doctor $true
-        if ($env:CHAT_WORKING_LIVE_PROOF -eq '1') {
+        if ($env:CHAT_FRESH_START_PROOF -eq '1') {
+            . "$PSScriptRoot/fresh-start-live.ps1"
+        } elseif ($env:CHAT_WORKING_LIVE_PROOF -eq '1') {
             . "$PSScriptRoot/working-live.ps1"
         } elseif ($env:CHAT_STARTUP_FAILURE_PROOF -eq '1') {
             . "$PSScriptRoot/startup-failure.ps1"
@@ -1534,7 +1538,7 @@ foreach ($plan in $plans) {
         try {
             if (Test-Path "$settings/debug.log") { Copy-Item "$settings/debug.log" "$caseDir/debug.log"; Get-Content "$caseDir/debug.log" | Add-Content "$Evidence/debug.log" }
             if (Test-Path $state) { Copy-Item $state "$caseDir/stand-in" -Recurse -Force }
-            if (($isAntigravity -or $isModel -or $isRecall -or $plan.name -in @('working-live', 'steady-live')) -and (Test-Path "$profile/home/.local/state/multiprompt/agent-host")) { Copy-Item "$profile/home/.local/state/multiprompt/agent-host" "$caseDir/host" -Recurse -Force }
+            if (($isAntigravity -or $isModel -or $isRecall -or $isFreshStart -or $plan.name -in @('working-live', 'steady-live')) -and (Test-Path "$profile/home/.local/state/multiprompt/agent-host")) { Copy-Item "$profile/home/.local/state/multiprompt/agent-host" "$caseDir/host" -Recurse -Force }
             foreach ($file in @('agent-buffer.jsonl', 'invocations.jsonl')) {
                 $source = "$caseDir/stand-in/$file"
                 if (Test-Path $source) { Get-Content $source | Add-Content "$Evidence/$file" }
@@ -1644,6 +1648,10 @@ if ($env:CHAT_REMOTE_PROOF -eq '1') {
 }
 if ($env:CHAT_STARTUP_FAILURE_PROOF -eq '1') {
     & node "$PSScriptRoot/../chat-startup-failure-proof.cjs" $Evidence
+    exit $LASTEXITCODE
+}
+if ($env:CHAT_FRESH_START_PROOF -eq '1') {
+    & node "$PSScriptRoot/../chat-fresh-start-live-proof.mjs" $Evidence
     exit $LASTEXITCODE
 }
 if ($env:CHAT_MISSING_PROOF -eq '1') {
