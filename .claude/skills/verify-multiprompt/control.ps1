@@ -19,7 +19,7 @@ if ($shapeProof -and $Feature -ne 'chat-switch-speed') { throw 'Shape proof requ
 if ($shapeProfile -and -not $shapeProof -and $env:CHAT_SWITCH_PROOF -ne '1') { throw 'Switch profiling requires a native switching journey' }
 switch ($Feature) {
         'rooms' {
-            & "$PSScriptRoot/control-feature-rooms.ps1" -Exe $Exe -ExpectedVersion $ExpectedVersion -ExpectedHash $ExpectedHash -Evidence $Evidence
+            & "$PSScriptRoot/rooms-driver.ps1" -Exe $Exe -ExpectedVersion $ExpectedVersion -ExpectedHash $ExpectedHash -Evidence $Evidence
             return
         }
         'server-chat' {

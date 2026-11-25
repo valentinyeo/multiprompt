@@ -1,6 +1,6 @@
 # Rooms
 
-Source files: src/room*.zig, src/room_service.py, src/room_bridge.py, .claude/skills/verify-multiprompt/control-feature-rooms.ps1, .claude/skills/verify-multiprompt/rooms-*.py, .claude/skills/verify-multiprompt/rooms-desktop.cs
+Source files: src/room*.zig, src/room_service.py, src/room_bridge.py, .claude/skills/verify-multiprompt/rooms-driver.ps1, .claude/skills/verify-multiprompt/rooms-*.py, .claude/skills/verify-multiprompt/rooms-desktop.cs
 
 ## Sub-features
 
@@ -14,7 +14,7 @@ Ctrl+K **New room** (also available as Ctrl+Shift+N), enter a name, Tab into mem
 
 Dispatch `gh workflow run verify.yml --ref <branch> -f feature=rooms`. The workflow discovers this file automatically; there is no global pull-request smoke entry. Source mapping selects it for room files and its own driver only. Automatic `all` matrices omit Rooms; explicit dispatch (including manual `all`) includes it. The Rooms build profile uses `-Drooms-preview=true`, matching the shipped release feature without enabling it in other verification builds.
 
-`drive.ps1 -Feature rooms` records the desktop with the existing FFmpeg recorder and delegates through `control.ps1` to `control-feature-rooms.ps1`. Only GitHub-hosted Windows, an isolated profile, the runner-owned account Worker, WSL2 OpenSSH/tmux, FFmpeg and Tesseract are supported. The production account service runs locally with disposable credentials, a runner-only certificate and two seeded saved chats. Initial saved chats, the user SSH configuration and provider commands are fixture setup, not proof of room creation. The room transport runs plain `ssh remote-1` against the user's own SSH configuration, so the fixture writes `home/.ssh/config` for the user profile and authorizes the profile's `id_ed25519` on the runner host before launch, then proves it with a plain SSH preflight. The driver never seeds a room or sends a room command outside the app.
+`drive.ps1 -Feature rooms` records the desktop with the existing FFmpeg recorder and delegates through `control.ps1` to `rooms-driver.ps1`. Only GitHub-hosted Windows, an isolated profile, the runner-owned account Worker, WSL2 OpenSSH/tmux, FFmpeg and Tesseract are supported. The production account service runs locally with disposable credentials, a runner-only certificate and two seeded saved chats. Initial saved chats, the user SSH configuration and provider commands are fixture setup, not proof of room creation. The room transport runs plain `ssh remote-1` against the user's own SSH configuration, so the fixture writes `home/.ssh/config` for the user profile and authorizes the profile's `id_ed25519` on the runner host before launch, then proves it with a plain SSH preflight. The driver never seeds a room or sends a room command outside the app.
 
 First try Ctrl+K New room on the fresh profile, before private chat driving can warm Rooms. Then send `PRIVATE534` through each chat's real composer and copy its visible reply. The deterministic stream-json provider replaces only paid Claude; Windows input, SSH, production host, connector, room bridge, persistence and transcript loading remain real. No model calls or shared servers are used. Controlled provider gates hold replies until the driver leaves the room or restarts its owned desktop; a one-time provider error exercises failed-turn recovery.
 
