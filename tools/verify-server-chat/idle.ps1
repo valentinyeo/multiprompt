@@ -40,7 +40,7 @@ function Measure-SshIdle([string]$Name, [int]$Seconds = 210) {
 }
 function Verify-SshRecovery {
     $before = Read-SshLogins 'drop-before'
-    $owned = @(Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'count-ssh.exe' -and $_.CommandLine -match 'base64.b64decode' })
+    $owned = @(Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'count-ssh.exe' -and $_.ParentProcessId -eq $app.Id -and $_.CommandLine -match 'base64.b64decode' -and $_.CommandLine -match '(?:^|\s)remote-1(?:\s|$)' })
     if ($owned.Count -ne 1) { throw "Expected one server-chat transport before dropping the link, found $($owned.Count)" }
     $links = @(Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'ssh.exe' -and $_.ParentProcessId -eq $owned[0].ProcessId })
     if ($links.Count -ne 1) { throw 'The counting wrapper must own one real SSH process' }
