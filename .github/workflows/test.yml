@@ -77,6 +77,8 @@ jobs:
         run: node --test tools/chat-send-now.test.js
       - name: Preserve slash skill positions in agent input
         run: node --test tools/chat-host-skill-anywhere.test.js tools/chat-host-skill-unreadable.test.js
+      - name: Start a skill that arrives above a quote in a hosted chat
+        run: node --test tools/chat-skill-quote.test.js
       - name: Guard the reader runtime fingerprint
         env:
           BASE: ${{ github.event.before || '' }}
