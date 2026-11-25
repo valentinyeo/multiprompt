@@ -761,7 +761,7 @@ async function workspaceSwitchAi(ctx, flags) {
     const already = chats.filter(tab => String(tab.provider || '').toLowerCase() === target).length;
     const pending = chats.filter(tab => String(tab.provider || '').toLowerCase() !== target);
     const results = [];
-    const totals = { switched: 0, already, busy: 0, refused: 0, failed: 0 };
+    const totals = { switched: 0, already: 0, busy: 0, refused: 0, failed: 0 };
     if (chats.length === 0) {
       if (!flags.json) ctx.out(`no agent chats in workspace ${workspace.name}`);
     } else if (!flags.json) {
