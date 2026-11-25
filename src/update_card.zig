@@ -124,7 +124,7 @@ var measured_font: HANDLE = null;
 var measured_scale: i32 = 0;
 var measured_font_gen: u32 = 0;
 var measured_shown: usize = 0;
-var note_heights: [16]i32 = @splat(0);
+var note_heights: [@import("update_notes.zig").MAX_LINES]i32 = @splat(0);
 var notes_height: i32 = 0;
 var last_notes_rect: RECT = std.mem.zeroes(RECT);
 
@@ -428,8 +428,7 @@ pub fn paintSidebarUpdateCard(hdc: HANDLE, font_title: HANDLE, font_subtitle: HA
         _ = @import("win32.zig").FillRect(hdc, &thumb, brush);
         _ = DeleteObject(brush);
     }
-    var more_buf: [32]u8 = undefined;
-    const more_text: []const u8 = if (card_expanded) "Show less" else card_notes.more(&more_buf, false);
+    const more_text: []const u8 = if (card_expanded) "Show less" else "See all";
     if (cardHasToggle()) {
         var more_rect = updateCardMoreRect(card);
         drawAscii(hdc, more_text, &more_rect, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);

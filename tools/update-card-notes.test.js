@@ -9,7 +9,7 @@ function assertCardNotes(source) {
   assert.match(source, /for \(0\.\.shown\)/);
   assert.match(source, /card_notes\.line\(i\)/);
   assert.match(source, /DrawTextW/);
-  assert.match(source, /card_notes\.more\(&more_buf, false\)/);
+  assert.match(source, /if \(card_expanded\) "Show less" else "See all"/);
   assert.match(source, /\[update\] card view=\{s\} n=\{d\} first=\{s\}/);
   assert.match(source, /\[update\] card note \{d\}=\{s\}/);
   assert.match(source, /\[update\] card remaining=/);
@@ -24,7 +24,7 @@ test('release asset includes every historical version, plain lines only, and the
   const notes = releaseNotes(source, `v${versions[0]}`);
   assert.deepEqual(notes.releases.map(release => release.version), versions);
   assert.ok(Buffer.byteLength(JSON.stringify(notes)) < 1024 * 1024);
-  assert.ok(notes.releases.every(release => release.changes.every(line => /^IGSH-[1-9]\d* \S/.test(line))));
+  assert.ok(notes.releases.every(release => release.changes.every(line => /^(?:IGSH|MUBO)-[1-9]\d* \S/.test(line))));
   assert.ok(notes.releases[0].changes.length > 0);
   assert.equal(notes.version, versions[0]);
   assert.doesNotMatch(JSON.stringify(notes), /Checks and fixes, no visible change/);
@@ -93,7 +93,7 @@ test('updater stages checksum-verified notes before publishing ready, without a 
   assert.doesNotMatch(zig, /@import\("changelog.zig"\)/);
 });
 
-test('existing card uses the same growing rectangle for layout and hits, with three Unicode note rows, an expandable full list and remaining count', () => {
+test('existing card uses the same growing rectangle for layout and hits, with three Unicode note rows, an expandable full list and a See all toggle', () => {
   const card = read('src/update_card.zig');
   assertCardNotes(card);
   assert.equal((card.match(/update_release.cardNotes\(/g) || []).length, 2);
@@ -102,7 +102,7 @@ test('existing card uses the same growing rectangle for layout and hits, with th
   assert.match(card, /const bottom = client.bottom - uiScaled\(8\);\s+return \.\{ \.left = uiScaled\(8\), \.top = bottom - updateCardHeight\(\)/);
   assert.match(card, /const card = updateCardRect\(\)/);
   assert.match(card, /utf8ToUtf16Le\(&note_wide, card_notes.line\(i\)\)/);
-  const painter = card.slice(card.indexOf('const notes_rect = updateCardNotesRect(card);'), card.indexOf('var more_buf:', card.indexOf('pub fn paintSidebarUpdateCard')));
+  const painter = card.slice(card.indexOf('const notes_rect = updateCardNotesRect(card);'), card.indexOf('if (cardHasToggle())', card.indexOf('pub fn paintSidebarUpdateCard')));
   assert.match(painter, /DrawTextW\(hdc, &note_wide, @intCast\(n\), &note, DT_WORDBREAK \| DT_NOPREFIX\)/);
   assert.doesNotMatch(painter, /DT_SINGLELINE|DT_END_ELLIPSIS/);
   assert.match(card, /DT_WORDBREAK \| DT_NOPREFIX \| @import\("win32.zig"\).DT_CALCRECT/);
@@ -116,10 +116,10 @@ test('existing card uses the same growing rectangle for layout and hits, with th
     'invalid notes and filler are not displayed',
     'collapsed and expanded counts retain omitted items',
   ]) assert.ok(notes.includes(`test "${name}"`));
-  assert.match(notes, /lines: \[16\]\[512\]u8/);
+  assert.match(notes, /lines: \[MAX_LINES\]\[512\]u8/);
   assert.match(notes, /!versionNewer\(installed, release.version\) or versionNewer\(offered, release.version\)/);
   assert.match(notes, /while \(at < result.count and !versionNewer\(versions\[at\], release.version\)\)/);
-  assert.match(notes, /"and \{d\} more", \.\{rest\}/);
+  assert.match(notes, /for \(TICKET_KEYS\) \|key\| if \(std\.mem\.startsWith\(u8, text, key\)\) return key\.len/);
   const rect = card.slice(card.indexOf('pub fn updateCardRect()'), card.indexOf('fn updateCardButtonRect('));
   assert.match(rect, /\.left = uiScaled\(8\), \.top = bottom - updateCardHeight\(\), \.right = @import\("browser_pane.zig"\).SIDEBAR_W\(\) - uiScaled\(8\), \.bottom = bottom/);
   const hit = card.slice(card.indexOf('pub fn updateCardHit('), card.indexOf('var release_ready'));
@@ -143,7 +143,7 @@ test('safe-updates journey requires painted multi-version notes and screenshot f
   assert.match(suite, /GetClientRect\(\$cardProcess.MainWindowHandle/);
   assert.match(suite, /GetDpiForWindow\(\$cardProcess.MainWindowHandle/);
   assert.match(suite, /\$collapsed \| ConvertTo-Json/);
-  assert.match(suite, /Wait-CardView \$log 0 'collapsed' \$expectedNotes\[0\.\.2\] 'and 1 more'/);
+  assert.match(suite, /Wait-CardView \$log 0 'collapsed' \$expectedNotes\[0\.\.2\] 'See all'/);
   assert.match(suite, /Click-CardMore \$collapsed/);
   assert.match(suite, /'update-card-expanded\.png'/);
   assert.match(suite, /PrintWindow\(\$cardProcess.MainWindowHandle/);
@@ -166,6 +166,30 @@ test('safe-updates journey requires painted multi-version notes and screenshot f
   for (const version of ['9.8.0', '9.9.0', '9.10.0', '10.0.0']) assert.ok(fixture.includes(version));
   assert.match(fixture, /version: '9.9.0', changes: \['IGSH-2 Middle change'\]/);
   assert.match(fixture, /names.push\('release-notes.json'\)/);
+});
+
+test('the published board keys reach the card and the real release explains itself', () => {
+  const notes = read('src/update_notes.zig');
+  for (const key of ['IGSH-', 'MUBO-']) assert.ok(notes.includes(`"${key}"`), key);
+  assert.doesNotMatch(notes, /startsWith\(u8, text, "IGSH-"\)/);
+  const published = JSON.parse(read('src/testdata/mubo-577-release-notes.json'));
+  assert.equal(published.version, '0.28.1985');
+  const newest = published.releases.find(release => release.version === '0.28.1985');
+  assert.deepEqual(newest.changes, ['MUBO-243 Poteto tab points at its chat from before a clear']);
+  assert.ok(published.releases.every(release => release.changes.every(line => /^(?:IGSH|MUBO)-[1-9]\d* \S/.test(line))));
+  const month = published.releases.find(release => release.version === '0.28.1961');
+  assert.equal(month.changes.length, 4);
+  assert.match(notes, /test "MUBO-577 real published release paints change lines for an available update"/);
+});
+
+test('the real release card paints published lines and reports See all', () => {
+  const proof = read('tools/update-card-real-notes.test.js');
+  assert.match(proof, /src\/testdata\/mubo-577-release-notes\.json/);
+  assert.match(proof, /zig-out\/bin\/multiprompt\.exe/);
+  assert.match(proof, /update-card-release-proof\.ps1/);
+  assert.match(proof, /card remaining=See all/);
+  assert.match(proof, /card view=collapsed n=3 /);
+  assert.match(read('.github/workflows/test-repeat.yml'), /path: evidence\//);
 });
 
 test('unidentified legacy lines publish without a link and warn', async () => {

@@ -228,7 +228,7 @@ try {
                 Assert ($cardEvent.WaitOne(15000)) 'Card fixture did not report readiness'
                 $stagedNotes = Get-Content "$cardExe.update/release-notes.json" -Raw | ConvertFrom-Json
                 Assert ($stagedNotes.version -ceq '9.10.0') 'Staged notes version mismatch'
-                $expectedNotes = @('IGSH-5 Typing feels faster', 'IGSH-6 Chats keep your place', 'IGSH-2 Middle change', 'IGSH-1 Older change')
+                $expectedNotes = @('IGSH-5 Typing feels faster', 'MUBO-77 Chats keep your place', 'IGSH-2 Middle change', 'IGSH-1 Older change')
                 $currentReleases = @(@($stagedNotes.releases) | Where-Object { $_.version -ceq '9.10.0' })
                 $middleReleases = @(@($stagedNotes.releases) | Where-Object { $_.version -ceq '9.9.0' })
                 $olderReleases = @(@($stagedNotes.releases) | Where-Object { $_.version -ceq '9.8.0' })
@@ -236,7 +236,7 @@ try {
                 $observedNotes = @($currentReleases[0].changes[0], $currentReleases[0].changes[1], $middleReleases[0].changes[0], $olderReleases[0].changes[0])
                 for ($i = 0; $i -lt $expectedNotes.Count; $i++) { Assert ($observedNotes[$i] -ceq $expectedNotes[$i]) 'Staged note order changed' }
                 Assert ((Get-FileHash "$cardExe.update/release-notes.json" -Algorithm SHA256).Hash -eq (Get-FileHash (Join-Path $script:releaseFolder 'release-notes.json') -Algorithm SHA256).Hash) 'Staged notes differ from the signed release'
-                $collapsed = Wait-CardView $log 0 'collapsed' $expectedNotes[0..2] 'and 1 more'
+                $collapsed = Wait-CardView $log 0 'collapsed' $expectedNotes[0..2] 'See all'
                 $cardProcess.Refresh()
                 $rectangle = New-Object UpdateProof+Rect
                 Assert ([UpdateProof]::GetWindowRect($cardProcess.MainWindowHandle, [ref]$rectangle)) 'Update card window unavailable'
@@ -256,7 +256,7 @@ try {
                 try { $bitmap.Save((Join-Path $Evidence 'update-card-expanded.png')) } finally { $bitmap.Dispose() }
                 $expanded | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 (Join-Path $Evidence 'update-card-expanded.json')
                 Click-CardMore $expanded
-                $null = Wait-CardView $log $expanded.logEnd 'collapsed' $expectedNotes[0..2] 'and 1 more'
+                $null = Wait-CardView $log $expanded.logEnd 'collapsed' $expectedNotes[0..2] 'See all'
                 Passed 'update card paints ticket titles and expands with real click'
                 Passed 'signed staged notes retain expected data'
                 Select-Release 'v9.11.0'
