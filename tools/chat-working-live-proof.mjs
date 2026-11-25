@@ -32,6 +32,10 @@ function verifyCase(root, name) {
   assert.equal(observation.error, null, observation.error || 'driver failed');
   const reply = 'The hosted stand-in reply is visible.';
   assert.ok(observation.copied.includes(reply), 'Live reply missing from copied rendered transcript');
+  if (observation.text.trim().startsWith('/')) {
+    assert.ok(observation.copied.includes(observation.text), 'A sent slash command did not render as the typed command');
+    assert.ok(!observation.copied.includes('<command-message>'), 'Slash command markup leaked into the rendered transcript');
+  }
   if (steady) assert.ok(observation.copied.includes('Known history message 0.') && observation.copied.includes('Known history message 49.'), 'Seeded server history missing from the rendered transcript');
   const rows = fs.readFileSync(path.join(dir, 'stand-in', 'working-host.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
   assert.ok(rows.some(row => row.stage === 'subscribed' && row.provider === 'claude'), 'Missing production subscription');
