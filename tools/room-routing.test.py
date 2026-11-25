@@ -25,6 +25,7 @@ class FakeRuntime:
         self.events = {}
         self.fail_once = set()
         self.answer = True
+        self.reject = False
 
     def request(self, query):
         op = query['op']
@@ -43,9 +44,9 @@ class FakeRuntime:
             else:
                 self.stored[key] = query['text']
                 self.submits.append((query['sid'], key, query['text']))
-                if self.answer:
+                if self.answer and not self.reject:
                     self.reply(query['sid'], key, query['room_scope'], 'reply to ' + query['text'])
-            return {'id': 1, 'result': {'message': {'id': key}}}
+            return {'id': 1, 'result': {'message': {'id': key, 'state': 'failed' if self.reject else 'accepted'}}}
         if op == 'events_subscribe':
             rows = self.events.get(query['sid'], [])
             page = [row for row in rows if row['seq'] > query['after']]
@@ -69,6 +70,7 @@ class RoutingTest(unittest.TestCase):
             patch.start()
         self.open()
         self.host = self.bridge.execute({'op': 'capabilities'})['host_uuid']
+        self.room_features = self.bridge.execute({'op': 'capabilities', 'room_messages': 1}).get('room_features') == [1]
         self.sids = {'alpha': uid(), 'beta': uid()}
         for sid in self.sids.values():
             self.enabled[sid] = True
@@ -88,8 +90,11 @@ class RoutingTest(unittest.TestCase):
     def status(self, sid):
         return {'status': 'ok', 'provider': 'claude', 'sid': sid, 'enabled': self.enabled.get(sid, True), 'tmux': 'tmux-' + sid[:8]}
 
-    def post(self, text, recipients=()):
-        return self.bridge.execute({'op': 'post_human', 'host_uuid': self.host, 'command_id': uid(), 'room_id': self.room, 'expected_revision': self.revision, 'text': text, 'recipients': list(recipients)})
+    def post(self, text, recipients=(), features=False):
+        request = {'op': 'post_human', 'host_uuid': self.host, 'command_id': uid(), 'room_id': self.room, 'expected_revision': self.revision, 'text': text, 'recipients': list(recipients)}
+        if features and self.room_features:
+            request['room_features'] = 1
+        return self.bridge.execute(request)
 
     def sweep(self):
         return self.bridge.execute({'op': 'events', 'host_uuid': self.host, 'room_id': self.room, 'after': 0, 'limit': 200})
@@ -113,14 +118,16 @@ class RoutingTest(unittest.TestCase):
         self.assertEqual(['@beta hello'], self.sent_to('beta'))
 
     def test_each_agent_receives_messages_in_post_order_after_a_runtime_failure(self):
+        self.enabled[self.sids['beta']] = False
         first = self.post('one')
-        self.post('two')
         self.runtime.fail_once.add(first['deliveries'][1]['id'])
+        self.enabled[self.sids['beta']] = True
+        self.post('two')
         self.sweep()
         self.sweep()
         self.sweep()
-        self.assertEqual(['one', 'two'], self.sent_to('alpha'))
-        self.assertEqual(['one', 'two'], self.sent_to('beta'))
+        self.assertEqual(['one', 'two'], [text.rsplit('New message from the user:\n\n', 1)[-1] for text in self.sent_to('alpha')])
+        self.assertEqual(['one', 'two'], [text.rsplit('New message from the user:\n\n', 1)[-1] for text in self.sent_to('beta')])
 
     def test_offline_agent_receives_message_when_it_returns(self):
         self.enabled[self.sids['beta']] = False
@@ -133,8 +140,10 @@ class RoutingTest(unittest.TestCase):
         self.assertEqual(['hello'], self.sent_to('beta'))
 
     def test_agent_coming_back_mid_sweep_still_gets_messages_in_order(self):
+        self.enabled[self.sids['beta']] = False
         self.post('one')
         self.post('two')
+        self.enabled[self.sids['beta']] = True
         beta = self.sids['beta']
         answers = iter([False, True, True, True, True, True])
         original = self.status
@@ -148,7 +157,7 @@ class RoutingTest(unittest.TestCase):
         with mock.patch.object(bridge_module, 'host_status', flipping):
             self.sweep()
             self.sweep()
-        self.assertEqual(['one', 'two'], self.sent_to('beta'))
+        self.assertEqual(['one', 'two'], [text.rsplit('New message from the user:\n\n', 1)[-1] for text in self.sent_to('beta')])
 
     def test_longest_message_still_reaches_the_agent_with_context(self):
         self.post('first question')
@@ -169,12 +178,117 @@ class RoutingTest(unittest.TestCase):
         self.assertEqual(before, self.runtime.submits)
         self.assertEqual(2, len([e for e in page['events'] if e['type'] == 'agent_reply']))
 
+    def test_displayed_name_selects_stable_member_and_alias_still_works(self):
+        sent = self.post('@bEtA hello', ['beta'], features=True)
+        member = next(m for m in self.bridge.store.members(self.room) if m['alias'] == 'beta')
+        self.assertEqual([member['id']], sent['event']['recipients'])
+        self.sweep()
+        self.assertEqual([], self.sent_to('alpha'))
+        self.assertEqual(['@bEtA hello'], self.sent_to('beta'))
+        self.post('@beta again', ['beta'], features=True)
+        self.sweep()
+        self.assertEqual(2, len(self.sent_to('beta')))
+
+    def test_post_admits_without_a_history_reader(self):
+        self.post('no reader')
+        self.assertEqual(['no reader'], self.sent_to('alpha'))
+        self.assertEqual(['no reader'], self.sent_to('beta'))
+
+    def test_request_to_another_room_sweeps_offline_work_once_after_restart(self):
+        self.enabled[self.sids['beta']] = False
+        self.post('offline')
+        self.bridge.close()
+        self.open()
+        self.enabled[self.sids['beta']] = True
+        for _ in range(2):
+            self.bridge.execute({'op': 'capabilities', 'room_messages': 1})
+        self.assertEqual(['offline'], self.sent_to('beta'))
+        replies = [e for e in self.bridge.store.execute({'op': 'events', 'room_id': self.room, 'after': 0, 'limit': 200})['events'] if e['type'] == 'agent_reply']
+        self.assertEqual(2, len(replies))
+
+    def test_empty_and_failed_turns_publish_no_answer_once_and_allow_resend(self):
+        self.runtime.answer = False
+        sent = self.post('question')
+        self.sweep()
+        for delivery in sent['deliveries']:
+            member = next(m for m in self.bridge.store.members(self.room) if m['id'] == delivery['member_id'])
+            scope = dict(host_uuid=self.host, room_id=self.room, parent_event_id=sent['event']['id'], member_id=member['id'])
+            self.runtime.reply(member['provider_sid'], delivery['id'], scope, '')
+            if member['alias'] == 'beta':
+                self.runtime.events[member['provider_sid']][-1]['event']['payload']['status'] = 'failed'
+        page = self.sweep()
+        self.sweep()
+        replies = [e for e in page['events'] if e['type'] == 'agent_reply']
+        self.assertEqual(2, len(replies))
+        self.assertTrue(all('No answer' in e['text'] and 'again' in e['text'] for e in replies))
+        self.runtime.answer = True
+        self.post('question')
+        self.sweep()
+        self.assertEqual(2, len(self.sent_to('alpha')))
+        self.assertEqual(2, len(self.sent_to('beta')))
+
+    def test_failed_admission_publishes_no_answer_and_resend_uses_a_new_identity(self):
+        self.runtime.reject = True
+        first = self.post('try this')
+        self.sweep()
+        replies = [e for e in self.sweep()['events'] if e['type'] == 'agent_reply']
+        self.assertEqual(2, len(replies))
+        self.assertTrue(all('No answer' in e['text'] for e in replies))
+        self.runtime.reject = False
+        second = self.post('try this')
+        self.sweep()
+        self.assertTrue({d['id'] for d in first['deliveries']}.isdisjoint({d['id'] for d in second['deliveries']}))
+        self.assertEqual(2, len(self.sent_to('alpha')))
+        self.assertEqual(2, len(self.sent_to('beta')))
+
+    def test_host_schedule_completes_offline_work_once_without_room_requests(self):
+        import ast
+        import base64
+        import re
+        import sqlite3
+        import time
+        import types
+        outer = ast.parse((root / 'src/chat_history_reader.py').read_text())
+        source = ast.literal_eval(next(node.value for node in outer.body if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == 'READER_SOURCE' for target in node.targets)))
+        functions = [node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef) and node.name in ('host_room_sweep', 'host_room_tick')]
+        self.assertEqual(2, len(functions))
+        fixture = types.ModuleType('mubo_room_runtime')
+        fixture.runtime_request = self.runtime.request
+        fixture.host_status = self.status
+        bridge_source = (root / 'src/room_bridge.py').read_text() + '\nfrom mubo_room_runtime import runtime_request, host_status\n'
+        with tempfile.TemporaryDirectory() as home, mock.patch.dict(sys.modules, {'mubo_room_runtime': fixture}):
+            directory = Path(home) / '.local/state/multiprompt' / ('rooms-account-' + 'a' * 64)
+            directory.mkdir(mode=0o700, parents=True)
+            bridge = bridge_module.RoomBridge(directory)
+            try:
+                host = bridge.store.host_uuid
+                sid = self.sids['beta']
+                member = dict(alias='beta', display_name='Beta', host_uuid=host, provider='claude', provider_sid=sid, session_identity='claude:' + sid)
+                room = bridge.store.execute(dict(op='create', command_id=uid(), name='Offline', members=[member]))['event']['room_id']
+                bridge.store.execute(dict(op='post_human', command_id=uid(), room_id=room, expected_revision=1, text='return without a reader', recipients=[]))
+                namespace = dict(HOME=Path(home), sys=sys, re=re, sqlite3=sqlite3, time=time, ROOM_SERVICE_SOURCE=base64.b64encode((root / 'src/room_service.py').read_bytes()).decode(), ROOM_BRIDGE_SOURCE=base64.b64encode(bridge_source.encode()).decode())
+                exec(compile(ast.Module(body=functions, type_ignores=[]), '<room-host-schedule>', 'exec'), namespace)
+                self.enabled[sid] = False
+                namespace['host_room_sweep'](sid)
+                self.assertEqual([], self.sent_to('beta'))
+                self.enabled[sid] = True
+                for _ in range(2):
+                    session = {}
+                    namespace['host_room_tick']('claude', sid, session)
+                    session['room_worker'].join(timeout=10)
+                    self.assertFalse(session['room_worker'].is_alive())
+                self.assertEqual(['return without a reader'], self.sent_to('beta'))
+                rows = bridge.store.db.execute("SELECT body FROM events WHERE room_id=? AND json_extract(body,'$.type')='agent_reply'", (room,)).fetchall()
+                self.assertEqual(1, len(rows))
+            finally:
+                bridge.close()
+
     def test_agents_see_the_same_ordered_conversation(self):
-        self.post('first question')
+        self.post('first question', features=True)
         self.sweep()
-        self.post('@alpha private question', ['alpha'])
+        self.post('@alpha private question', ['alpha'], features=True)
         self.sweep()
-        self.post('third question')
+        self.post('third question', features=True)
         self.sweep()
         alpha, beta = self.sent_to('alpha'), self.sent_to('beta')
         self.assertEqual(3, len(alpha))
@@ -185,7 +299,8 @@ class RoutingTest(unittest.TestCase):
         self.assertNotIn('alpha: reply to first question', alpha[1])
         self.assertTrue(alpha[1].endswith('@alpha private question'))
         self.assertIn('alpha: reply to first question', beta[1])
-        self.assertNotIn('private question', beta[1])
+        self.assertIn('User: @alpha private question', beta[1])
+        self.assertIn('alpha: reply to', beta[1])
         self.assertTrue(beta[1].endswith('third question'))
         self.bridge.close()
         self.open()

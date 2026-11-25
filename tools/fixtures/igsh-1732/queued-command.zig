@@ -1,5 +1,5 @@
 const std = @import("std");
-const Kind = enum { create, edit, post, catalog, catalog_metadata, snapshot, events, status };
+const Kind = enum { create, edit, post, catalog, catalog_metadata, snapshot, events, status, members };
 const Pending = struct {
     awaiting_launch: bool = true,
     kind: Kind = .post,
@@ -152,7 +152,7 @@ test "launch failure frees pending action and schedules durable recovery" {
     try std.testing.expectEqual(@as(usize, 1), action_failed);
     try std.testing.expectEqual(@as(usize, 1), disposed);
 }
-test "interrupted metadata and status reads remain eligible for refresh" {
+test "interrupted metadata and member reads remain eligible for refresh" {
     var item = Pending{};
     reset(&item);
     metadata_read = .{};
@@ -160,10 +160,10 @@ test "interrupted metadata and status reads remain eligible for refresh" {
     try std.testing.expect(rows[0].metadata_state == .queued);
     try std.testing.expect(metadata_read == null);
     item.awaiting_launch = true;
-    try std.testing.expect(launchQueuedCommand(&controller.?, .{ .failed = .{ .kind = .status } }, true));
+    try std.testing.expect(launchQueuedCommand(&controller.?, .{ .failed = .{ .kind = .members } }, true));
     try std.testing.expectEqual(@as(usize, 1), candidate_scan);
     item.awaiting_launch = true;
     status_generation = 0;
-    try std.testing.expect(launchQueuedCommand(&controller.?, .{ .failed = .{ .kind = .status } }, true));
+    try std.testing.expect(launchQueuedCommand(&controller.?, .{ .failed = .{ .kind = .members } }, true));
     try std.testing.expectEqual(@as(usize, 1), candidate_scan);
 }

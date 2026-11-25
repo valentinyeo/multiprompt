@@ -78,6 +78,28 @@ class RoomServiceTest(unittest.TestCase):
         self.assertEqual(2, len(self.store.execute(self.post(r'Email a@example.org and \@alice', []))['deliveries']))
         self.assertEqual(2, len(self.store.execute(self.post('@alice and @bob', ['alice', 'bob']))['deliveries']))
 
+    def test_shown_names_with_spaces_and_unicode_select_stable_members(self):
+        self.store.execute(self.edit([{**self.alice, 'display_name': 'Straße Research'}, self.bob]))
+        alice_id = next(member['id'] for member in self.snapshot()['members'] if member['alias'] == 'alice')
+        for mention in ('@STRASSE RESEARCH hello', '@straße research hello', '@ALICE hello'):
+            result = self.store.execute({**self.post(mention, [], revision=2), 'room_features': 1})
+            self.assertEqual([alice_id], result['event']['recipients'])
+            self.assertEqual({'id', 'room_id', 'seq', 'type', 'text', 'revision', 'recipients'}, set(result['event']))
+        self.error('invalid_mentions', {**self.post('@STRASSE RESEARCH hello', ['bob'], revision=2), 'room_features': 1})
+        self.error('invalid_mentions', self.post('@ALICE hello', ['alice'], revision=2))
+
+    def test_removing_members_cancels_capability_gated_delivery_work(self):
+        sent = self.store.execute({**self.post('Hello', []), 'room_features': 1})
+        self.assertEqual(['pending', 'pending'], [delivery['status'] for delivery in self.deliveries()])
+        self.store.execute(self.edit([]))
+        self.assertEqual(['cancelled', 'cancelled'], [delivery['status'] for delivery in self.deliveries()])
+        self.error('invalid_scope', dict(op='delivery_work', room_id=self.room, delivery_id=sent['deliveries'][0]['id']))
+
+    def test_ambiguous_shown_names_never_choose_an_arbitrary_member(self):
+        self.store.execute(self.edit([{**self.alice, 'display_name': 'Same Name'}, {**self.bob, 'display_name': 'Same Name'}]))
+        self.error('ambiguous_mentions', {**self.post('@same name hello', [], revision=2), 'room_features': 1})
+        self.assertEqual([], self.deliveries())
+
     def test_membership_cancellation_and_scoped_reply(self):
         sent = self.store.execute(self.post('Hello', []))
         members = {m['alias']: m['id'] for m in self.snapshot()['members']}

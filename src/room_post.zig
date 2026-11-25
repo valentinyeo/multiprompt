@@ -47,6 +47,42 @@ pub fn recipients(message: []const u8, active: []const []const u8, out: *[max_re
     return count;
 }
 
+pub const Recipient = struct { alias: []const u8, display_name: []const u8 };
+
+pub fn namedRecipients(message: []const u8, active: []const Recipient, out: *[max_recipients][]const u8) ?usize {
+    var count: usize = 0;
+    var at: usize = 0;
+    while (at < message.len) : (at += 1) {
+        if (message[at] != '@' or (at > 0 and blocksMention(message[at - 1]))) continue;
+        const rest = message[at + 1 ..];
+        var matched: ?[]const u8 = null;
+        var length: usize = 0;
+        var ambiguous = false;
+        for (active) |member| {
+            for ([_][]const u8{ member.alias, member.display_name }) |name| {
+                if (name.len == 0 or name.len > rest.len or !std.ascii.eqlIgnoreCase(name, rest[0..name.len])) continue;
+                if (name.len < rest.len and (aliasByte(rest[name.len]) or rest[name.len] >= 0x80)) continue;
+                if (name.len > length) {
+                    matched = member.alias;
+                    length = name.len;
+                    ambiguous = false;
+                } else if (name.len == length and matched != null and !std.mem.eql(u8, matched.?, member.alias)) ambiguous = true;
+            }
+        }
+        const alias = matched orelse return null;
+        if (ambiguous) return null;
+        var seen = false;
+        for (out[0..count]) |old| if (std.mem.eql(u8, old, alias)) { seen = true; break; };
+        if (!seen) {
+            if (count == max_recipients) return null;
+            out[count] = alias;
+            count += 1;
+        }
+        at += length;
+    }
+    return count;
+}
+
 test "post text rejects blank, oversize and NUL" {
     try std.testing.expect(validText("hello"));
     try std.testing.expect(!validText(""));

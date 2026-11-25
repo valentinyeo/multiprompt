@@ -35,7 +35,9 @@ One logical chat address, at most two pending switch requests, five successful s
 
 ## Coverage and sync
 
-Last reviewed source/model sync commit is `6572511ca37a48b58bc6cc88d0fa4898d2bf4d71`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
+Last reviewed source/model sync commit is `9d974f31047f8b72e94307da6c6b41f094b8c0fa`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
+
+MUBO-533 makes desktop rooms reliable. In `src/chat_history_reader.py` it adds `host_room_sweep` and `host_room_tick`, calls the tick once at the top of `host_loop`'s poll loop, adds a `room_features` list to the handshake reply in `host_handle_request` and adds the `--rooms` flag to `host_cli` status. All twelve covered `host_switch_*`, `host_usage_limit` and `host_auto_switch_*` functions are unchanged, as are the recorded provider events, probes, decisions and mutations, because a room sweep carries no turn end, no usage-limit text and moves no chat. Only the reader's whole-file hash and the sync commit move.
 
 SOFT-2681 publishes Claude's current native session and changes transcript selection. All twelve covered reader functions are unchanged from the prior sync, as are every other covered file, the model, bounds, decisions, probes and mutations. Only the reader hash and sync commit move. Hosted CI must rerun the full self-test and native replay; this review does not extend the model to transcript rotation.
 

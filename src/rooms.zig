@@ -13,7 +13,7 @@ pub const Member = struct {
     session_identity: []const u8,
 };
 
-pub const RequestKind = enum { capabilities, catalog, snapshot, catalog_metadata, events, create, edit, post, status };
+pub const RequestKind = enum { capabilities, catalog, snapshot, catalog_metadata, events, create, edit, post, status, members };
 
 pub fn requestKind(kind: @import("room_journal.zig").Kind) RequestKind {
     return switch (kind) {
@@ -40,6 +40,8 @@ pub const Failure = struct {
     reason: enum { transport, timeout, cancelled, parse, remote },
     code: [64]u8 = @splat(0),
     code_len: usize = 0,
+    detail: [2048]u8 = undefined,
+    detail_len: usize = 0,
     outcome_unknown: bool = false,
 };
 pub const Completion = union(enum) {
@@ -56,6 +58,7 @@ pub const Controller = struct {
     host_uuid: [36]u8 = undefined,
     has_host_uuid: bool = false,
     live_send: bool = false,
+    room_features: bool = false,
     job: ?*transport.Job = null,
     kind: RequestKind = .capabilities,
     journal_lock: ?@import("room_journal.zig").Lock = null,
@@ -164,6 +167,11 @@ pub const Controller = struct {
         return self.launch(.events, .{ .op = "events", .host_uuid = self.host_uuid[0..], .room_id = room_id, .after = after, .limit = 100 });
     }
 
+    pub fn fetchMembers(self: *Controller) bool {
+        if (!self.has_host_uuid or !self.room_features) return false;
+        return self.launch(.members, .{ .op = "members", .host_uuid = self.host_uuid[0..], .slot = self.host });
+    }
+
     pub fn status(self: *Controller, sid: []const u8) bool {
         if (!self.has_host_uuid) return false;
         return self.launch(.status, .{ .op = "status", .host_uuid = self.host_uuid[0..], .sid = sid });
@@ -247,7 +255,7 @@ pub const Controller = struct {
             self.journal_lock = null;
         }
         const mutation = isMutation(self.kind);
-        if (!job.success) return .{ .failed = .{ .kind = self.kind, .reason = if (job.cancelled.load(.acquire)) .cancelled else if (job.timed_out) .timeout else .transport, .outcome_unknown = mutation } };
+        if (!job.success) return .{ .failed = .{ .kind = self.kind, .reason = if (job.cancelled.load(.acquire)) .cancelled else if (job.timed_out) .timeout else .transport, .detail = job.error_text, .detail_len = job.error_len, .outcome_unknown = mutation } };
         var parsed = std.json.parseFromSlice(std.json.Value, allocator, job.output[0..job.output_len], .{ .allocate = .alloc_always }) catch return .{ .failed = .{ .kind = self.kind, .reason = .parse, .outcome_unknown = mutation } };
         if (parsed.value != .object) {
             parsed.deinit();
@@ -263,6 +271,12 @@ pub const Controller = struct {
                 if (code == .string and code.string.len <= failure.code.len) {
                     failure.code_len = code.string.len;
                     @memcpy(failure.code[0..failure.code_len], code.string);
+                }
+            }
+            if (parsed.value.object.get("message")) |detail| {
+                if (detail == .string and detail.string.len <= failure.detail.len) {
+                    failure.detail_len = detail.string.len;
+                    @memcpy(failure.detail[0..failure.detail_len], detail.string);
                 }
             }
             parsed.deinit();

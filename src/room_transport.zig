@@ -2,7 +2,6 @@ const std = @import("std");
 const w = @import("win32.zig");
 const console = @import("console.zig");
 const app_state = @import("app_state.zig");
-const L = std.unicode.utf8ToUtf16LeStringLiteral;
 extern "kernel32" fn OpenThread(w.DWORD, w.BOOL, w.DWORD) callconv(w.WINAPI) w.HANDLE;
 extern "kernel32" fn CancelSynchronousIo(w.HANDLE) callconv(w.WINAPI) w.BOOL;
 
@@ -36,6 +35,8 @@ pub const Job = struct {
     request: []const u8,
     output: []u8,
     output_len: usize = 0,
+    error_text: [2048]u8 = undefined,
+    error_len: usize = 0,
     success: bool = false,
     finished: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
     thread: ?std.Thread = null,
@@ -90,6 +91,18 @@ pub fn start(job: *Job) bool {
     return true;
 }
 
+fn readErrors(job: *Job, handle: w.HANDLE) void {
+    var buffer: [4096]u8 = undefined;
+    var available: w.DWORD = 0;
+    while (w.PeekNamedPipe(handle, null, 0, null, &available, null) != 0 and available > 0) {
+        var count: w.DWORD = 0;
+        if (w.ReadFile(handle, &buffer, @min(available, buffer.len), &count, null) == 0 or count == 0) break;
+        const keep = @min(count, job.error_text.len - job.error_len);
+        @memcpy(job.error_text[job.error_len .. job.error_len + keep], buffer[0..keep]);
+        job.error_len += keep;
+    }
+}
+
 fn run(job: *Job) void {
     defer job.finished.store(true, .release);
     var cmd: [4096]u16 = undefined;
@@ -121,15 +134,19 @@ fn run(job: *Job) void {
     defer _ = w.CloseHandle(output);
     defer { if (child_output != null) _ = w.CloseHandle(child_output); }
     if (w.SetHandleInformation(input, app_state.HANDLE_FLAG_INHERIT, 0) == 0 or w.SetHandleInformation(output, app_state.HANDLE_FLAG_INHERIT, 0) == 0) return;
-    const stderr = w.CreateFileW(L("NUL"), w.GENERIC_WRITE, w.FILE_SHARE_READ | w.FILE_SHARE_WRITE, &attributes, w.OPEN_EXISTING, w.FILE_ATTRIBUTE_NORMAL, null);
-    if (stderr == w.INVALID_HANDLE_VALUE_PTR) return;
-    defer _ = w.CloseHandle(stderr);
+    var errors: w.HANDLE = null;
+    var child_errors: w.HANDLE = null;
+    if (w.CreatePipe(&errors, &child_errors, &attributes, 1 << 20) == 0) return;
+    defer _ = w.CloseHandle(errors);
+    defer { if (child_errors != null) _ = w.CloseHandle(child_errors); }
+    if (w.SetHandleInformation(errors, app_state.HANDLE_FLAG_INHERIT, 0) == 0) return;
+    defer readErrors(job, errors);
     var startup = std.mem.zeroes(w.STARTUPINFOW);
     startup.cb = @sizeOf(w.STARTUPINFOW);
     startup.dwFlags = 0x00000100;
     startup.hStdInput = child_input;
     startup.hStdOutput = child_output;
-    startup.hStdError = stderr;
+    startup.hStdError = child_errors;
     var process = std.mem.zeroes(w.PROCESS_INFORMATION);
     if (w.CreateProcessW(null, @ptrCast(&cmd), null, null, 1, 0x08000000, null, null, &startup, &process) == 0) return;
     _ = w.CloseHandle(process.hThread);
@@ -156,11 +173,14 @@ fn run(job: *Job) void {
     child_input = null;
     _ = w.CloseHandle(child_output);
     child_output = null;
+    _ = w.CloseHandle(child_errors);
+    child_errors = null;
     if (!writeSource(input, @embedFile("room_service.py"), &watch.expired) or !writeSource(input, @embedFile("room_bridge.py"), &watch.expired) or !writeAll(input, &job.account_digest, &watch.expired) or !writeAll(input, "\n", &watch.expired) or !writeAll(input, job.request, &watch.expired) or !writeAll(input, "\n", &watch.expired)) return;
     _ = w.CloseHandle(input);
     input = null;
     var saw_line = false;
     while (!watch.expired.load(.acquire)) {
+        readErrors(job, errors);
         var available: w.DWORD = 0;
         if (w.PeekNamedPipe(output, null, 0, null, &available, null) == 0) {
             var exit_code: w.DWORD = 1;

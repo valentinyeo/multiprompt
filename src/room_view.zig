@@ -28,6 +28,7 @@ pub const Message = struct {
     author: ?Author,
     time: []const u16,
     question_id: []const u8 = "",
+    member_id: []const u8 = "",
 };
 pub const ViewModel = struct {
     room_id: []const u8,
@@ -107,6 +108,8 @@ pub const View = struct {
     focus_target: usize = 0,
     too_small: bool = false,
     result: ?ActionResult = null,
+    error_text: [1024]u16 = undefined,
+    error_len: usize = 0,
     title_hit: w.RECT = empty_rect,
     send_hit: w.RECT = empty_rect,
     restart_hit: w.RECT = empty_rect,
@@ -199,7 +202,12 @@ pub const View = struct {
     }
 
     pub fn showUnavailable(self: *View) void {
-        self.result = .unsupported;
+        self.showError("Could not load this room. Check the server connection and try again.");
+    }
+
+    pub fn showError(self: *View, message: []const u8) void {
+        self.error_len = std.unicode.utf8ToUtf16Le(&self.error_text, message) catch 0;
+        self.result = .failed;
         self.invalidate();
     }
 
@@ -396,6 +404,7 @@ pub const View = struct {
     }
 
     fn token(self: *View, kind: ActionKind) ActionToken {
+        self.error_len = 0;
         self.serial +%= 1;
         return .{ .generation = self.generation, .serial = self.serial, .kind = kind };
     }
@@ -596,20 +605,6 @@ fn draw(view: *View, dc: w.HANDLE, bounds: w.RECT) void {
     text(dc, count_w[0..count_len], .{ .left = view.title_hit.right - view.px(26), .top = view.title_hit.top, .right = view.title_hit.right - view.px(4), .bottom = view.title_hit.bottom }, 0x8a8a8a, w.DT_SINGLELINE | w.DT_VCENTER);
     view.restart_hit = empty_rect;
     view.restart_member = null;
-    for (view.model.members) |member| if (member.presence == .offline) {
-        const bar = w.RECT{ .left = @max(view.px(16), center - view.px(380)), .top = height - view.px(122), .right = @min(width - view.px(16), center + view.px(380)), .bottom = height - view.px(78) };
-        smooth.fillRoundRect(dc, bar, view.px(8), rgb(0x5a4a1e));
-        var inner = bar;
-        inner.left += p; inner.top += p; inner.right -= p; inner.bottom -= p;
-        smooth.fillRoundRect(dc, inner, view.px(7), rgb(0x2a2210));
-        _ = w.SelectObject(dc, body);
-        text(dc, member.name, .{ .left = bar.left + view.px(12), .top = bar.top, .right = bar.right - view.px(96), .bottom = bar.bottom }, 0xf5c26b, w.DT_SINGLELINE | w.DT_VCENTER | w.DT_END_ELLIPSIS);
-        view.restart_hit = .{ .left = bar.right - view.px(90), .top = bar.top + view.px(4), .right = bar.right - view.px(8), .bottom = bar.bottom - view.px(4) };
-        view.restart_member = member.id;
-        smooth.fillRoundRect(dc, view.restart_hit, view.px(18), rgb(if (w.GetFocus() == view.hwnd and view.focus_target == 1) 0xb0b0b0 else 0xf2f2f2));
-        text(dc, L("Restart"), view.restart_hit, 0x181818, w.DT_SINGLELINE | w.DT_VCENTER | w.DT_CENTER);
-        break;
-    };
     const top = view.px(78);
     const bottom = @max(top, height - view.px(if (view.restart_member == null) 90 else 130));
     const left = @max(view.px(20), center - view.px(380));
@@ -670,7 +665,7 @@ fn draw(view: *View, dc: w.HANDLE, bounds: w.RECT) void {
     smooth.fillRoundRect(dc, view.send_hit, view.px(18), rgb(0xf2f2f2));
     text(dc, L("↑"), view.send_hit, 0x111111, w.DT_SINGLELINE | w.DT_CENTER | w.DT_VCENTER);
     if (view.picker) drawPicker(view, dc, composer, body);
-    if (view.result == .failed or view.result == .unsupported) text(dc, if (view.result == .unsupported) L("Action unavailable") else L("Action failed"), .{ .left = left, .top = height - view.px(94), .right = right, .bottom = height - view.px(76) }, 0xf5c26b, w.DT_SINGLELINE);
+    if (view.result == .failed or view.result == .unsupported) text(dc, if (view.error_len > 0) view.error_text[0..view.error_len] else L("Could not send. Check the server connection and try again."), .{ .left = left, .top = height - view.px(94), .right = right, .bottom = height - view.px(76) }, 0xf5c26b, w.DT_SINGLELINE);
 }
 
 fn matchSearch(value: []const u16, query: []const u16) bool {
@@ -764,7 +759,7 @@ fn drawDialog(view: *View, dc: w.HANDLE, bounds: w.RECT, body: w.HANDLE, heading
     const count_len = std.unicode.utf8ToUtf16Le(&count_w, count) catch 0;
     text(dc, count_w[0..count_len], view.confirm_hit, 0x181818, w.DT_SINGLELINE | w.DT_CENTER | w.DT_VCENTER);
     _ = w.SelectObject(dc, small);
-    if (view.result == .failed or view.result == .unsupported) text(dc, if (view.result == .unsupported) L("Action unavailable") else L("Check name and members, then try again"), .{ .left = left + view.px(24), .top = bottom - view.px(82), .right = left + width - view.px(24), .bottom = bottom - view.px(62) }, 0xf5c26b, w.DT_SINGLELINE | w.DT_END_ELLIPSIS);
+    if (view.result == .failed or view.result == .unsupported) text(dc, if (view.error_len > 0) view.error_text[0..view.error_len] else L("Check name and members, then try again"), .{ .left = left + view.px(24), .top = bottom - view.px(82), .right = left + width - view.px(24), .bottom = bottom - view.px(62) }, 0xf5c26b, w.DT_SINGLELINE | w.DT_END_ELLIPSIS);
 }
 
 fn drawPicker(view: *View, dc: w.HANDLE, composer: w.RECT, body: w.HANDLE) void {
@@ -779,7 +774,7 @@ fn drawPicker(view: *View, dc: w.HANDLE, composer: w.RECT, body: w.HANDLE) void 
     var count: usize = 0;
     for (view.model.members, 0..) |member, i| {
         if (count == indices.len) break;
-        if (matchSearch(member.alias, query)) {
+        if (matchSearch(member.name, query) or matchSearch(member.alias, query)) {
             indices[count] = i;
             count += 1;
         }
@@ -842,18 +837,13 @@ fn refreshHits(view: *View) void {
     const x = @divTrunc(width - composer_width, 2);
     const composer = w.RECT{ .left = x, .top = height - view.px(74), .right = x + composer_width, .bottom = height - view.px(20) };
     view.send_hit = .{ .left = composer.right - view.px(45), .top = composer.top + view.px(8), .right = composer.right - view.px(8), .bottom = composer.bottom - view.px(8) };
-    for (view.model.members) |member| if (member.presence == .offline) {
-        view.restart_member = member.id;
-        view.restart_hit = .{ .left = composer.right - view.px(90), .top = composer.top - view.px(44), .right = composer.right - view.px(8), .bottom = composer.top - view.px(8) };
-        break;
-    };
     if (!view.picker) return;
     var buffer: [65537]u16 = undefined;
     const value = view.draft(&buffer) orelse return;
     const start = mentionStart(value) orelse return;
     var indices: [64]usize = undefined;
     var count: usize = 0;
-    for (view.model.members, 0..) |member, i| if (matchSearch(member.alias, value[start + 1 ..])) {
+    for (view.model.members, 0..) |member, i| if (matchSearch(member.name, value[start + 1 ..]) or matchSearch(member.alias, value[start + 1 ..])) {
         indices[count] = i;
         count += 1;
     };
@@ -878,7 +868,7 @@ fn mentionStart(value: []const u16) ?usize {
             if (pos > 0 and value[pos - 1] != ' ' and value[pos - 1] != '\n' and value[pos - 1] != '\r') return null;
             return pos;
         }
-        if (!((c >= 'a' and c <= 'z') or (c >= '0' and c <= '9') or c == '_' or c == '-')) return null;
+        if (c == '\n' or c == '\r' or value.len - pos > 256) return null;
     }
     return null;
 }
@@ -888,8 +878,8 @@ fn chooseMention(view: *View, index: usize) void {
     var draft_buf: [65537]u16 = undefined;
     const draft = view.draft(&draft_buf) orelse return;
     const start = mentionStart(draft) orelse return;
-    var replacement: [66:0]u16 = @splat(0);
-    const alias = view.model.members[index].alias;
+    var replacement: [260:0]u16 = @splat(0);
+    const alias = view.model.members[index].name;
     if (alias.len + 2 >= replacement.len) return;
     replacement[0] = '@';
     @memcpy(replacement[1 .. 1 + alias.len], alias);

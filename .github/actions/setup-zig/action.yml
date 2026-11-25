@@ -1,5 +1,5 @@
 name: Set up Zig
-description: Restore the pinned Zig archive from cache, download it with a time limit and retries on a miss, check its checksum and add Zig to PATH.
+description: Install pinned Zig from verified cached archives, with a time-limited registry fallback when the official download stalls.
 
 inputs:
   version:
@@ -15,6 +15,12 @@ runs:
       with:
         path: ${{ runner.temp }}/zig-archive-${{ inputs.version }}
         key: ${{ runner.os }}-zig-archive-${{ inputs.version }}
+    - name: Restore verified registry archives
+      if: runner.os != 'Windows'
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+      with:
+        path: ${{ runner.temp }}/zig-registry-${{ inputs.version }}
+        key: ${{ runner.os }}-zig-registry-${{ inputs.version }}-1
     - name: Install Zig
       if: runner.os != 'Windows'
       shell: bash
@@ -31,7 +37,7 @@ runs:
         esac
         mkdir -p "$(dirname "$archive")"
         echo "$toolchain" >> "$GITHUB_PATH"
-        if [ -x "$toolchain/zig" ]; then
+        if [ -x "$toolchain/zig" ] && [ -f "$toolchain/lib/std/std.zig" ]; then
           echo "Zig $ZIG_VERSION already installed at $toolchain"
           exit 0
         fi
@@ -40,7 +46,24 @@ runs:
           rm -f "$archive"
         fi
         if [ ! -f "$archive" ]; then
-          curl -fsSL --connect-timeout 20 --max-time 240 --speed-limit 2048 --speed-time 45 --retry 3 --retry-max-time 300 "https://ziglang.org/download/$ZIG_VERSION/zig-x86_64-linux-$ZIG_VERSION.tar.xz" -o "$archive"
+          registry="$RUNNER_TEMP/zig-registry-$ZIG_VERSION"
+          if [ -f "$registry/compiler.tgz" ] || ! curl -fsSL --connect-timeout 15 --max-time 60 --speed-limit 2048 --speed-time 30 --retry 1 --retry-max-time 65 "https://ziglang.org/download/$ZIG_VERSION/zig-x86_64-linux-$ZIG_VERSION.tar.xz" -o "$archive"; then
+            rm -f "$archive"
+            mkdir -p "$registry" "$toolchain/lib"
+            fetch_package() {
+              local name="$1" expected="$2" file="$3"
+              if [ ! -f "$file" ] || [ "$(openssl dgst -sha512 -binary "$file" | openssl base64 -A)" != "$expected" ]; then
+                curl -fsSL --connect-timeout 15 --max-time 90 --retry 1 --retry-max-time 100 "https://registry.npmjs.org/@zigc/$name/-/$name-$ZIG_VERSION.tgz" -o "$file"
+              fi
+              [ "$(openssl dgst -sha512 -binary "$file" | openssl base64 -A)" = "$expected" ]
+            }
+            fetch_package linux-x64 'zVSGKmIZb5w+ot3eDdoF7GzvICN1e6mwGIAgavDiQR0stXnJu9UgOMppcIKqP5fG5ecsH6jsIf9rThd3ZI/dlQ==' "$registry/compiler.tgz"
+            fetch_package lib 'btxgqPJy93rwlcypaMHLLGjvtj/t1km+KUKjlCCxKV+UpayeI1v6ybXt4/jFI3ufDKoLe9GLKTpsX8bavMEygA==' "$registry/lib.tgz"
+            tar -xzf "$registry/compiler.tgz" -C "$toolchain" --strip-components=2 package/bin/zig
+            tar -xzf "$registry/lib.tgz" -C "$toolchain/lib" --strip-components=1
+            test "$("$toolchain/zig" version)" = "$ZIG_VERSION"
+            exit 0
+          fi
         fi
         echo "$expected  $archive" | sha256sum -c -
         tar -xf "$archive" -C "$RUNNER_TEMP"

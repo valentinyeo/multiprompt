@@ -63,9 +63,9 @@ Run `feature=rooms` for the desktop gate in [Rooms](rooms.md), including fresh c
 
 | Palette row or dynamic family | User reaches it |
 | --- | --- |
-| `SEARCH_ROOM_ROW_OFFSET` | In a Rooms preview build, search Ctrl+K for the room's name. Follow `room` above. |
-| `room.edit_room_target` | In the Rooms preview build, Ctrl+K, choose **Edit room**. Follow `room` above. |
-| `room.new_room_target` | In the Rooms preview build, Ctrl+K, choose **New room**. Follow `room` above. |
+| `SEARCH_ROOM_ROW_OFFSET` | In a released desktop build, search Ctrl+K for the room's name. Follow `room` above. |
+| `room.edit_room_target` | In a released desktop build, Ctrl+K, choose **Edit room**. Follow `room` above. |
+| `room.new_room_target` | In a released desktop build, Ctrl+K, choose **New room**. Follow `room` above. |
 
 ## Gotchas
 - Offline CMD workspace proof does not cover Rooms, sync, or remote agents. Room reply checks are [diagnostic](../diagnostics/room-reply-grouping.md), not a completed desktop journey.
