@@ -756,7 +756,7 @@ pub fn sendChatPrompt() void {
         const text = text_buf[0..@intCast(text_len_i)];
         const shell = &app_state.shells[app_state.active_shell];
         const live = !@import("chat_view.zig").canToggle(shell.tmux_session[0..shell.tmux_session_len]);
-        if (shell.kind == .tmux and shell.ai_agent == 1 and chatBareClear(text)) {
+        if (live and shell.kind == .tmux and shell.ai_agent == 1 and chatBareClear(text)) {
             if (!chatTmuxSendEligible(app_state.active_shell) or !chatTmuxSendStart(app_state.active_shell, text, 0, false, false, false)) {
                 showHeaderNoticeAscii("Could not clear this chat. Try again", 4000, true);
             }
@@ -4014,6 +4014,14 @@ test "IGSH-1266 a submit that never landed is typeable again on the next tick" {
 
 fn chatBareClear(text: []const u16) bool {
     return std.mem.eql(u16, std.mem.trim(u16, text, &.{ ' ', '\t', '\r', '\n' }), std.unicode.utf8ToUtf16LeStringLiteral("/clear"));
+}
+
+test "MUBO-136 only a bare clear uses the host control" {
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    try std.testing.expect(chatBareClear(w("/clear")));
+    try std.testing.expect(chatBareClear(w(" /clear \r\n")));
+    try std.testing.expect(!chatBareClear(w("/clear keep notes")));
+    try std.testing.expect(!chatBareClear(w("please /clear")));
 }
 
 fn chatTmuxSendEligible(idx: u32) bool {
