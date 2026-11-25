@@ -5497,6 +5497,13 @@ class MUBO_221_AntigravityHistoryRetentionTest(unittest.TestCase):
             time.sleep(0.05)
         self.fail('timed out waiting for the antigravity host; ' + self.evidence())
 
+    def lock_free(self):
+        handle = reader.host_lock(self.provider, self.sid)
+        if handle is None:
+            return False
+        handle.close()
+        return True
+
     def send(self):
         store = dict(message_protocol=1, provider=self.provider, sid=self.sid, tmux=self.tmux)
         token = 'mubo221' + uuid.uuid4().hex
@@ -5543,7 +5550,7 @@ class MUBO_221_AntigravityHistoryRetentionTest(unittest.TestCase):
         token = self.send()
         self.read()
         reader.host_stop(self.provider, self.sid, force=True)
-        self.wait_for(lambda: not reader.host_owned(self.provider, self.sid))
+        self.wait_for(lambda: not reader.host_owned(self.provider, self.sid) and self.lock_free())
         self.paths()['history'].unlink()
         state = reader.host_read(self.paths()['state']) or {}
         state.pop('display_history', None)
