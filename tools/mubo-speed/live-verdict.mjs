@@ -7,6 +7,11 @@ import { fileURLToPath } from 'node:url';
 const BAR_MB_PER_HOUR = 1;
 const MIN_WINDOWS_PER_SIDE = 3;
 
+const SCENARIOS = [
+  { id: 'live', title: 'three live chats, nothing new arriving' },
+  { id: 'stream', title: 'three live chats, a reply streaming into all three' },
+];
+
 function walk(dir, found = []) {
   if (!fs.existsSync(dir)) return found;
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -30,6 +35,7 @@ function fixed(value, digits) {
 
 function side(runs) {
   const measured = runs.filter((run) => run.status === 'measured');
+  const pick = (key) => measured.map((run) => run[key] ?? 0);
   return {
     runs,
     windows: runs.length,
@@ -41,16 +47,18 @@ function side(runs) {
     cpuMin: measured.length ? Math.min(...measured.map((run) => run.cpuPercentOfOneCore)) : null,
     cpuMax: measured.length ? Math.max(...measured.map((run) => run.cpuPercentOfOneCore)) : null,
     bytes: median(measured.map((run) => run.logBytesDelta)),
-    statusSnapshots: median(measured.map((run) => run.windowStatusSnapshots ?? 0)),
-    paintLines: median(measured.map((run) => run.windowChatPaintLines ?? 0)),
-    transcriptReads: median(measured.map((run) => run.transcriptReads ?? 0)),
+    statusSnapshots: median(pick('windowStatusSnapshots')),
+    paintLines: median(pick('windowChatPaintLines')),
+    transcriptReads: median(pick('windowTranscriptReads')),
+    paints: median(pick('windowReceiveToPaint')),
+    streamEvents: median(pick('streamEvents')),
   };
 }
 
-export function verdict(runs, before, after) {
+function scenarioVerdict(runs, scenario, before, after) {
   const byTag = { [before]: [], [after]: [] };
   for (const run of runs) {
-    if (run.scenario !== 'live') continue;
+    if (run.scenario !== scenario) continue;
     if (run.tag !== before && run.tag !== after) continue;
     byTag[run.tag].push(run);
   }
@@ -58,8 +66,8 @@ export function verdict(runs, before, after) {
   const failures = [];
   for (const [name, tag] of [['before', before], ['after', after]]) {
     const data = sides[name];
-    if (data.windows < MIN_WINDOWS_PER_SIDE) failures.push(`${tag} has ${data.windows} idle windows; at least ${MIN_WINDOWS_PER_SIDE} are required`);
-    if (data.measured !== data.windows) failures.push(`${tag} has ${data.windows - data.measured} invalid window(s)`);
+    if (data.windows < MIN_WINDOWS_PER_SIDE) failures.push(`${tag} has ${data.windows} ${scenario} windows; at least ${MIN_WINDOWS_PER_SIDE} are required`);
+    if (data.measured !== data.windows) failures.push(`${tag} has ${data.windows - data.measured} invalid ${scenario} window(s)`);
   }
   const base = sides.before;
   const head = sides.after;
@@ -72,24 +80,48 @@ export function verdict(runs, before, after) {
       failures.push(`after CPU ${fixed(head.cpu, 3)}% (up to ${fixed(head.cpuMax, 3)}%) is inside the before range ${fixed(base.cpuMin, 3)}-${fixed(base.cpuMax, 3)}%, so CPU shows no measurable difference`);
     }
   }
-  return { sides, failures, pass: failures.length === 0 };
+  return { scenario, sides, failures, pass: failures.length === 0 };
+}
+
+export function verdict(runs, before, after) {
+  const scenarios = SCENARIOS.map((entry) => scenarioVerdict(runs, entry.id, before, after));
+  const failures = [];
+  for (const result of scenarios) {
+    const seen = result.sides.before.windows + result.sides.after.windows;
+    if (seen === 0) failures.push(`no ${result.scenario} windows in this evidence set`);
+    for (const failure of result.failures) failures.push(`${result.scenario}: ${failure}`);
+  }
+  return { scenarios, failures, pass: failures.length === 0 };
+}
+
+function renderScenario(lines, result) {
+  const before = result.sides.before;
+  const after = result.sides.after;
+  const entry = SCENARIOS.find((row) => row.id === result.scenario);
+  lines.push(`### ${entry ? entry.title : result.scenario}`);
+  lines.push('');
+  lines.push('| release | windows | median MB/hour | MB/hour range | median CPU % of one core | CPU % range | transcript reads per window | receive-to-paint per window | reply events per window |');
+  lines.push('| --- | --- | --- | --- | --- | --- | --- | --- | --- |');
+  for (const data of [before, after]) {
+    lines.push(`| ${data.runs[0]?.tag ?? 'n/a'} | ${data.windows} (${data.measured} measured) | ${fixed(data.mbPerHour, 3)} | ${fixed(data.mbMin, 3)}-${fixed(data.mbMax, 3)} | ${fixed(data.cpu, 3)} | ${fixed(data.cpuMin, 3)}-${fixed(data.cpuMax, 3)} | ${fixed(data.transcriptReads, 0)} | ${fixed(data.paints, 0)} | ${fixed(data.streamEvents, 0)} |`);
+  }
+  lines.push('');
+  for (const run of before.runs.concat(after.runs)) {
+    lines.push(`- ${run.tag} ${run.scenario} window ${run.windowSeconds} s: log ${fixed(run.logMbPerHour, 3)} MB/hour, CPU ${fixed(run.cpuPercentOfOneCore, 3)}% of one core, ${run.chatTabs ?? 'n/a'} live chats, ${run.windowTranscriptReads ?? 'n/a'} transcript reads, ${run.windowReceiveToPaint ?? 'n/a'} paints, ${run.windowChatPaintLines ?? 'n/a'} chat paint log lines, status ${run.status}${run.error ? ` (${run.error})` : ''}`);
+  }
+  lines.push('');
+  lines.push(result.pass ? `${result.scenario.toUpperCase()} PASSED` : `${result.scenario.toUpperCase()} FAILED`);
+  for (const failure of result.failures) lines.push(`  ${failure}`);
+  lines.push('');
 }
 
 export function render(result, before, after) {
   const lines = [];
   lines.push('## MUBO-17 idle log growth and processor use, three live chats open');
   lines.push('');
-  lines.push('| release | windows | median MB/hour | MB/hour range | median CPU % of one core | CPU % range | status snapshots per window | chat paint lines per window |');
-  lines.push('| --- | --- | --- | --- | --- | --- | --- | --- |');
-  for (const [name, tag] of [['before', before], ['after', after]]) {
-    const data = result.sides[name];
-    lines.push(`| ${tag} | ${data.windows} (${data.measured} measured) | ${fixed(data.mbPerHour, 3)} | ${fixed(data.mbMin, 3)}-${fixed(data.mbMax, 3)} | ${fixed(data.cpu, 3)} | ${fixed(data.cpuMin, 3)}-${fixed(data.cpuMax, 3)} | ${fixed(data.statusSnapshots, 0)} | ${fixed(data.paintLines, 0)} |`);
-  }
+  lines.push(`Before ${before}, after ${after}. Each window is the released app left alone with three live chats restored into the chat view.`);
   lines.push('');
-  for (const run of result.sides.before.runs.concat(result.sides.after.runs)) {
-    lines.push(`- ${run.tag} ${run.scenario} window ${run.windowSeconds} s: log ${fixed(run.logMbPerHour, 3)} MB/hour, CPU ${fixed(run.cpuPercentOfOneCore, 3)}% of one core, ${run.chatTabs ?? 'n/a'} live chats, ${run.transcriptReads ?? 'n/a'} transcript reads, ${run.windowStatusSnapshots ?? 'n/a'} snapshots in window, status ${run.status}${run.error ? ` (${run.error})` : ''}`);
-  }
-  lines.push('');
+  for (const scenario of result.scenarios) renderScenario(lines, scenario);
   lines.push(result.pass ? 'MUBO-17 IDLE LIVE PASSED' : 'MUBO-17 IDLE LIVE FAILED');
   for (const failure of result.failures) lines.push(`  ${failure}`);
   return lines.join('\n');

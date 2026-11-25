@@ -2,7 +2,7 @@ param(
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$Evidence,
     [Parameter(Mandatory=$true)][string]$Tag,
-    [ValidateSet('bare', 'chat', 'live')][string]$Scenario = 'bare',
+    [ValidateSet('bare', 'chat', 'live', 'stream')][string]$Scenario = 'bare',
     [string]$SshPath = '',
     [int]$IdleSeconds = 660,
     [int]$SettleSeconds = 40
@@ -22,7 +22,7 @@ $env:MULTIPROMPT_NO_LOGIN = '1'
 $env:ZIGSHELL_DEBUG = '1'
 $env:IGSH_246 = '1'
 New-Item -ItemType Directory -Force $root, $env:APPDATA, $env:LOCALAPPDATA, $env:USERPROFILE | Out-Null
-if ($Scenario -eq 'live') {
+if ($Scenario -eq 'live' -or $Scenario -eq 'stream') {
     if (-not $SshPath) { throw 'The live scenario needs -SshPath pointing at the boundary launcher' }
     $env:MP_VERIFY_STATE = Join-Path $root 'state'
     $env:MP_VERIFY_PYTHON = (Get-Command python.exe).Source
@@ -38,11 +38,17 @@ $eventName = 'Local\MultipromptIdle-' + [guid]::NewGuid().ToString('N')
 $ready = [Threading.EventWaitHandle]::new($false, [Threading.EventResetMode]::ManualReset, $eventName)
 $job = [VerifyJob]::new()
 $process = $null
+$streamProcess = $null
 function Read-LogText {
     if (-not (Test-Path $logPath)) { return '' }
     $stream = [IO.File]::Open($logPath, 'Open', 'Read', ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
     $reader = [IO.StreamReader]::new($stream)
     try { $reader.ReadToEnd() } finally { $reader.Dispose() }
+}
+function Read-StreamEvents {
+    $file = Join-Path $evidencePath 'stream-count.json'
+    if (-not (Test-Path $file)) { return 0 }
+    try { return [int](Get-Content $file -Raw | ConvertFrom-Json).events } catch { return 0 }
 }
 function Measure-Log {
     $total = 0L
@@ -109,6 +115,11 @@ $result = [ordered]@{
     chatPaintLines = $null
     windowStatusSnapshots = $null
     windowChatPaintLines = $null
+    windowTranscriptReads = $null
+    windowTranscriptRequests = $null
+    windowReceiveToPaint = $null
+    streamEvents = $null
+    streamSeconds = $null
     sha256 = $null
     exeVersion = $null
     error = $null
@@ -120,7 +131,7 @@ try {
     $bytes = $null
     if (-not $result.exeVersion) { throw 'Executable version marker missing' }
     New-Item -ItemType Directory -Force $settings | Out-Null
-    if ($Scenario -eq 'live') {
+    if ($Scenario -eq 'live' -or $Scenario -eq 'stream') {
         & python "$PSScriptRoot/live-chat-fixture.py" $root (Resolve-Path $SshPath).Path
         if ($LASTEXITCODE -ne 0) { throw 'Live chat fixture failed' }
     }
@@ -142,7 +153,7 @@ try {
         [void](Wait-For 'chat view composer' { [ChatDeliveryDesktop]::Composer($main) -ne [IntPtr]::Zero } 60 250)
         $result.chatView = 'composer present after a real Alt+C'
     }
-    if ($Scenario -eq 'live') {
+    if ($Scenario -eq 'live' -or $Scenario -eq 'stream') {
         $sessionFile = Join-Path $settings 'session.json'
         $restored = Wait-For 'three restored live chats' {
             try {
@@ -156,12 +167,22 @@ try {
         [void](Wait-For 'live chat composer' { [ChatDeliveryDesktop]::Composer($main) -ne [IntPtr]::Zero } 60 250)
         [void](Wait-For 'transcript read for a live chat' { (Read-LogText) -match '\[chat\] transcript (load|push) shell=' } 90 250)
         $result.chatView = 'three live chats restored into the chat view'
+        if ($Scenario -eq 'stream') {
+            $countFile = Join-Path $evidencePath 'stream-count.json'
+            $stopFile = Join-Path $evidencePath 'stream-stop'
+            Remove-Item -Force -ErrorAction SilentlyContinue $countFile, $stopFile
+            $arguments = '-u "{0}" "{1}" {2} "{3}" "{4}"' -f (Join-Path $PSScriptRoot 'stream-reply.py'), (Join-Path $root 'state/workload.json'), ($IdleSeconds + $SettleSeconds + 120), $countFile, $stopFile
+            $streamProcess = Start-Process -FilePath (Get-Command python.exe).Source -PassThru -WindowStyle Hidden `
+                -ArgumentList $arguments -RedirectStandardOutput "$evidencePath/stream.out.log" -RedirectStandardError "$evidencePath/stream.err.log"
+            $result.chatView = 'three live chats restored while a reply streams into all three'
+        }
     }
     Write-Host "Settling for $SettleSeconds s before the idle window"
     Start-Sleep -Seconds $SettleSeconds
     $process.Refresh()
     $beforeLog = Measure-Log
     $beforeText = Read-LogText
+    $beforeStream = Read-StreamEvents
     $beforeCpu = $process.TotalProcessorTime.TotalMilliseconds
     $timer = [Diagnostics.Stopwatch]::StartNew()
     $result.series += [ordered]@{ atSeconds = 0; logBytes = $beforeLog; cpuMs = [Math]::Round($beforeCpu, 2) }
@@ -185,6 +206,16 @@ try {
     $result.chatPaintLines = [regex]::Matches($afterText, '\[chat-live\] (page|draw)|PERF\[chat\]: ').Count
     $result.windowStatusSnapshots = [regex]::Matches($window, 'chat-status-snapshot: sid=').Count
     $result.windowChatPaintLines = [regex]::Matches($window, '\[chat-live\] (page|draw)|PERF\[chat\]: ').Count
+    $result.windowTranscriptReads = [regex]::Matches($window, '\[chat\] transcript (load|push) shell=').Count
+    $result.windowTranscriptRequests = [regex]::Matches($window, '\[chat\] transcript request shell=').Count
+    $result.windowReceiveToPaint = [regex]::Matches($window, 'PERF\[chat\]: receive to paint').Count
+    if ($null -ne $streamProcess) {
+        $result.streamEvents = (Read-StreamEvents) - $beforeStream
+        Set-Content -Path (Join-Path $evidencePath 'stream-stop') -Value 'stop'
+    }
+    if ($null -ne $streamProcess -and $streamProcess.HasExited) {
+        throw "Stream appender exited during the window with $($streamProcess.ExitCode)"
+    }
     $bytesDelta = $afterLog - $beforeLog
     $cpuDelta = $afterCpu - $beforeCpu
     $minutes = $wallMs / 60000
@@ -201,14 +232,33 @@ try {
     $result.rotatedLogs = @(Get-ChildItem $settings -Filter 'debug.log*' | Where-Object { $_.Name -ne 'debug.log' } | ForEach-Object { $_.Name })
     $result.topLogTags = Get-TagHistogram $window
     $result.status = if (-not $process.HasExited -and $result.logMbPerHour -ne $null) { 'measured' } else { 'invalid' }
-    if ($Scenario -eq 'live' -and ($result.chatTabs -ne 3 -or $result.transcriptReads -lt 1)) {
+    if (($Scenario -eq 'live' -or $Scenario -eq 'stream') -and ($result.chatTabs -ne 3 -or $result.transcriptReads -lt 1)) {
         $result.status = 'invalid'
         if (-not $result.error) { $result.error = "live chats never read a transcript (tabs=$($result.chatTabs), reads=$($result.transcriptReads), snapshots=$($result.statusSnapshots))" }
+    }
+    if ($Scenario -eq 'stream') {
+        $polls = [Math]::Max($result.windowTranscriptRequests, $result.windowTranscriptReads)
+        if ($polls -lt 100 -or $result.windowReceiveToPaint -lt 20) {
+            $result.status = 'invalid'
+            if (-not $result.error) { $result.error = "the streamed reply never drove polling and paints (requests=$($result.windowTranscriptRequests), loads=$($result.windowTranscriptReads), paints=$($result.windowReceiveToPaint), events=$($result.streamEvents))" }
+        }
     }
 } catch {
     $result.error = $_.Exception.Message
     Write-Host $_.ScriptStackTrace
 } finally {
+    if ($null -ne $streamProcess) {
+        try { if (-not $streamProcess.HasExited) { Stop-Process -Id $streamProcess.Id -Force -ErrorAction Stop } } catch { Write-Host "stream appender stop failed: $($_.Exception.Message)" }
+        $countFile = Join-Path $evidencePath 'stream-count.json'
+        if (Test-Path $countFile) {
+            try {
+                $counts = Get-Content $countFile -Raw | ConvertFrom-Json
+                if ($null -eq $result.streamEvents) { $result.streamEvents = $counts.events }
+                $result.streamSeconds = $counts.seconds
+            } catch { Write-Host "stream count unreadable: $($_.Exception.Message)" }
+        }
+        $streamProcess.Dispose()
+    }
     if ($null -ne $job) { try { [void]$job.Stop() } catch { Write-Host "job stop failed: $($_.Exception.Message)" }; $job.Dispose() }
     $ready.Dispose()
     if ($null -ne $process) { $process.Dispose() }

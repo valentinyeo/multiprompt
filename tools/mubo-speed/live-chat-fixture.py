@@ -1,9 +1,11 @@
-"""Seed three live, quiet chats so an idle window exercises transcript polling.
+"""Seed three live chats so an idle window exercises transcript polling.
 
 The released app restores session.json, attaches to the tmux sessions the
 boundary fixture reports, sees a running agent for each one, and polls their
-transcripts for the whole window. The transcripts never change, so any work the
-app does in the window is idle work.
+transcripts for the whole window. With -StreamSeconds 0 the transcripts never
+change, so any work the app does in the window is idle work. With a positive
+value a reply keeps streaming into all three chats, which is the state the
+laptop sample was taken in: nothing for the user to do, a live answer arriving.
 
 Usage: python live-chat-fixture.py <sandbox-root> <ssh-path>
 """
@@ -50,4 +52,6 @@ snapshot = dict(active=1, chat=True, single_window=True, sort_auto=False,
 (state / 'workload.json').write_text(json.dumps(dict(
     sessionCount=len(names),
     transcriptBytes=sum(path.stat().st_size for path in transcripts),
-    transcripts=[str(path) for path in transcripts])), encoding='utf-8')
+    transcripts=[str(path) for path in transcripts],
+    chats=[dict(path=str(path), sid=sids[name]) for path, name in zip(transcripts, names)])), encoding='utf-8')
+
