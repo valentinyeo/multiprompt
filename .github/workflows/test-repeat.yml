@@ -101,3 +101,9 @@ jobs:
       - name: Require every CLEAN pixel test
         if: inputs.test == 'IGSH-816 CLEAN' && always()
         run: node tools/check-clean-chat-output.mjs clean-chat-output.log
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: test-repeat-evidence-${{ matrix.run }}
+          path: evidence/
+          if-no-files-found: ignore
