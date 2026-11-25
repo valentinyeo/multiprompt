@@ -5534,9 +5534,11 @@ class MUBO_221_AntigravityHistoryRetentionTest(unittest.TestCase):
         return [(row['role'], row['text'], row.get('id')) for row in rows if row.get('role') in ('user', 'assistant')]
 
     def pre_fix_source(self):
-        path = ROOT / 'tools/fixtures/MUBO-221/reader-before-host-history-claim.txt'
+        call = '    host_history_claim(provider, sid, session)\n'
+        source = (ROOT / 'src/chat_history_reader.py').read_text(encoding='utf-8')
+        self.assertEqual(source.count(call), 1, 'the host loop claim call moved; the pre-fix baseline no longer removes it')
         scope = dict(__name__='mubo221_prefix_reader')
-        exec(compile(path.read_text(encoding='utf-8'), str(path), 'exec'), scope)
+        exec(compile(source.replace(call, ''), 'reader-before-host-history-claim', 'exec'), scope)
         return scope['READER_SOURCE']
 
     def start(self):
