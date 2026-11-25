@@ -12,6 +12,14 @@ function finish(pr, masterFails = false, headStatus = 'passed', extra = {}) {
 
 const fix = { title: 'fix(settings): preserve appearance', body: 'Repro journey: `appearance`' };
 
+test('an emergency label uses the owned-journey repair rule', () => {
+  const emergency = { title: 'MUBO-235: Restore chat reachability', labels: [{ name: 'emergency' }], body: 'Repro journey: `appearance`' };
+  assert.equal(finish(emergency, true).final, 'PASS');
+  const selection = verifier.validateSelection({ features: ['sessions'] }, ['appearance', 'sessions'], emergency);
+  assert.deepEqual(selection.features, ['sessions']);
+  assert.equal(selection.bugFix, true);
+});
+
 test('a repair PR passes on its touched journey without a named repro', () => {
   for (const pr of [fix, { title: 'Settings repair', labels: [{ name: 'bug' }], body: fix.body }]) {
     for (const masterFails of [false, true]) {

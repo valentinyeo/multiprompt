@@ -3017,6 +3017,7 @@ pub fn switchToShell(idx: u32) void {
     app_state.g_browser_switch_preparing = defer_native_browser;
     defer app_state.g_browser_switch_preparing = browser_preparing_previous;
     if (idx != app_state.active_shell) {
+        @import("voice.zig").cancelDictationOnTabSwitch();
         var lbuf: [128]u8 = undefined;
         if (std.fmt.bufPrint(&lbuf, "switchToShell: {d} -> {d} restoring={} sync={} caller=0x{x}", .{ app_state.active_shell, idx, app_state.g_restoring, app_state.g_account_applying, @returnAddress() })) |l| debugLog(l) else |_| {}
     }

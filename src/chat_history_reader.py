@@ -30,7 +30,7 @@ SESSION_ID = re.compile(r"[A-Za-z0-9_-]{1,80}\Z")
 TMUX_NAME = re.compile(r"[A-Za-z0-9_.:-]{1,80}\Z")
 _COMMAND_NAME = re.compile(r"<command-name>\s*(.*?)\s*</command-name>", re.S)
 _COMMAND_ARGS = re.compile(r"<command-args>(.*?)</command-args>", re.S)
-_MENTION_WIRE_NOTE = re.compile(r"\n\n\(This line is addressed to .*? or relay it unless you are also asked\.\)\s*\Z", re.S)
+_MENTION_WIRE_NOTE = re.compile(r"\n\n\((?:This line is addressed to .*? or relay it unless you are also asked|Valentin wrote this to you\. It also mentions .*? or relay it)\.\)\s*\Z", re.S)
 _INTERRUPT_MARKERS = ("[Request interrupted by user]", "[Request interrupted by user for tool use]")
 _LOCAL_COMMAND = re.compile(r"<(local-command-stdout|local-command-stderr|local-command-caveat)>.*?</\1>", re.S)
 _SYSTEM_REMINDER = re.compile(r"^[ \t]*<system-reminder>.*?</system-reminder>[ \t]*(?:\r?\n|$)", re.S | re.M)
@@ -7205,7 +7205,18 @@ def chat_names_publish(entries):
         if not name or len(name) > 192 or any(ord(c) < 32 for c in name):
             continue
         sid = entry.get("sid")
-        known[tmux] = dict(name=name, at=now, sid=sid if isinstance(sid, str) and len(sid) <= 80 else None)
+        record = dict(name=name, at=now, sid=sid if isinstance(sid, str) and len(sid) <= 80 else None)
+        workspace = entry.get("workspace")
+        if isinstance(workspace, str):
+            workspace = workspace.strip()
+            if workspace and len(workspace) <= 64 and not any(ord(c) < 32 for c in workspace):
+                record["workspace"] = workspace
+        group = entry.get("group")
+        if isinstance(group, str):
+            group = group.strip()
+            if group and len(group) <= 64 and not any(ord(c) < 32 for c in group):
+                record["group"] = group
+        known[tmux] = record
         count += 1
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + "." + str(os.getpid()) + ".tmp")

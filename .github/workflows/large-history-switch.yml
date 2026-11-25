@@ -50,15 +50,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Release authentication failed' }
           Copy-Item released/multiprompt-x64.exe released/multiprompt.exe
           Copy-Item released/zigshell-bridge-x64.exe released/zigshell-bridge.exe
-      - name: Install fixture compiler
-        shell: pwsh
-        run: |
-          $zip = "$env:RUNNER_TEMP/zig.zip"
-          Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $zip
-          if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
-          tar -xf $zip -C $env:RUNNER_TEMP
-          if ($LASTEXITCODE -ne 0) { throw 'Zig extraction failed' }
-          "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - name: Install Zig 0.16.0
+        uses: ./.github/actions/setup-zig
       - name: Build transport fixtures only
         shell: pwsh
         run: |
