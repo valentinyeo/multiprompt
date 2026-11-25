@@ -37,7 +37,7 @@ class RuntimeFingerprintTest(unittest.TestCase):
 
     def test_every_bundled_tool_and_connector_changes_the_fingerprint(self):
         first = self.info()
-        for name in ('MP_SEND_SOURCE', 'FEEDBACK_SOURCE', 'MP_HELPER_SOURCE', 'MP_SHELL_SOURCE', 'MP_SESSIONS_SOURCE', 'MP_LAYOUT_SOURCE', 'MP_FRESH_SOURCE', 'ZSB_SOURCE'):
+        for name in ('MP_SEND_SOURCE', 'FEEDBACK_SOURCE', 'MP_HELPER_SOURCE', 'MP_SHELL_SOURCE', 'MP_SESSIONS_SOURCE', 'MP_LAYOUT_SOURCE', 'MP_FRESH_SOURCE', 'ZSB_SOURCE', 'ROOM_SERVICE_SOURCE', 'ROOM_BRIDGE_SOURCE'):
             with self.subTest(name=name):
                 bundled = name + ' = ' + repr(base64.b64encode(b'print(1)\n').decode()) + '\n' + SOURCE
                 second = self.info(bundled)

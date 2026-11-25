@@ -798,7 +798,7 @@ fn showFailure(failure: rooms.Failure) void {
 }
 
 fn scheduleDiscovery(c: *const rooms.Controller) void {
-    if (last_failure) |failure| showFailure(failure);
+    if (last_failure) |failure| showFailure(failure) else if (created and front != .hidden) view.showError("Could not discover rooms on this server. Check its connection and try again.");
     if (discovery_attempts >= 3) return;
     discovery_generation = account_generation;
     discovery_slot = route_slot;
