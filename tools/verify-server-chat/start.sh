@@ -5,6 +5,15 @@ id mpverify >/dev/null 2>&1 || useradd -m -s /bin/bash mpverify
 passwd -d mpverify >/dev/null
 install -d -m 700 -o mpverify -g mpverify /home/mpverify/.ssh
 install -m 600 -o mpverify -g mpverify "$public" /home/mpverify/.ssh/authorized_keys
+if [[ ${3:-} == idle ]]; then
+    for user in mpverify mpverify2 mpverify3; do
+        id "$user" >/dev/null 2>&1 || useradd -m -s /bin/bash "$user"
+        passwd -d "$user" >/dev/null
+        install -d -m 700 -o "$user" -g "$user" "/home/$user/.ssh" "/home/$user/.local" "/home/$user/.local/state" "/home/$user/.local/state/multiprompt"
+        install -m 600 -o "$user" -g "$user" "$public" "/home/$user/.ssh/authorized_keys"
+        runuser -u "$user" -- touch "/home/$user/.local/state/multiprompt/relay-v1"
+    done
+fi
 mkdir -p /run/sshd
 ssh-keygen -A
 cat > /tmp/mp-ci-sshd.conf <<'CONFIG'
@@ -17,7 +26,7 @@ AuthorizedKeysFile .ssh/authorized_keys
 PasswordAuthentication no
 KbdInteractiveAuthentication no
 PermitRootLogin no
-AllowUsers mpverify
+AllowUsers mpverify mpverify2 mpverify3
 UsePAM no
 LogLevel VERBOSE
 Subsystem sftp internal-sftp
