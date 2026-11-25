@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <io.h>
+#include <fcntl.h>
 
 static char root[MAX_PATH];
 static char sessions[4096];
@@ -59,6 +61,7 @@ static void clients(void) {
 }
 
 static int broker(void) {
+    _setmode(_fileno(stdout), _O_BINARY);
     char *line = malloc(16 * 1024 * 1024);
     if (!line) return 98;
     for (int i = 0; i < 2; i++) if (!fgets(line, 16 * 1024 * 1024, stdin)) { free(line); return 99; }

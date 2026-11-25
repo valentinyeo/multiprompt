@@ -2,6 +2,10 @@ name: Set up Zig
 description: Restore the pinned Zig archive from cache, download it with a time limit and retries on a miss, check its checksum and add Zig to PATH.
 
 inputs:
+  cache:
+    description: Restore the optional archive cache before downloading
+    required: false
+    default: 'true'
   version:
     description: Zig version the job must use
     required: false
@@ -11,6 +15,7 @@ runs:
   using: composite
   steps:
     - name: Restore the Zig archive
+      if: inputs.cache != 'false'
       uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
       with:
         path: ${{ runner.temp }}/zig-archive-${{ inputs.version }}
