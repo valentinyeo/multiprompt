@@ -126,7 +126,7 @@ try {
         $result.cases += @{ name = $case.name; passed = $true; detail = 'Exactly one provider receipt over real SSH and a copied rendered reply' }
     }
     if ($env:SSH_IDLE_PROOF -eq '1') {
-        Start-Sleep -Seconds 30
+        Start-Sleep -Seconds 210
         Measure-SshIdle 'idle'
         Verify-SshRecovery
     }
