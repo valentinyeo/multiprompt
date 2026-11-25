@@ -47,6 +47,8 @@ MUBO-221 merges master `91d6d9e9cb27aa29ecc58a2e8473013e0de18cc0` at `8e6e1237fb
 
 MUBO-221 reviews `1a59f4ad97899f924ca18a24a5568caf5519d134`. The reader's only change since the preceding PR head selects Neon 4 in `host_antigravity_argv`; none of the covered switch, history, usage-limit, or auto-switch functions changed. The reader hash and sync commit move, while the model, bounds, decisions, probes, and mutation controls stay unchanged. Hosted self-tests must rerun; model selection and rendered-history continuity remain separate desktop proof.
 
+MUBO-558 reviewed merged source at `f6d470f18`, which carries MUBO-525's read-only event push. It records the app version that published each runtime helper in `tools.json` and refuses to move a helper back to an older version. The publish step runs in the reader's bootstrap before any request, outside every covered switch, usage-limit and auto-switch function. The model, bounds, decisions, probes and mutations are unchanged; only the reader's whole-file hash and the sync commit move.
+
 Last reviewed source/model sync commit is `f8cbf6dff039f687f1c4145540e0162627c30e72`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
 
 SOFT-2681 publishes Claude's current native session and changes transcript selection. All twelve covered reader functions are unchanged from the prior sync, as are every other covered file, the model, bounds, decisions, probes and mutations. Only the reader hash and sync commit move. Hosted CI must rerun the full self-test and native replay; this review does not extend the model to transcript rotation.
