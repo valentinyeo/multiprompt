@@ -48,6 +48,7 @@ fn reset() void {
 }
 
 fn load(highwater: u64) *OwnedModel {
+    front = .{ .selected = .{ .room_id = test_room.* } };
     const loaded = std.heap.page_allocator.create(OwnedModel) catch unreachable;
     loaded.* = .{ .arena = std.heap.ArenaAllocator.init(std.heap.page_allocator), .value = .{ .room_id = test_room }, .highwater = highwater };
     const a = loaded.arena.allocator();

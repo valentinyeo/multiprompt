@@ -41,3 +41,62 @@ The branch’s latest [Room safety run](https://github.com/valentinyeo/multiprom
 ## Decisions
 
 Fix Root Causes moved admission off history reads and corrected installed-runtime selection. Test Behavior, Not Implementation uses real store events, a real installed runtime, host-loop functions and extracted desktop logic instead of relying on recent-send flags.
+
+## Janitor note: the fixture premise, written down before the next patch
+
+**The premise every earlier desktop room fix assumed:** the handwritten View fixture copies in
+`tools/room-creation-focus.test.js` and `tools/room-reliability.test.js` exercise the same state
+machine as production, so a green fixture means the shipped room view behaves.
+
+**Observation that contradicts it:** each production change added a member the copy did not have and
+the copy was patched afterwards, in this order: `start_failed`, then `loading` and `deferred_submit`,
+then `openingRoom`. Three same-gate failures on one premise means the premise is the defect, not the
+copies.
+
+**What replaced it:** `tools/room-view-harness.cjs` reads `src/room_view.zig` and emits the harness
+instead of a copy. Every View field is lifted verbatim, so a new field appears in every fixture with
+no edit. Every View method whose body stays inside the struct is lifted verbatim. A method that calls
+the window layer is stubbed by name, with its signature taken from production and a default return,
+unless the test supplies its own body. The harness fails, naming the method, when production adds a
+method that calls the window layer in a way it cannot default. Nothing in a fixture now restates a
+production behaviour, so a fixture cannot go green against a state machine that no longer exists.
+
+The accepted-post fixture is a frontend copy, not a View copy. Its state setup moved into `load()` so
+a test no longer depends on another test's teardown to place the reader in the room.
+
+## Room command release and receipt scope
+
+**Mechanism 1, a finished room send never releasing the view's action.** `view.submit()` refuses while
+`view.pending` is set. `finishCommand` only told the view when the command was "visible", and the
+evidence-retry path (`retryCommandEvidence`) never told it at all. A post accepted while the user was
+elsewhere, or whose journal write needed a retry, left `view.pending` set for the life of that view, so
+every later send was refused locally with `post rejected reason=command_pending` and nothing reached
+the room. Evidence: `debug.log` at a56ae6d7b has the accepted post response at 19:36:06.781 and then
+`post rejected reason=command_pending` at 19:36:23.668 and 19:36:46.661, with no room request between
+them.
+
+`releaseCommandAction` is now the only path that tells the view a command finished, and every terminal
+path calls it without asking where the user is looking. `View.completeAction` already ignores a token
+it is not holding, so releasing an older command cannot clear a newer action or the draft.
+
+**Mechanism 2, a receipt from another room being drawn into the open room.** `applyAcceptedPost` checked
+the item's room against the view and the loaded model, but not against the event the receipt carried, so
+any accepted human event with a higher seq was appended to whatever room was open. `AcceptedHuman` now
+carries the event's `room_id` and the room must match before anything is appended.
+
+Both are covered by `tools/room-reliability.test.js`: the harness compiles the production `View`, proves
+a submitted send keeps its action and draft until the completion arrives, proves an older token cannot
+release a newer action, and proves `finishCommand`, `launchQueuedCommand` and `retryCommandEvidence`
+release without a visibility test. The accepted-post fixture's third case proves a same-room read, a
+foreign-room receipt and a refusal leave the room untouched.
+
+## Still open, with the evidence that carries it
+
+- Step 4/7 at a56ae6d7b: Alpha's saved transcript holds `BROADCAST534` and `Alpha says BROADCAST534`,
+  the room store holds Alpha's delivery `8ceb9885` as written and accepted, and the room event seq 4 is
+  still `No answer. The agent did not complete a reply.` A private chat answering while the room records
+  no answer points at turn correlation in `collect_reply`, not at the composer. That needs host event
+  rows for the turn, which this branch does not have yet, so no code changed for it.
+- Step 3 at a56ae6d7b reports "Saved room message is not visible in the room" while the owner reads
+  `BROADCAST534` on the step 3 screenshot. That is a check boundary in the journey, not missing paint;
+  it belongs to the Rooms journey owner on MUBO-534 and no UI code was changed for it.

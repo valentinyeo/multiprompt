@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const roomView = require('./room-view-harness.cjs');
 
 const root = path.resolve(__dirname, '..');
 const read = name => fs.readFileSync(path.join(root, 'src', name), 'utf8');
@@ -13,18 +14,6 @@ function declaration(source, marker) {
   const end = source.indexOf('\n}', start);
   assert.notEqual(end, -1, marker);
   return source.slice(start, end + 2) + (source[end + 2] === ';' ? ';' : '');
-}
-function method(source, signature) {
-  const start = source.indexOf(signature);
-  assert.notEqual(start, -1, signature);
-  const end = source.indexOf('\n    }', start);
-  assert.notEqual(end, -1, signature);
-  return source.slice(start, end + 6);
-}
-function lineDeclaration(source, name) {
-  const match = source.match(new RegExp(`^(?:pub )?const ${name} = .+;$`, 'm'));
-  assert.ok(match, `production declaration ${name}`);
-  return match[0];
 }
 function run(source, files = {}, expectedStatus = 0) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'room-reliability-'));
@@ -232,6 +221,13 @@ test('a saved room send is shown before the room is read again', () => {
 test('a send pressed while a room opens is held for that room and never sent elsewhere', () => {
   const source = read('room_view.zig');
   const fixture = fs.readFileSync(path.join(__dirname, 'fixtures/MUBO-533/deferred-send.zig'), 'utf8');
+  const stubs = {
+    draft: `    fn draft(_: *View, buffer: []u16) ?[]const u16 {
+        if (w.composer_len == 0 or w.composer_len >= buffer.len) return null;
+        @memcpy(buffer[0..w.composer_len], w.composer_text[0..w.composer_len]);
+        return buffer[0..w.composer_len];
+    }`,
+  };
   const harness = `
 const std = @import("std");
 const w = struct {
@@ -266,10 +262,6 @@ const ViewModel = struct {
     candidates: []const Member = &.{},
     messages: []const u8 = &.{},
 };
-${['ActionResult', 'ActionKind', 'ActionToken', 'Mode'].map(name => lineDeclaration(source, name)).join('\n')}
-${declaration(source, 'pub const Callbacks = struct {')}
-${declaration(source, 'fn sameRoom(')}
-${declaration(source, 'fn validModel(')}
 var sent: usize = 0;
 var sent_room: []const u8 = "";
 var sent_revision: u64 = 0;
@@ -301,34 +293,7 @@ fn reset() void {
     sent_len = 0;
     w.compose(&.{});
 }
-const View = struct {
-    hwnd: w.HANDLE = null,
-    composer: w.HANDLE = null,
-    model: *const ViewModel,
-    callbacks: Callbacks,
-    mode: Mode = .room,
-    scroll: i32 = 0,
-    generation: u64 = 1,
-    serial: u64 = 0,
-    pending: ?ActionToken = null,
-    presented_revision: u64 = 0,
-    too_small: bool = false,
-    result: ?ActionResult = null,
-    start_failed: bool = false,
-    loading: bool = false,
-    deferred_submit: bool = false,
-    opening: [128]u8 = undefined,
-    opening_len: usize = 0,
-    error_text: [1024]u16 = undefined,
-    error_len: usize = 0,
-    selected_count: usize = 0,
-    picker: bool = false,
-    fn clearHits(_: *View) void {}
-    fn ownsFocus(_: *View) bool { return false; }
-    fn layout(_: *View) void {}
-    fn setFocus(_: *View, _: w.HANDLE) void {}
-${['pub fn setModel(', 'fn retire(', 'pub fn completeAction(', 'pub fn showLoading(', 'pub fn showError(', 'pub fn flushDeferred(', 'fn submit(', 'fn rejectSubmit(', 'fn token(', 'pub fn draft(', 'fn invalidate(', 'fn openingRoom('].map(signature => method(source, signature)).join('\n')}
-};
+${roomView.view({ source, copy: ['flushDeferred'], stub: stubs })}
 ${fixture}`;
   run(harness, { 'diagnostics.zig': 'pub fn syncLog(_: []const u8) void {}\n' });
   const alwaysSends = harness.replace('        if (w.GetWindowTextLengthW(self.composer) <= 0) return;\n', '');
@@ -337,6 +302,105 @@ ${fixture}`;
   const unscoped = harness.replace('        if (!self.openingRoom(room_id)) self.deferred_submit = false;\n', '');
   assert.notEqual(unscoped, harness);
   assert.match(run(unscoped, { 'diagnostics.zig': 'pub fn syncLog(_: []const u8) void {}\n' }, 1), /a held send never follows you into another room or back again[\s\S]*FAIL/);
+});
+
+test('a finished room send releases the action the view is holding without touching the draft', () => {
+  const source = read('room_view.zig');
+  const stubs = {
+    draft: `    fn draft(_: *View, buffer: []u16) ?[]const u16 {
+        if (w.composer_len == 0 or w.composer_len >= buffer.len) return null;
+        @memcpy(buffer[0..w.composer_len], w.composer_text[0..w.composer_len]);
+        return buffer[0..w.composer_len];
+    }`,
+  };
+  run(`
+const std = @import("std");
+const w = struct {
+    pub const BOOL = i32;
+    pub const HANDLE = ?*anyopaque;
+    pub const RECT = extern struct { left: i32, top: i32, right: i32, bottom: i32 };
+    var composer_text: [256]u16 = @splat(0);
+    var composer_len: usize = 0;
+    fn compose(value: []const u16) void {
+        @memcpy(composer_text[0..value.len], value);
+        composer_len = value.len;
+    }
+    pub fn GetWindowTextLengthW(_: HANDLE) i32 { return @intCast(composer_len); }
+    pub fn GetWindowTextW(_: HANDLE, buffer: [*]u16, count: i32) i32 {
+        if (count <= 0) return 0;
+        const length = @min(composer_len, @as(usize, @intCast(count)));
+        @memcpy(buffer[0..length], composer_text[0..length]);
+        return @intCast(length);
+    }
+    pub fn InvalidateRect(_: HANDLE, _: ?*const RECT, _: BOOL) BOOL { return 1; }
+};
+const Member = struct { id: []const u8 };
+const ViewModel = struct {
+    room_id: []const u8,
+    name: []const u16 = &.{},
+    revision: u64 = 0,
+    members: []const Member = &.{},
+    candidates: []const Member = &.{},
+    messages: []const u8 = &.{},
+};
+var sent: usize = 0;
+var context: u8 = 0;
+fn onSubmit(_: *anyopaque, _: ActionToken, _: []const u8, _: u64, _: []const u16) ActionResult { sent += 1; return .pending; }
+fn onEntry(_: *anyopaque, _: ActionToken, _: []const u16, _: []const []const u8) ActionResult { return .failed; }
+fn onEdit(_: *anyopaque, _: ActionToken, _: []const u8, _: u64, _: []const u16, _: []const []const u8) ActionResult { return .failed; }
+fn onRestart(_: *anyopaque, _: ActionToken, _: []const u8, _: []const u8) ActionResult { return .failed; }
+const callbacks = Callbacks{ .context = &context, .create = onEntry, .edit = onEdit, .submit = onSubmit, .restart = onRestart };
+${roomView.view({ source, stub: stubs })}
+test "a send the room accepted keeps the draft until the answer arrives" {
+    const room = ViewModel{ .room_id = "room-a", .revision = 4 };
+    var view = View{ .model = &room, .callbacks = callbacks };
+    try std.testing.expect(view.setModel(&room));
+    w.compose(std.unicode.utf8ToUtf16LeStringLiteral("Hello room"));
+    view.submit();
+    const token = view.pending orelse return error.NoPending;
+    try std.testing.expectEqual(@as(usize, 1), sent);
+    try std.testing.expectEqual(ActionResult.pending, view.result.?);
+    try std.testing.expectEqual(@as(usize, 10), w.composer_len);
+    view.completeAction(token, .accepted);
+    try std.testing.expectEqual(@as(?ActionToken, null), view.pending);
+    try std.testing.expectEqual(ActionResult.accepted, view.result.?);
+    try std.testing.expectEqual(@as(usize, 10), w.composer_len);
+}
+test "an older send cannot release the action a newer one is holding" {
+    const room = ViewModel{ .room_id = "room-a", .revision = 4 };
+    const other = ViewModel{ .room_id = "room-b", .revision = 9 };
+    var view = View{ .model = &room, .callbacks = callbacks };
+    try std.testing.expect(view.setModel(&room));
+    w.compose(std.unicode.utf8ToUtf16LeStringLiteral("Hello room"));
+    view.submit();
+    const stale = view.pending.?;
+    try std.testing.expect(view.setModel(&other));
+    w.compose(std.unicode.utf8ToUtf16LeStringLiteral("Second room"));
+    view.submit();
+    const current = view.pending.?;
+    try std.testing.expect(!std.meta.eql(stale, current));
+    view.completeAction(stale, .accepted);
+    try std.testing.expectEqual(current, view.pending.?);
+    view.completeAction(current, .accepted);
+    try std.testing.expectEqual(@as(?ActionToken, null), view.pending);
+}
+`, { 'diagnostics.zig': 'pub fn syncLog(_: []const u8) void {}\n' });
+});
+
+test('a room command that finishes releases its view action wherever the user is looking', () => {
+  const frontend = read('room_frontend.zig');
+  const gated = source => /if \(visible\) view\.completeAction/.test(source) || /if \(commandVisible\(item\)\) \{[^}]*view\.completeAction/.test(source);
+  const finish = frontend.slice(frontend.indexOf('fn finishCommand('), frontend.indexOf('fn driveRestore('));
+  const launch = frontend.slice(frontend.indexOf('fn launchQueuedCommand('), frontend.indexOf('pub fn pollTimer('));
+  const evidence = frontend.slice(frontend.indexOf('pub fn retryCommandEvidence('), frontend.indexOf('fn matchesPending('));
+  for (const part of [finish, launch, evidence]) {
+    assert.ok(part.length > 0, 'production room command path is present');
+    assert.ok(!gated(part), 'a finished room command releases its action without a visibility test');
+  }
+  assert.match(finish, /releaseCommandAction\(item, /);
+  assert.match(launch, /releaseCommandAction\(item, /);
+  assert.match(evidence, /releaseCommandAction\(item, item\.evidence_state == \.accepted\);\n    freePending\(item\);/);
+  assert.ok(gated('if (visible) view.completeAction(item.token, .failed);'), 'the visibility gate would fail this check');
 });
 
 test('a saved room send keeps the command identity the room store deduplicates on', () => {

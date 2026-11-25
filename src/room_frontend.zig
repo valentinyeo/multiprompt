@@ -1471,6 +1471,7 @@ fn publishModel() bool {
 
 fn applyAcceptedPost(item: *const PendingCommand, payload: std.json.Value) void {
     const accepted = room_post.acceptedHuman(payload) orelse return;
+    if (!std.mem.eql(u8, accepted.room_id, &item.room_id)) return;
     const loaded = owned_model orelse return;
     if (front != .selected or !std.mem.eql(u8, &front.selected.room_id, &item.room_id)) return;
     if (!std.mem.eql(u8, loaded.value.room_id, &item.room_id) or accepted.seq <= loaded.highwater) return;
@@ -1508,6 +1509,11 @@ fn freePending(item: *PendingCommand) void {
     item.arena.deinit();
     std.heap.page_allocator.destroy(item);
     pending_command = null;
+}
+
+fn releaseCommandAction(item: *const PendingCommand, accepted: bool) void {
+    if (!created) return;
+    view.completeAction(item.token, if (accepted) .accepted else .failed);
 }
 
 fn commandVisible(item: *const PendingCommand) bool {
@@ -1636,16 +1642,14 @@ fn finishCommand(c: *rooms.Controller, completion: rooms.Completion, fresh: bool
     if (evidence) |bytes| {
         journal.update(item.scope, &item.id, state, bytes) catch |err| {
             if (err != error.InvalidJournal) {
-                if (visible) {
-                    view.completeAction(item.token, if (state == .accepted) .accepted else .failed);
-                    if (state == .accepted and item.kind == .create and room_id != null) created_selection = .{ .location = .{ .store = item.location, .room_id = room_id.? }, .generation = item.generation, .token_generation = item.token.generation };
-                }
+                releaseCommandAction(item, state == .accepted);
+                if (visible and state == .accepted and item.kind == .create and room_id != null) created_selection = .{ .location = .{ .store = item.location, .room_id = room_id.? }, .generation = item.generation, .token_generation = item.token.generation };
                 item.evidence = bytes; item.evidence_state = state;
                 evidence_attempts = 0;
                 _ = w.SetTimer(app_state.g_main_hwnd, TIMER_ROOM_EVIDENCE, 1000, null);
                 return;
             }
-            if (visible) view.completeAction(item.token, .failed);
+            releaseCommandAction(item, false);
             freePending(item);
             return;
         };
@@ -1655,13 +1659,11 @@ fn finishCommand(c: *rooms.Controller, completion: rooms.Completion, fresh: bool
         item.evidence_state = state;
         evidence_attempts = 0;
         _ = w.SetTimer(app_state.g_main_hwnd, TIMER_ROOM_EVIDENCE, 1000, null);
-        if (visible) {
-            view.completeAction(item.token, .accepted);
-            if (item.kind == .create and room_id != null) created_selection = .{ .location = .{ .store = item.location, .room_id = room_id.? }, .generation = item.generation, .token_generation = item.token.generation };
-        }
+        releaseCommandAction(item, true);
+        if (visible and item.kind == .create and room_id != null) created_selection = .{ .location = .{ .store = item.location, .room_id = room_id.? }, .generation = item.generation, .token_generation = item.token.generation };
         return;
     }
-    if (visible) view.completeAction(item.token, if (state == .accepted) .accepted else .failed);
+    releaseCommandAction(item, state == .accepted);
     if (fresh and state == .accepted) {
         if (visible and item.kind == .create and room_id != null) created_selection = .{ .location = .{ .store = item.location, .room_id = room_id.? }, .generation = item.generation, .token_generation = item.token.generation };
         if (item.kind != .create and front == .selected and std.mem.eql(u8, &front.selected.room_id, &item.room_id)) selection_waiting = true;
@@ -1737,10 +1739,8 @@ fn launchQueuedCommand(c: *rooms.Controller, completion: rooms.Completion, fresh
     if (!item.awaiting_launch or completion == .pending) return false;
     if (!fresh or commandScope(item.location) == null) {
         if (item.kind == .post) diagnostics.syncLog("[rooms] post rejected reason=queued_account_or_host_changed");
-        if (commandVisible(item)) {
-            if (item.kind == .post) view.showError("The room account or server changed before sending. Your draft is kept. Reopen the room and try again.");
-            view.completeAction(item.token, .failed);
-        }
+        if (commandVisible(item) and item.kind == .post) view.showError("The room account or server changed before sending. Your draft is kept. Reopen the room and try again.");
+        releaseCommandAction(item, false);
         freePending(item);
         return false;
     }
@@ -1775,10 +1775,8 @@ fn launchQueuedCommand(c: *rooms.Controller, completion: rooms.Completion, fresh
             var log: [256]u8 = undefined;
             diagnostics.syncLog(std.fmt.bufPrint(&log, "[rooms] post rejected reason=queued_launch error={s}", .{@errorName(err)}) catch unreachable);
         }
-        if (commandVisible(item)) {
-            if (item.kind == .post) view.showError("Could not start this room send. Your draft is kept. Reopen the room and try again.");
-            view.completeAction(item.token, .failed);
-        }
+        if (commandVisible(item) and item.kind == .post) view.showError("Could not start this room send. Your draft is kept. Reopen the room and try again.");
+        releaseCommandAction(item, false);
         freePending(item);
         journal_checked_generation = null;
         scheduleDiscovery(c);
@@ -2096,6 +2094,7 @@ pub fn retryCommandEvidence() !void {
             if (!startSnapshot(c) and c.job == null) { selection_waiting = false; _ = pumpRefresh(c); }
         };
     }
+    releaseCommandAction(item, item.evidence_state == .accepted);
     freePending(item);
 }
 

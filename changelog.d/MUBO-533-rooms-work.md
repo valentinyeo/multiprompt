@@ -13,3 +13,5 @@ A message that was still being confirmed is sent once before your rewritten mess
 A message you send appears in the room straight away instead of after the room reloads.
 Sending while a room is still opening waits for it instead of refusing your message.
 A room that is still opening no longer reports that it could not load before a read has failed.
+A send the room accepted releases the room's send control, so your next message sends instead of waiting for an action that already finished.
+A room no longer shows a message that was sent somewhere else.
