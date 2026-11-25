@@ -73,7 +73,8 @@ artifact holds paths and public fingerprints, never credentials.
 
 A red run is a product symptom, not a driver gap: read `computer-pane.png`, the `[computer]` lines in
 `data/roaming/ZigShell/debug.log`, and the item table. The known released symptom is
-`viewer could not start, WebView2 unavailable`, which reaches `Lost` before any SSH starts.
+`viewer could not start, WebView2 unavailable`, which reaches `Lost` before any SSH starts; that is
+MUBO-541 and item 1 stays red until it lands.
 
 ## Gotchas
 
