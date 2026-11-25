@@ -36,6 +36,16 @@ var test_host: ?*Host = null;
 var entered: std.atomic.Value(bool) = .init(false);
 var released: std.atomic.Value(bool) = .init(false);
 
+test "MUBO-532 reader retries do not cancel an SSH handshake already in progress" {
+    hosts[0] = .{ .starting = true };
+    defer hosts[0] = .{};
+    for (0..120) |_| {
+        respawn(0);
+        try std.testing.expect(hosts[0].starting);
+        try std.testing.expect(!hosts[0].running);
+    }
+}
+
 test "blocked SSH writes leave incoming data and other channels usable with bounded queues" {
     var host = Host{ .running = true };
     test_host = &host;

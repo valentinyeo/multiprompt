@@ -51,8 +51,21 @@ test('session list poll and autocomplete ride the shared server connection when 
   const vps = read('src/vps.zig');
   assert.match(vps, /if \(app_state\.g_shared_server_connection\) \{\s+if \(app_state\.g_vps_channels\[host\]\.alive\) closeVpsChannelUnlocked\(host\);\s+return sharedChannelRequest\(&g_shared_poll_channels\[host\], host, VPS_CHANNEL_LOOP_SCRIPT, "", buf, VPS_CHANNEL_SENTINEL\);/);
   assert.match(vps, /if \(app_state\.g_shared_server_connection\) \{\s+if \(app_state\.g_ac_channels\[host\]\.alive\) closeAcChannelUnlocked\(host\);\s+const n = sharedChannelRequest\(&g_shared_ac_channels\[host\], host, AC_SERVE_SCRIPT,/);
-  assert.match(vps, /slot\.\* = chat_transport\.openCommand\(host, command\);/);
+  assert.match(vps, /slot\.\* = chat_transport\.openCommandWait\(host, command, 15_000\);/);
   assert.match(read('src/chat_transport.zig'), /packet\(host, \.\{ \.channel = channel\.id, \.command = channel\.command, \.data = line \}\)/);
+});
+
+test('idle probes and usage cards use logical commands rather than opening SSH logins', () => {
+  for (const [file, name] of [['src/chat_send.zig', 'sshProbeThread'], ['src/telemetry_panel.zig', 'ladderFetchRemote']]) {
+    const source = read(file);
+    const start = source.indexOf(`fn ${name}(`);
+    const body = source.slice(start, source.indexOf('\n}', start));
+    assert.match(body, /captureSharedCommand\(/);
+    assert.doesNotMatch(body, /sshOneShotCapture|appendSshExe|CreateProcessW/);
+  }
+  const transport = read('src/chat_transport.zig');
+  assert.match(transport, /pub fn openCommandWait[\s\S]*?WaitForSingleObject\(ready, timeout_ms\)/);
+  assert.match(transport, /fn handshakeWorker\(b: Boot\) void \{\s+defer _ = w.SetEvent\(b.host.ready\)/);
 });
 
 test('a host whose ssh fails is backed off and its error text is never listed as a session', () => {
