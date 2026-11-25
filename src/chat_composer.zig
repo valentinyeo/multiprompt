@@ -103,13 +103,7 @@ const CloseHandle = @import("win32.zig").CloseHandle;
 const GetEnvironmentVariableA = @import("win32.zig").GetEnvironmentVariableA;
 const GetFileAttributesW = @import("win32.zig").GetFileAttributesW;
 const DeleteFileW = @import("win32.zig").DeleteFileW;
-const CreateFileW = @import("win32.zig").CreateFileW;
 const FlushFileBuffers = @import("win32.zig").FlushFileBuffers;
-const WriteFile = @import("win32.zig").WriteFile;
-const GENERIC_WRITE = @import("win32.zig").GENERIC_WRITE;
-const CREATE_ALWAYS = @import("win32.zig").CREATE_ALWAYS;
-const FILE_ATTRIBUTE_NORMAL = @import("win32.zig").FILE_ATTRIBUTE_NORMAL;
-const INVALID_HANDLE_VALUE_PTR = @import("win32.zig").INVALID_HANDLE_VALUE_PTR;
 const GetTickCount64 = @import("win32.zig").GetTickCount64;
 const SendMessageW = @import("win32.zig").SendMessageW;
 const CallWindowProcW = @import("win32.zig").CallWindowProcW;
@@ -138,8 +132,10 @@ const CHAT_AC_ENTER_SENDS = @import("app_state.zig").CHAT_AC_ENTER_SENDS;
 const win32WidePath = @import("file_io.zig").win32WidePath;
 const win32WriteAll = @import("file_io.zig").win32WriteAll;
 const readFileAllocWin32 = @import("file_io.zig").readFileAllocWin32;
-const win32MoveReplace = @import("file_io.zig").win32MoveReplace;
 const win32MakePath = @import("file_io.zig").win32MakePath;
+const writeFileAtomicW = @import("file_io.zig").writeFileAtomicW;
+const writeFileAtomicSync = @import("file_io.zig").writeFileAtomicSync;
+const copyQueuedWrite = @import("file_io.zig").copyQueuedWrite;
 const updateMainWindowTitle = @import("workspaces.zig").updateMainWindowTitle;
 const verboseLoggingEnabled = @import("diagnostics.zig").verboseLoggingEnabled;
 const debugLog = @import("diagnostics.zig").debugLog;
@@ -2293,21 +2289,20 @@ fn getChatDraftPath(id: []const u8, buf: *[560]u8) ?[]const u8 {
     return buf[0 .. n + ext.len];
 }
 
-fn chatDraftWriteFile(path: []const u8, bytes: []const u8) bool {
+fn chatDraftEnsureDir(path: []const u8) void {
     var dir_end: usize = path.len;
     while (dir_end > 0 and path[dir_end - 1] != '\\') dir_end -= 1;
     if (dir_end > 1) win32MakePath(path[0 .. dir_end - 1]);
-    var tmp_buf: [580]u8 = undefined;
-    const tmp = std.fmt.bufPrint(&tmp_buf, "{s}.tmp", .{path}) catch return false;
-    var wbuf: [600]u16 = undefined;
-    const tmp_w = win32WidePath(&wbuf, tmp) orelse return false;
-    const h = CreateFileW(tmp_w.ptr, GENERIC_WRITE, 0, null, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, null);
-    if (h == INVALID_HANDLE_VALUE_PTR) return false;
-    var written: DWORD = 0;
-    const complete = WriteFile(h, bytes.ptr, @intCast(bytes.len), &written, null) != 0 and written == bytes.len;
-    const flushed = FlushFileBuffers(h) != 0;
-    _ = CloseHandle(h);
-    return complete and flushed and win32MoveReplace(tmp, path);
+}
+
+fn chatDraftWriteFile(path: []const u8, bytes: []const u8) bool {
+    chatDraftEnsureDir(path);
+    return writeFileAtomicW(path, bytes);
+}
+
+fn chatDraftWriteFileInline(path: []const u8, bytes: []const u8) bool {
+    chatDraftEnsureDir(path);
+    return writeFileAtomicSync(path, bytes);
 }
 
 pub fn chatDraftKeyForShell(idx: u32, buf: []u8) []const u8 {
@@ -2325,6 +2320,12 @@ pub fn chatDraftKeyForShell(idx: u32, buf: []u8) []const u8 {
     return std.fmt.bufPrint(buf, "session:#{x:0>16}", .{sh.chat_id}) catch buf[0..0];
 }
 
+fn chatDraftReadAll(path: []const u8) ?[]u8 {
+    var queued: [65536]u8 = undefined;
+    if (copyQueuedWrite(path, &queued)) |n| return std.heap.page_allocator.dupe(u8, queued[0..n]) catch null;
+    return readFileAllocWin32(path, 65536);
+}
+
 fn chatDraftLoad(id: []const u8) void {
     if (id.len == 0 or chat_drafts.entries.contains(id)) return;
     var text: [16384]u16 = undefined;
@@ -2332,7 +2333,7 @@ fn chatDraftLoad(id: []const u8) void {
     var dirty = false;
     var path_buf: [560]u8 = undefined;
     const path = getChatDraftPath(id, &path_buf) orelse return;
-    if (readFileAllocWin32(path, 65536)) |bytes| {
+    if (chatDraftReadAll(path)) |bytes| {
         defer std.heap.page_allocator.free(bytes);
         len = std.unicode.utf8ToUtf16Le(text[0..16383], bytes) catch return;
     } else {
@@ -2360,7 +2361,7 @@ fn chatDraftLoad(id: []const u8) void {
                 const bytes = readFileAllocWin32(old_path, 65536) orelse continue;
                 defer std.heap.page_allocator.free(bytes);
                 len = std.unicode.utf8ToUtf16Le(text[0..16383], bytes) catch continue;
-                dirty = !chatDraftWriteFile(path, bytes);
+                dirty = !chatDraftWriteFileInline(path, bytes);
                 if (!dirty) {
                     if (win32WidePath(&wbuf, old_path)) |old_w| _ = DeleteFileW(old_w.ptr);
                 }
