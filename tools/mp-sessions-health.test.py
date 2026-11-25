@@ -290,9 +290,11 @@ class MpSessionsHealthTest(unittest.TestCase):
         self.assertEqual(done.returncode, 1, done.stderr + done.stdout)
         row = json.loads(done.stdout)[0]
         self.assertEqual(row["status"], "BROKEN UNKNOWN desktop offline")
-        self.assertTrue(row["offline_detail"].startswith("port_conflict: "))
-        self.assertIn("19548", row["offline_detail"])
-        self.assertIn("stale_listener.py", row["offline_detail"])
+        detail = row.get("offline_detail")
+        self.assertIsInstance(detail, str)
+        self.assertTrue(detail.startswith("port_conflict: "))
+        self.assertIn("19548", detail)
+        self.assertIn("stale_listener.py", detail)
         text = self.run_with_reply(conflict, "health", **extra)
         self.assertEqual(text.returncode, 1, text.stderr + text.stdout)
         self.assertIn("unreachable: port_conflict", text.stdout)
@@ -308,7 +310,7 @@ class MpSessionsHealthTest(unittest.TestCase):
         done = self.run_with_reply(healthy, "health", "--json", **extra)
         self.assertEqual(done.returncode, 0, done.stderr + done.stdout)
         row = json.loads(done.stdout)[0]
-        self.assertIsNone(row["offline_detail"])
+        self.assertIsNone(row.get("offline_detail"))
 
 
 if __name__ == "__main__":
