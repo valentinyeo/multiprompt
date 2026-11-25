@@ -16,7 +16,7 @@ Release paths: src/workspace*.zig, src/room*, src/groups*.zig, src/main.zig, bui
 ## Driving it with drive.ps1
 Preconditions: single-window mode, fresh hosted Windows desktop, matching executable/hash/version, isolated app data, and the selected legacy recipe’s prerequisites.
 - The shared wrapper accepts these Journeys; automatic workflow migration remains partial. Run `gh workflow run verify.yml --ref <branch> -f feature=workspaces`. [Workspaces](workspaces.md) drives creation, switching, archive/restore and deletion; [workspace focus](workspace-focus.md) checks typing after returning.
-- Require stable saved workspace IDs and session membership, card screenshots, and restored typing. Rooms require visible member replies in a separately authenticated live pass. Only the selected journey is covered. Download `verify-workspaces` after cleanup. This legacy workflow route does not yet use the video driver; see [inventory](../inventory.md).
+- Require stable saved workspace IDs and session membership, card screenshots, and restored typing. The [rooms journey](rooms.md) supplies a runner-owned authenticated account and two deterministic live member agents. Only the selected journey is covered. Download `verify-workspaces` after cleanup. This legacy workflow route does not yet use the video driver; see [inventory](../inventory.md).
 
 The recipes distinguish existing focused journeys from unreachable complete paths. UNREACHABLE names the missing data, endpoint, build mode or driver action; it never means the product passed.
 
@@ -55,11 +55,11 @@ Journey: workspaces, workspace-focus, sessions. UNREACHABLE for cross-device fol
 
 ### room: Rooms
 
-In a Rooms preview build, use Ctrl+Shift+N or Ctrl+K New room. Choose members, create and open the room by name, send a message, then Edit room to rename and change members. Reopen and inspect both agents' replies.
+In a release or Rooms-enabled verification build, use Ctrl+Shift+N or Ctrl+K New room. Choose members, create and open the room by name, send a message, then Edit room to rename and change members. Reopen and inspect both agents' replies.
 
 Observable proof: The room keeps one ID and the selected members; replies are attributed once to the right agent. Editing preserves earlier history and prevents private per-chat actions from leaking into a room.
 
-UNREACHABLE in the ordinary build: src/room_frontend.zig enables Rooms only with ROOMS_PREVIEW. A preview executable, authenticated disposable account, two available member agents and a room-driving desktop recipe are required. The room-reply-grouping diagnostic is not desktop proof.
+Run `feature=rooms` for the six-step desktop gate in [Rooms](rooms.md). Release builds enable Rooms; non-release verification builds need `-Drooms-preview=true`. The room-reply-grouping diagnostic alone is not desktop proof.
 
 | Palette row or dynamic family | User reaches it |
 | --- | --- |
