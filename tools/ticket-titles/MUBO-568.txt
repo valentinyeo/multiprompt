@@ -1,0 +1,1 @@
+Show each chat's AI as a small mark on its tab
