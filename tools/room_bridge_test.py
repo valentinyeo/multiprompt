@@ -100,11 +100,16 @@ class BridgeTest(unittest.TestCase):
     @mock.patch.object(bridge_module, 'scoped_runtime', return_value=True)
     @mock.patch.object(bridge_module, 'host_status')
     def test_old_running_host_is_named_before_a_new_post_is_recorded(self, status, runtime):
-        status.return_value = dict(enabled=True, alive=True, owner='host')
+        status.return_value = dict(enabled=True, alive=True, owner='host', room_message_protocol=1)
         room = self.bridge.execute(self.create)['event']['room_id']
         request = dict(op='post_human', host_uuid=self.host, command_id=uid(), room_id=room, expected_revision=1, text='hello', recipients=[], room_features=1)
         self.error('room_host_upgrade_required', request)
         self.assertEqual(1, self.bridge.store.room(room)['seq'])
+        status.return_value['room_features'] = [1]
+        with mock.patch.object(self.bridge, 'sweep_pending'):
+            accepted = self.bridge.execute(request)
+        self.assertEqual('human', accepted['event']['type'])
+        self.assertEqual(2, self.bridge.store.room(room)['seq'])
 
     @mock.patch.object(bridge_module, 'scoped_runtime', return_value=True)
     @mock.patch.object(bridge_module, 'host_status', return_value=dict(enabled=True, alive=False))

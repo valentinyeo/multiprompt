@@ -5515,7 +5515,8 @@ def host_handle_request(provider, sid, tmux, session, request):
         inflight = session.get("inflight")
         return dict(status="ok", pid=os.getpid(), sid=sid, tmux=tmux,
                     inflight=inflight.get("id") if isinstance(inflight, dict) else None,
-                    parked=len(session["parked"]), room_message_protocol=ROOM_MESSAGE_PROTOCOL)
+                    parked=len(session["parked"]), room_message_protocol=ROOM_MESSAGE_PROTOCOL,
+                    room_features=[1] if globals().get('ROOM_BRIDGE_SOURCE') and globals().get('ROOM_SERVICE_SOURCE') else [])
     if operation == "stop":
         session["stop"] = True
         session["exit_cause"] = "stop_requested"
@@ -7162,6 +7163,7 @@ def host_cli(argv):
     if '--rooms' in rest and status.get('alive') and status.get('owner') == 'host':
         ping = host_request(provider, sid, dict(op='ping'), timeout=1)
         status['room_message_protocol'] = ping.get('room_message_protocol') if ping.get('status') == 'ok' else None
+        status['room_features'] = ping.get('room_features', []) if ping.get('status') == 'ok' else []
     return status
 
 

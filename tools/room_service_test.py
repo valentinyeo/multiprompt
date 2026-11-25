@@ -84,6 +84,7 @@ class RoomServiceTest(unittest.TestCase):
         for mention in ('@STRASSE RESEARCH hello', '@straße research hello', '@ALICE hello'):
             result = self.store.execute({**self.post(mention, [], revision=2), 'room_features': 1})
             self.assertEqual([alice_id], result['event']['recipients'])
+            self.assertEqual({'id', 'room_id', 'seq', 'type', 'text', 'revision', 'recipients'}, set(result['event']))
         self.error('invalid_mentions', {**self.post('@STRASSE RESEARCH hello', ['bob'], revision=2), 'room_features': 1})
         self.error('invalid_mentions', self.post('@ALICE hello', ['alice'], revision=2))
 

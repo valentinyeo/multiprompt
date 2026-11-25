@@ -233,7 +233,7 @@ class RoomBridge:
                 if command.get('recipients') and member['alias'] not in command['recipients']:
                     continue
                 status = host_status(member['provider_sid'])
-                if status.get('enabled') and status.get('alive') and status.get('owner') == 'host' and status.get('room_message_protocol') != 1:
+                if status.get('enabled') and status.get('alive') and status.get('owner') == 'host' and (type(status.get('room_message_protocol')) is not int or status['room_message_protocol'] != 1 or status.get('room_features') != [1]):
                     fail('room_host_upgrade_required')
         result = self.store.execute(command)
         if op == 'post_human':
