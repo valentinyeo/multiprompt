@@ -138,6 +138,7 @@ The script starts a throwaway hosted chat, sends a marker, switches Claude→Cod
 | `SEARCH_CHAT_SWITCH_CLAUDE_OFFSET` | Ctrl+K, type **switch ai to claude**, then select the matching action with Up/Down and Enter. Follow `lifecycle` above. |
 | `SEARCH_CHAT_SWITCH_CODEX_OFFSET` | Ctrl+K, type **switch ai to codex**, then select the matching action with Up/Down and Enter. Follow `lifecycle` above. |
 | `SEARCH_CHAT_SWITCH_PI_OFFSET` | Ctrl+K, type **switch ai to pi**, then select the matching action with Up/Down and Enter. Follow `lifecycle` above. |
+| `SEARCH_CHAT_SWITCH_ANTIGRAVITY_OFFSET` | Ctrl+K, type **switch ai to antigravity**, then select the matching action with Up/Down and Enter. Follow `lifecycle` above. |
 | `SEARCH_TABCTX_ADOPT_HOST` | UNREACHABLE as a distinct palette row: source retains a label/handler but no current result-generation path in `src/command_palette.zig`. Use the recipe above only through its documented alternative entry, not this ID. |
 | `SEARCH_TABCTX_CHAT_RESET` | Right-click the intended tab, then choose **chat view reset this chat clear bubbles cache**. Follow `lifecycle` above. |
 | `SEARCH_TABCTX_CHAT_RESTART_AI` | Right-click the intended tab, then choose **chat view restart the ai agent stopped claude resume**. Follow `lifecycle` above. |
@@ -145,6 +146,7 @@ The script starts a throwaway hosted chat, sends a marker, switches Claude→Cod
 | `SEARCH_TABCTX_SWITCH_CLAUDE` | Right-click the intended tab, then choose **Switch AI to Claude keep chat name picture address history**. Follow `lifecycle` above. |
 | `SEARCH_TABCTX_SWITCH_CODEX` | Right-click the intended tab, then choose **Switch AI to Codex keep chat name picture address history**. Follow `lifecycle` above. |
 | `SEARCH_TABCTX_SWITCH_PI` | Right-click the intended tab, then choose **Switch AI to Pi keep chat name picture address history**. Follow `lifecycle` above. |
+| `SEARCH_TABCTX_SWITCH_ANTIGRAVITY` | Right-click the intended tab, then choose **Switch AI to Antigravity keep chat name picture address history**. Follow `lifecycle` above. |
 
 ## Gotchas
 - Live chats have no shell toggle. Sending, attachments, provider login, and real delivery need their own live prerequisites; focus proof does not cover them.

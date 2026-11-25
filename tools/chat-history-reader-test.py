@@ -7811,6 +7811,12 @@ class HostControlTest(HostControlFixture, unittest.TestCase):
         open_cursor('cursor', self.sid, self.tmux, self.session)
         self.assertEqual(self.writes(), [])
 
+    def test_antigravity_start_does_not_request_remote_control(self):
+        open_agy = getattr(reader, 'host_antigravity_open', None)
+        self.assertIs(reader.HOST_ADAPTERS['antigravity']['open'], open_agy)
+        open_agy('antigravity', self.sid, self.tmux, self.session)
+        self.assertEqual(self.writes(), [])
+
     def test_remote_control_rejection_does_not_stop_normal_chat(self):
         reader.host_claude_open(self.provider, self.sid, self.tmux, self.session)
         writes = self.writes()
@@ -8257,12 +8263,44 @@ class IGSH_1828_HostRecallTest(HostControlFixture, unittest.TestCase):
     def test_an_unsupported_provider_never_substitutes_an_interrupt(self):
         target = self.deliver('host_fixture_message_01')
         previous = self.writes()
-        for provider in ('codex', 'pi', 'hax', 'cursor'):
+        for provider in ('codex', 'pi', 'hax', 'cursor', 'antigravity'):
             result = reader.host_handle_request(provider, self.sid, self.tmux, self.session,
                                                 dict(op='recall', id=target['id'], attempt='attempt-1'))
             self.assertEqual(result['reason'], 'recall_unavailable')
         self.assertEqual(self.writes(), previous)
         self.assertEqual(self.session['sends'], [target])
+
+
+class HostAntigravityTurnTest(HostEventStreamFixture, unittest.TestCase):
+    provider = 'antigravity'
+
+    def antigravity_events(self, kind=None):
+        db = reader.message_store_db(self.tmux)
+        rows = [json.loads(body) for (body,) in db.execute(
+            "SELECT body FROM message_events WHERE provider='antigravity' AND sid=? ORDER BY seq", (self.sid,))]
+        db.close()
+        return [row for row in rows if kind is None or row.get('kind') == kind]
+
+    def test_an_antigravity_turn_reports_the_user_message_uuid_it_took(self):
+        self.session['sends'] = [dict(id='mp-antigravity-1', attempt='a', epoch=0, accepted=False, turn='t-1',
+                                      sha256='x', uuid=None, text='hello')]
+        self.feed(dict(event='step_update',
+                       step_update=dict(conversation_id='conversation-1', step_index=0, state='DONE',
+                                        step_type='user_input', user_message_uuid='um-antigravity-1')))
+        started = self.antigravity_events('turn.started')
+        self.assertEqual(len(started), 1, 'the Antigravity turn must name the send it took')
+        self.assertEqual(started[0]['payload']['message_id'], 'mp-antigravity-1')
+        self.assertEqual(started[0]['payload']['uuids'], ['mp-antigravity-1', 'um-antigravity-1'])
+
+    def test_an_antigravity_turn_without_a_reported_uuid_still_names_its_row(self):
+        self.session['sends'] = [dict(id='mp-antigravity-2', attempt='a', epoch=0, accepted=False, turn='t-1',
+                                      sha256='x', uuid=None, text='hello')]
+        self.feed(dict(event='step_update',
+                       step_update=dict(conversation_id='conversation-1', step_index=0, state='DONE',
+                                        step_type='user_input')))
+        started = self.antigravity_events('turn.started')
+        self.assertEqual(len(started), 1)
+        self.assertEqual(started[0]['payload']['uuids'], ['mp-antigravity-2'])
 
 
 class HostInterruptTest(HostControlFixture, unittest.TestCase):

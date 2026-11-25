@@ -37,6 +37,7 @@ REACHABLE for real SSH and tmux through `feature=server-chat`, which owns both e
 | `SEARCH_NEW_CLAUDE_CHAT_OFFSET` | Ctrl+K, type **new claude session**, then select the matching action with Up/Down and Enter. Follow `server` above. |
 | `SEARCH_NEW_CLAUDE_TERMINAL_OFFSET` | UNREACHABLE as a distinct palette row: source retains a label/handler but no current result-generation path in `src/command_palette.zig`. Use the recipe above only through its documented alternative entry, not this ID. |
 | `SEARCH_NEW_CURSOR_CHAT_OFFSET` | Ctrl+K, type **new cursor chat**, then select the matching action with Up/Down and Enter. Follow `server` above. |
+| `SEARCH_NEW_ANTIGRAVITY_CHAT_OFFSET` | Ctrl+K, type **new antigravity sessions**, then select the matching action with Up/Down and Enter. Follow `server` above. |
 | `SEARCH_NEW_PI_CHAT_OFFSET` | Ctrl+K, type **new pi chat**, then select the matching action with Up/Down and Enter. Follow `server` above. |
 | `SEARCH_NEW_TERMINAL_OFFSET` | Ctrl+K, type **new terminal**, then select the matching action with Up/Down and Enter. Follow `server` above. |
 | `SEARCH_OPENALL_HOST_BACK_OFFSET` | Open the named submenu, then choose **back**. Follow `server` above. |

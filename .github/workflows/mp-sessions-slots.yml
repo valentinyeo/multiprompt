@@ -4,6 +4,10 @@ on:
   pull_request:
     paths:
       - 'src/mp_sessions.py'
+      - 'src/mp_zsb.sh'
+      - 'tools/vps-multiprompt-browser.sh'
+      - 'tools/zsb-port-holder.test.py'
+      - 'tools/fixtures/MUBO-566/**'
       - 'src/mp_layout.mjs'
       - 'tools/mp-sessions'
       - 'tools/mp-sessions-test.py'
@@ -50,8 +54,15 @@ jobs:
           set +e
           node --test --test-reporter=tap tools/mp-layout-host.test.js tools/check-servers-slots.test.js > "$RUNNER_TEMP/input/layout.log" 2>&1
           echo "head_layout=$?" >> "$GITHUB_ENV"
-          python3 tools/mp-sessions-test.py -v > "$RUNNER_TEMP/input/sessions.log" 2>&1
+          timeout 180s python3 tools/zsb-port-holder.test.py -v > "$RUNNER_TEMP/input/bridge.log" 2>&1
+          echo "head_bridge=$?" >> "$GITHUB_ENV"
+          timeout 300s python3 tools/mp-sessions-test.py -v > "$RUNNER_TEMP/input/sessions.log" 2>&1
           echo "head_sessions=$?" >> "$GITHUB_ENV"
+          timeout 180s python3 tools/mp-sessions-health.test.py -v > "$RUNNER_TEMP/input/health.log" 2>&1
+          echo "head_health=$?" >> "$GITHUB_ENV"
+          timeout 180s python3 -m unittest tools/agent-notifications/test_mp_notify_relay.py -v > "$RUNNER_TEMP/input/relay.log" 2>&1
+          echo "head_relay=$?" >> "$GITHUB_ENV"
+          cat "$RUNNER_TEMP/input/bridge.log" "$RUNNER_TEMP/input/sessions.log" "$RUNNER_TEMP/input/health.log" "$RUNNER_TEMP/input/relay.log"
           true
       - name: Run the same tests against the base source
         shell: bash
@@ -63,7 +74,8 @@ jobs:
           git worktree add --detach "$RUNNER_TEMP/base" "$BASE_SHA"
           cp tools/mp-layout-host.test.js tools/mp-sessions-test.py "$RUNNER_TEMP/base/tools/"
           cp tools/check-servers-slots.test.js tools/check-servers-slots.mjs "$RUNNER_TEMP/base/tools/"
-          mkdir -p "$RUNNER_TEMP/base/tools/fixtures/MUBO-294" "$RUNNER_TEMP/base/tools/fixtures/MUBO-558"
+          mkdir -p "$RUNNER_TEMP/base/tools/fixtures/MUBO-294" "$RUNNER_TEMP/base/tools/fixtures/MUBO-558" "$RUNNER_TEMP/base/tools/fixtures/MUBO-566"
+          cp tools/fixtures/MUBO-566/*.json "$RUNNER_TEMP/base/tools/fixtures/MUBO-566/"
           cp tools/fixtures/MUBO-294/servers.json "$RUNNER_TEMP/base/tools/fixtures/MUBO-294/"
           cp tools/fixtures/MUBO-558/mp-send-without-published-entries.py "$RUNNER_TEMP/base/tools/fixtures/MUBO-558/"
           (cd "$RUNNER_TEMP/base" && node --test --test-reporter=tap tools/mp-layout-host.test.js tools/check-servers-slots.test.js) > "$RUNNER_TEMP/input/layout-base.log" 2>&1
@@ -86,6 +98,7 @@ jobs:
             node tools/ci-receipt-summary.mjs "$RUNNER_TEMP/receipt" sessions "$RUNNER_TEMP/input/sessions.log" "$head_sessions" '^test_MUBO_294_|^(?:OK|FAILED)'
             echo "receipt_sessions=$?" >> "$GITHUB_ENV"
           fi
+          cp "$RUNNER_TEMP/input/bridge.log" "$RUNNER_TEMP/input/health.log" "$RUNNER_TEMP/input/relay.log" "$RUNNER_TEMP/receipt/"
           true
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
@@ -97,5 +110,8 @@ jobs:
         run: |
           test "$head_layout" = 0
           test "$head_sessions" = 0
+          test "$head_bridge" = 0
+          test "$head_health" = 0
+          test "$head_relay" = 0
           test "$receipt_layout" = 0
           test "$receipt_sessions" = 0

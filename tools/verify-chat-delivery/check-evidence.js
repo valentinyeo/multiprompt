@@ -332,7 +332,9 @@ function evaluateEvidence(root) {
   } catch (error) {
     cases.push({ name: sendName, passed: false, detail: error.message });
   }
-  return { feature: 'chat-delivery', status: cases.every(row => row.passed) ? 'passed' : 'failed', agentBoundary, cases };
+  const totals = fs.existsSync(path.join(root, 'cleanup.json')) ? json('cleanup.json') : {};
+  const cleanupText = `The owned Windows job stopped the app and its children (${totals.remaining_owned_processes ?? 'unrecorded'} left running); each case's isolated profile, process table and socket temp folder were removed (scratchRemoved=${totals.scratch_removed ?? 'unrecorded'}); the evidence copy was kept (evidencePreserved=${totals.evidence_preserved ?? 'unrecorded'}).`;
+  return { feature: 'chat-delivery', status: cases.every(row => row.passed) ? 'passed' : 'failed', agentBoundary, cleanup: cleanupText, cases };
 }
 
 if (require.main === module) {

@@ -329,6 +329,8 @@ pub fn tmuxAgentFromPaneCommand(command: []const u8) u8 {
     if (std.ascii.eqlIgnoreCase(command, "grok")) return 6;
     if (std.ascii.eqlIgnoreCase(command, "cursor") or
         std.ascii.eqlIgnoreCase(command, "cursor-agent")) return 7;
+    if (std.ascii.eqlIgnoreCase(command, "antigravity") or
+        std.ascii.eqlIgnoreCase(command, "agy")) return 8;
     return 0;
 }
 

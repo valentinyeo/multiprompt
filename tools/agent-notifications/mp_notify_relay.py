@@ -24,6 +24,7 @@ MAX_CACHED_ROUTES = 1024
 NOTIFY_TOKEN = b""
 route_cache = {}
 route_cache_lock = threading.Lock()
+reported_holder = None
 
 
 def load_token():
@@ -218,6 +219,62 @@ def sweep(directory):
             conn.close()
 
 
+def port_holder(port):
+    inodes = set()
+    for table in ("/proc/net/tcp", "/proc/net/tcp6"):
+        try:
+            with open(table, encoding="utf-8", errors="replace") as handle:
+                next(handle, None)
+                for row in handle:
+                    fields = row.split()
+                    if len(fields) < 10 or fields[3] != "0A":
+                        continue
+                    try:
+                        if int(fields[1].rsplit(":", 1)[1], 16) != port:
+                            continue
+                    except (IndexError, ValueError):
+                        continue
+                    inodes.add(fields[9])
+        except OSError:
+            continue
+    if not inodes:
+        return None
+    try:
+        processes = [entry for entry in Path("/proc").iterdir() if entry.name.isdigit()]
+    except OSError:
+        return None
+    for entry in processes:
+        try:
+            handles = list(entry.joinpath("fd").iterdir())
+        except OSError:
+            continue
+        for handle in handles:
+            try:
+                link = os.readlink(handle)
+            except OSError:
+                continue
+            if not link.startswith("socket:[") or link[8:-1] not in inodes:
+                continue
+            try:
+                command = " ".join(entry.joinpath("cmdline").read_bytes().decode(errors="replace").split("\x00")).strip()
+            except OSError:
+                command = ""
+            return int(entry.name), command
+    return None
+
+
+def report_port_conflict(port):
+    global reported_holder
+    holder = port_holder(port)
+    if holder == reported_holder:
+        return
+    reported_holder = holder
+    if holder is None:
+        print(f"Port {port} is held by no visible process; retrying in {SWEEP_INTERVAL} seconds", file=sys.stderr)
+    else:
+        print(f"Port {port} is held by pid {holder[0]} ({holder[1] or 'unknown process'}), not by this relay; retrying in {SWEEP_INTERVAL} seconds", file=sys.stderr)
+
+
 def prepare_directory(directory):
     try:
         directory.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -240,10 +297,12 @@ def serve(directory=None, port=PORT, stop=None):
         return UNSAFE_DIRECTORY
     next_sweep = time.monotonic()
     while stop is None or not stop.is_set():
+        bound = False
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
                 server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 server.bind(("127.0.0.1", port))
+                bound = True
                 server.listen()
                 server.settimeout(0.5)
                 while stop is None or not stop.is_set():
@@ -256,6 +315,8 @@ def serve(directory=None, port=PORT, stop=None):
                         continue
                     threading.Thread(target=handle, args=(client, directory), daemon=True).start()
         except OSError:
+            if not bound:
+                report_port_conflict(port)
             if time.monotonic() >= next_sweep:
                 sweep(directory)
                 next_sweep = time.monotonic() + SWEEP_INTERVAL

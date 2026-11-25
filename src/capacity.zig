@@ -226,7 +226,7 @@ fn agentSessionBreakdownForHost(entries: []const TmuxSessionEntry, host: u8) Age
         switch (entry.agent) {
             1 => result.claude +|= 1,
             2 => result.codex +|= 1,
-            3, 4, 5, 6, 7 => result.other +|= 1,
+            3, 4, 5, 6, 7, 8 => result.other +|= 1,
             else => {},
         }
     }
@@ -394,7 +394,7 @@ pub fn workspaceCapacityState(workspace: u8) CapacityState {
 }
 
 pub fn commandCreatesAgentWorkload(command: []const u8) bool {
-    const words = [_][]const u8{ "claude", "codex", "kimi", "hax", "grok", "cursor", "cursor-agent", "tnn" };
+    const words = [_][]const u8{ "claude", "codex", "kimi", "hax", "grok", "cursor", "cursor-agent", "antigravity", "agy", "tnn" };
     for (words) |word| {
         if (command.len < word.len) continue;
         var i: usize = 0;
@@ -469,6 +469,8 @@ test "capacity parsers and workload recognition are deterministic" {
     try std.testing.expect(commandCreatesAgentWorkload("hax"));
     try std.testing.expect(commandCreatesAgentWorkload("grok"));
     try std.testing.expect(commandCreatesAgentWorkload("cursor-agent"));
+    try std.testing.expect(commandCreatesAgentWorkload("agy"));
+    try std.testing.expect(commandCreatesAgentWorkload("antigravity --print"));
     try std.testing.expect(!commandCreatesAgentWorkload("python -m pip"));
     try std.testing.expect(!commandCreatesAgentWorkload("tmux new-session -A -s projects -c ~/projects"));
 }
@@ -486,6 +488,8 @@ test "tmux pane commands identify the current coding agent" {
     try std.testing.expectEqual(@as(u8, 6), tmuxAgentFromPaneCommand("GROK"));
     try std.testing.expectEqual(@as(u8, 7), tmuxAgentFromPaneCommand("cursor"));
     try std.testing.expectEqual(@as(u8, 7), tmuxAgentFromPaneCommand("CURSOR-AGENT"));
+    try std.testing.expectEqual(@as(u8, 8), tmuxAgentFromPaneCommand("antigravity"));
+    try std.testing.expectEqual(@as(u8, 8), tmuxAgentFromPaneCommand("agy"));
     try std.testing.expectEqual(@as(u8, 0), tmuxAgentFromPaneCommand("bash"));
 }
 
