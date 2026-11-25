@@ -1265,25 +1265,31 @@ function Resolve-ComputerHost {
     $runId = 0
     if (-not [int64]::TryParse([string]$env:GITHUB_RUN_ID, [ref]$runId) -or $runId -le 0) { throw 'The computer-pane journey needs the workflow run id for the tunnel port range' }
     $base = 20000 + ($runId % 40000)
+    $offset = 0
+    if ([int]::TryParse([string]$env:VERIFY_COMPUTER_PORT_OFFSET, [ref]$offset) -and $offset -gt 0) { $base += $offset }
     $candidates = @(0..15 | ForEach-Object { $base + $_ })
-    $enrollPort = $base + 500
+    $enrollCandidates = @(0..15 | ForEach-Object { $base + 500 + $_ })
+    $enrollPort = 0
     $enrolled = $false
     $enrollDeadline = [DateTime]::UtcNow.AddSeconds(900)
-    Write-Host ('Computer host: enrolling the disposable client key through the free tunnel port ' + $enrollPort)
+    Write-Host ('Computer host: enrolling the disposable client key through the free tunnel ports ' + ($enrollCandidates[0]) + ' to ' + ($enrollCandidates[-1]))
     do {
-        $client = New-Object Net.Sockets.TcpClient
-        try {
-            $connecting = $client.ConnectAsync($address, $enrollPort)
-            if ($connecting.Wait(8000)) {
-                $stream = $client.GetStream()
-                $stream.ReadTimeout = 8000
-                $wire = [Text.Encoding]::ASCII.GetBytes(($publicKey + "`n"))
-                $stream.Write($wire, 0, $wire.Length)
-                $buffer = New-Object byte[] 8
-                $size = $stream.Read($buffer, 0, 8)
-                if ($size -ge 2 -and [Text.Encoding]::ASCII.GetString($buffer, 0, $size).Trim() -ceq 'ok') { $enrolled = $true }
-            }
-        } catch { } finally { $client.Dispose() }
+        foreach ($candidate in $enrollCandidates) {
+            $client = New-Object Net.Sockets.TcpClient
+            try {
+                $connecting = $client.ConnectAsync($address, $candidate)
+                if ($connecting.Wait(8000)) {
+                    $stream = $client.GetStream()
+                    $stream.ReadTimeout = 8000
+                    $wire = [Text.Encoding]::ASCII.GetBytes(($publicKey + "`n"))
+                    $stream.Write($wire, 0, $wire.Length)
+                    $buffer = New-Object byte[] 8
+                    $size = $stream.Read($buffer, 0, 8)
+                    if ($size -ge 2 -and [Text.Encoding]::ASCII.GetString($buffer, 0, $size).Trim() -ceq 'ok') { $enrolled = $true; $enrollPort = $candidate }
+                }
+            } catch { } finally { $client.Dispose() }
+            if ($enrolled) { break }
+        }
         if (-not $enrolled) { Start-Sleep -Seconds 15 }
     } while (-not $enrolled -and [DateTime]::UtcNow -lt $enrollDeadline)
     if (-not $enrolled) { throw 'The disposable host did not accept the client public key within fifteen minutes' }

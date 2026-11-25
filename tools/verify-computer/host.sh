@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
-work="${1:?usage: host.sh <workdir> <github-output-file>}"
-output="${2:?usage: host.sh <workdir> <github-output-file>}"
+work="${1:?usage: host.sh <workdir> <github-output-file> [port-offset]}"
+output="${2:?usage: host.sh <workdir> <github-output-file> [port-offset]}"
+port_offset="${3:-0}"
 repo="${GITHUB_WORKSPACE:-$(pwd)}"
 desk=desk
 vnc_port=5900
@@ -141,19 +142,24 @@ echo 'e484d1e3acba77169b773f31a5bfb34192d4b660f44a094a658a2522cd2270f7  bore.tar
 tar -C "$work" -xzf "$work/bore.tar.gz"
 chmod 755 "$work/bore"
 
-base=$(( 20000 + GITHUB_RUN_ID % 40000 ))
+base=$(( 20000 + GITHUB_RUN_ID % 40000 + port_offset ))
 enroll_local=29999
-enroll_public=$(( base + 500 ))
-
-setsid "$work/bore" local "$enroll_local" --to bore.pub --port "$enroll_public" >>"$work/enroll.log" 2>&1 &
-echo $! >"$work/enroll.pid"
-enroll_up=0
-for attempt in $(seq 1 20); do
-    sleep 1
-    if grep -qi 'listening at' "$work/enroll.log"; then enroll_up=1; break; fi
+enroll_public=0
+for offset in $(seq 0 15); do
+    candidate=$(( base + 500 + offset ))
+    : >"$work/enroll.log"
+    setsid "$work/bore" local "$enroll_local" --to bore.pub --port "$candidate" >>"$work/enroll.log" 2>&1 &
+    echo $! >"$work/enroll.pid"
+    enroll_up=0
+    for attempt in $(seq 1 10); do
+        sleep 1
+        if grep -qi 'listening at' "$work/enroll.log"; then enroll_up=1; break; fi
+    done
+    if [ "$enroll_up" -eq 1 ]; then enroll_public=$candidate; break; fi
+    kill "$(cat "$work/enroll.pid")" 2>/dev/null || true
 done
-if [ "$enroll_up" -ne 1 ]; then
-    echo 'the enrollment tunnel did not come up'
+if [ "$enroll_public" -eq 0 ]; then
+    echo 'no free enrollment tunnel port in the reserved range'
     cat "$work/enroll.log"
     exit 1
 fi
@@ -243,6 +249,7 @@ done
 {
     echo "host_ready=true"
     echo "host_port=$tunnel_port"
+    echo "host_enroll_port=$enroll_public"
     echo "host_user=$desk"
     echo "host_vnc_port=$vnc_port"
     echo "host_viewer_port=$viewer_port"

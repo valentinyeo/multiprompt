@@ -274,6 +274,7 @@ jobs:
     uses: ./.github/workflows/computer-host.yml
     with:
       revision: ${{ inputs.revision || github.sha }}
+      port_offset: ${{ inputs.app_revision != '' && '16' || '0' }}
   build-app:
     strategy:
       fail-fast: false
@@ -464,6 +465,7 @@ jobs:
       USAGE_PACE_PROOF: ${{ inputs.usage_pace_proof && '1' || '' }}
       USAGE_PACE_STATUS: ${{ inputs.usage_pace_status || '' }}
       VERIFY_APP_REVISION: ${{ matrix.app-revision }}
+      VERIFY_COMPUTER_PORT_OFFSET: ${{ inputs.app_revision != '' && '16' || '0' }}
       OWNER_BROWSER_PROOF: ${{ inputs.owner_browser_proof || '' }}
       AGENT_SOAK_SECONDS: ${{ matrix.feature == 'live-chat-pane' && '1200' || '' }}
       FEATURE: ${{ matrix.feature }}
