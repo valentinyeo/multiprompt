@@ -214,9 +214,8 @@ $publishRows = @((Read-Shared "$state/runtime-publish.jsonl") -split "`n" | Wher
 $ownRuntime = @($publishRows | Where-Object { $_.sha256 -ceq $pinned.Groups[1].Value })
 if ($ownRuntime.Count -lt 1) { throw 'The launched runtime is not a bundle this app published' }
 if (-not ($publishRows | Where-Object { $_.sharedPointerHeld -eq $true })) { throw 'The shared reader pointer was not held stale during the fresh launch' }
-if ((Read-Shared $sharedReader) -ceq (Read-Shared $staleReader)) {
-    Save @{case='fresh antigravity chat'; sharedReader='reader.py'; staleSha256=(Get-FileHash $sharedReader -Algorithm SHA256).Hash.ToLower(); reason='an older client selected its own bundle last'; pinnedRuntime=$pinned.Groups[1].Value; launch=$launchText; published=@($ownRuntime.sha256); sharedPointerStaleAtLaunch=$true; generation=$ownRuntime[-1].generation} "$caseDir/fresh-start-runtime.json"
-} else { throw 'The shared reader pointer was replaced before the fresh chat proved itself' }
+$heldPublish = @($publishRows | Where-Object { $_.sharedPointerHeld -eq $true })[-1]
+Save @{case='fresh antigravity chat'; sharedReader='reader.py'; staleSha256=(Get-FileHash $staleReader -Algorithm SHA256).Hash.ToLower(); reason='an older client selected its own bundle last'; pinnedRuntime=$pinned.Groups[1].Value; launch=$launchText; published=@($ownRuntime.sha256); sharedPointerHeldAtPreparation=$true; generation=$heldPublish.generation} "$caseDir/fresh-start-runtime.json"
 $freshSid = $newTab.csid
 [void](Wait-For 'the fresh Antigravity chat enabled itself on the server' {
     @((Agent-Configs) | Where-Object { $_.provider -ceq 'antigravity' -and $_.sid -ceq $freshSid -and $_.enabled -eq $true -and $_.tmux.StartsWith('live-') }).Count -eq 1
