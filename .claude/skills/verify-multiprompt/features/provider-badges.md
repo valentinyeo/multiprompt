@@ -28,7 +28,7 @@ Each chat avatar in the sidebar carries a small solid triangle inside its top ri
 6. Hover the second row and confirm the row's second line repaints.
 7. Collapse the sidebar with Ctrl+Shift+B and repeat the triangle sampling on the rail avatars.
 
-`tools/verify-provider-badges/drive.ps1` runs this at 96 and 144 DPI through `.github/workflows/provider-badges.yml`. The workflow first swaps in `tools/fixtures/MUBO-568/provider-badge-before.zig`, the chat-name version, and `tools/fixtures/MUBO-568/provider-badge-round.zig`, the round badge with a white glyph, and requires a named test to fail for each.
+`tools/verify-provider-badges/drive.ps1` runs this at 96 and 144 DPI through `.github/workflows/provider-badges.yml`, which runs nightly and on request because a native desktop proof is heavy. The workflow first swaps in `tools/fixtures/MUBO-568/provider-badge-before.zig`, the chat-name version, and `tools/fixtures/MUBO-568/provider-badge-round.zig`, the round badge with a white glyph, and requires a named test to fail for each.
 
 ## Gotchas
 
