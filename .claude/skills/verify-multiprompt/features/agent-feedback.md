@@ -7,6 +7,7 @@ CI workflow: agent-feedback.yml
 
 - A wish from any chat reaches board 13734 with the existing Multiprompt and Agent Feedback labels and a ticket number in whatever prefix that board uses today (`MUBO`).
 - The board rejects ticket ids and long sentences outside quote blocks, so a ticket leads with short plain lines and keeps the full want, the full why and the app version and provider details inside `> ` quote blocks.
+- The want sits under `Problem` and `Fix` reads `to be written`, so a fresh wish never looks fixed before anyone has written the fix; triage fills it in later.
 - The title is the first ten words of the want, so a repeated wish finds the existing ticket and votes instead of creating another.
 - With `HT_TOKEN` unset, the tool uses the chat's own agent login file and passes it to the hypertask CLI for that subprocess only. No token file keeps the wish local and says `agent token unavailable`.
 
@@ -16,7 +17,7 @@ Nobody opens this from the app. An agent runs `multibot-feedback "<want>" --why 
 
 ## Driving it with GitHub CI
 
-One Linux job runs `python3 tools/multibot-feedback-test.py`. Its cases drive the real tool against a fake `hypertask` executable: a wish files on board 13734, the printed link is `https://app.hypertask.ai/detail/project-13734/<number>`, the title is the first ten words of the want, and every long line sits inside a `> ` quote block. The same suite covers the agent-token fallback, a wish kept local with no token, any ticket prefix, and the queue cutoff.
+One Linux job runs `python3 tools/multibot-feedback-test.py`. Its cases drive the real tool against a fake `hypertask` executable: a wish files on board 13734, the printed link is `https://app.hypertask.ai/detail/project-13734/<number>`, the title is the first ten words of the want, and every long line sits inside a `> ` quote block. The same suite covers the agent-token fallback, a wish kept local with no token, any ticket prefix, the queue cutoff, and the `Problem` / `Fix` body shape that leaves the fix unwritten.
 
 One artifact named `agent-feedback` holds `summary.json` and the case log. The PR selector owns `src/multibot_feedback.py` and `tools/multibot-feedback-proof.py` through `CI workflow:`, not a nearest desktop name. The verifier requires this workflow on the exact pull request head, downloads the artifact and gives the independent judge its summary and run receipt.
 
