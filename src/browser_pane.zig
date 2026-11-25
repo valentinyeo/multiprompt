@@ -3127,20 +3127,10 @@ fn browserRectMatchesTarget(rect: RECT, x: i32, y: i32, w: i32, h: i32) bool {
 }
 
 fn browserWindowNeedsPosition(hwnd: HANDLE, x: i32, y: i32, w: i32, h: i32) bool {
-    const vis = IsWindowVisible(hwnd) != 0;
-    if (!vis) {
-        if (verboseLoggingEnabled()) browserTrace("posBrowser needs: hwnd hidden");
-        return true;
-    }
+    if (IsWindowVisible(hwnd) == 0) return true;
     var current: RECT = std.mem.zeroes(RECT);
     if (GetWindowRect(hwnd, &current) == 0) return true;
-    const needs = !browserRectMatchesTarget(current, x, y, w, h);
-    if (needs and verboseLoggingEnabled()) {
-        var lbuf: [128]u8 = undefined;
-        const ls = std.fmt.bufPrint(&lbuf, "posBrowser needs: vis=1 rect=({d},{d},{d},{d})", .{ current.left, current.top, current.right, current.bottom }) catch "";
-        browserTrace(ls);
-    }
-    return needs;
+    return !browserRectMatchesTarget(current, x, y, w, h);
 }
 
 test "settle positioning is idempotent once Chromium reaches its dock" {
