@@ -35,9 +35,9 @@ One logical chat address, at most two pending switch requests, five successful s
 
 ## Coverage and sync
 
-Last reviewed source/model sync commit is `2d3eeee17b4fe6dd433b110577c42df91b96be9c`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
+Last reviewed source/model sync commit is `5908369f8`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
 
-MUBO-136 merges master `2d3eeee17b4fe6dd433b110577c42df91b96be9c` (including MUBO-452's pending fresh-start hold and MUBO-528's idle-poll worker gate) with its hosted clear control and other-user empty-history stream pin. All twelve covered reader functions are unchanged from master, as are the other covered files, model, bounds, decisions, probes and mutations. Clear and provider restart are outside the switch model. Only the reader hash and sync commit move; GitHub Actions reruns the self-test and replay.
+MUBO-136 merges master `5908369f8` (including MUBO-525's read-only event push and folder watch, MUBO-452's pending fresh-start hold, MUBO-528's idle-poll worker gate and MUBO-560's Zig download retry) with its hosted clear control and other-user empty-history stream pin. All twelve covered reader functions are unchanged from master, as are the other covered files, model, bounds, decisions, probes and mutations. Clear and provider restart are outside the switch model. Only the reader hash and sync commit move on top of master; GitHub Actions reruns the self-test and replay.
 
 SOFT-2681 publishes Claude's current native session and changes transcript selection. All twelve covered reader functions are unchanged from the prior sync, as are every other covered file, the model, bounds, decisions, probes and mutations. Only the reader hash and sync commit move. Hosted CI must rerun the full self-test and native replay; this review does not extend the model to transcript rotation.
 
@@ -68,6 +68,8 @@ MUBO-452 holds a queued message through a pending fresh start in `message_expire
 MUBO-135 keeps one row per hax server reply in the reader's conversation and host-history paths. `host_switch_ai`, `host_switch_abort`, `host_switch_handover`, `host_switch_rows`, `host_switch_follow`, `host_dispatch_switch`, `host_usage_limit` and every `host_auto_switch_*` function are unchanged, and `host_switch_rows` still reads the same display-history rows; the model, bounds, decisions, probes and mutations are unchanged. Only the reader's whole-file hash and the sync commit move.
 
 MUBO-528 makes `start_message_worker` ask the store whether a message is due before it forks, and hands its locked descriptor to the child so a poll during the child's startup reaches that lock. The covered `host_switch_*`, `host_usage_limit`, `host_auto_switch_*` and `host_dispatch_switch` functions are unchanged, so only the reader's whole-file hash and the sync commit move.
+
+MUBO-525 changes only the reader's event push: a synced live snapshot now reads the store read-only, the minute retention sweep probes read-only before it writes, the folder watch drops `IN_CLOSE_WRITE`, and the push loop wakes only for `store.sqlite3` or its `-wal`. The twelve covered `host_switch_*`, `host_usage_limit` and `host_auto_switch_*` functions are unchanged, including `host_switch_follow`, so only the reader's whole-file hash and the sync commit move. Bounds, decisions, probes and mutations stay the same. Merging master `2d3eeee17` carries MUBO-452's fresh-start queue hold, MUBO-304's ready tab wait and MUBO-528's due-check before a message worker forks, all outside every covered switch function.
 
 | Source | Covered behavior |
 | --- | --- |

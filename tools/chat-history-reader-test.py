@@ -7575,6 +7575,60 @@ class ServeEventPushTest(unittest.TestCase):
         self.ask(dict(id=89, op='engine_info'))
         self.assertEqual(self.line()['id'], 89)
 
+    def test_mubo_525_idle_reader_waits_without_spinning_cpu_or_rereading_store(self):
+        proc = Path(f'/proc/{self.server.pid}')
+        if not (proc / 'io').is_file() or not (proc / 'stat').is_file():
+            self.skipTest('proc io metrics unavailable')
+
+        def sample():
+            io_stats = {}
+            for row in (proc / 'io').read_text(encoding='utf-8').splitlines():
+                key, _, value = row.partition(':')
+                if value.strip().isdigit():
+                    io_stats[key.strip()] = int(value.strip())
+            stat_text = (proc / 'stat').read_text(encoding='utf-8')
+            tail = stat_text[stat_text.rfind(')') + 2:].split()
+            ticks = int(tail[11]) + int(tail[12])
+            return time.monotonic(), io_stats['rchar'], io_stats['syscr'], ticks
+
+        for index in range(30):
+            self.publish('seed ' + str(index))
+        self.ask(dict(id=88, op='events_subscribe', provider=self.provider, sid=self.sid, after=0, snapshot=True))
+        self.assertEqual(self.line()['id'], 88)
+        self.ask(dict(id=89, op='events_subscribe', provider=self.provider, sid='serve-events-empty', after=0, snapshot=True))
+        self.assertEqual(self.line()['id'], 89)
+        warm = self.publish('warm')
+        warmed = self.line()
+        self.assertEqual(warmed['id'], 88)
+        self.assertEqual([item['seq'] for item in warmed['result']['events']], [warm])
+        unrelated = reader.message_store_path().parent / 'store.unrelated.dispatch'
+        unrelated.write_bytes(b'x')
+        time.sleep(0.2)
+        t0, rchar0, syscr0, ticks0 = sample()
+        time.sleep(1.0)
+        unrelated.write_bytes(b'y')
+        time.sleep(1.0)
+        t1, rchar1, syscr1, ticks1 = sample()
+        elapsed = t1 - t0
+        delta_rchar = rchar1 - rchar0
+        delta_syscr = syscr1 - syscr0
+        cpu_pct = 100.0 * ((ticks1 - ticks0) / os.sysconf('SC_CLK_TCK')) / elapsed
+        summary = (f'MUBO_525_IDLE_SAMPLE cpu_pct={cpu_pct:.2f} read_bytes_per_s={delta_rchar / elapsed:.0f} '
+                   f'syscr_per_s={delta_syscr / elapsed:.1f} delta_rchar={delta_rchar} delta_syscr={delta_syscr} elapsed={elapsed:.2f}')
+        print(summary, flush=True)
+        self.assertLessEqual(delta_syscr, 50, summary)
+        self.assertLessEqual(delta_rchar, 64 * 1024, summary)
+        self.assertLess(cpu_pct, 10.0, summary)
+        started = time.monotonic()
+        fresh = self.publish('after idle')
+        pushed = self.line(timeout=2)
+        push_ms = (time.monotonic() - started) * 1000.0
+        print(f'MUBO_525_PUSH_LATENCY_MS={push_ms:.1f}', flush=True)
+        self.assertEqual(pushed['id'], 88)
+        self.assertEqual([item['seq'] for item in pushed['result']['events']], [fresh])
+        self.assertEqual(pushed['result']['events'][0]['event']['payload']['text'], 'after idle')
+        self.assertLess(push_ms, 1000.0)
+
 
 
 class AgentHostStreamFixture(AgentHostFixture):
