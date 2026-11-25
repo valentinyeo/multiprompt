@@ -43,7 +43,15 @@ $clock = [Diagnostics.Stopwatch]::StartNew()
 function Save($Value, [string]$Path) { [IO.File]::WriteAllText($Path, ($Value | ConvertTo-Json -Depth 30), [Text.UTF8Encoding]::new($false)) }
 function Read-Shared([string]$Path) {
     if (-not (Test-Path $Path)) { return '' }
-    $stream = [IO.File]::Open($Path, 'Open', 'Read', ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+    $readDeadline = [Diagnostics.Stopwatch]::StartNew()
+    while ($true) {
+        try { $stream = [IO.File]::Open($Path, 'Open', 'Read', ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete)); break }
+        catch {
+            $cause = $_.Exception.GetBaseException()
+            if ($cause -isnot [IO.IOException] -or ($cause.HResult -band 0xffff) -notin @(32, 33) -or $readDeadline.Elapsed.TotalSeconds -ge 5) { throw }
+            [void]$watcher.WaitForChanged([IO.WatcherChangeTypes]::All, 200)
+        }
+    }
     try { $reader = [IO.StreamReader]::new($stream); try { $reader.ReadToEnd() } finally { $reader.Dispose() } } finally { $stream.Dispose() }
 }
 function Wait-For([string]$ConditionName, [scriptblock]$Check, [int]$Seconds = 45) {
