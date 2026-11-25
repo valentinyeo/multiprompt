@@ -17,7 +17,7 @@ pub const ReasonText = struct {
     buf: [96]u8 = std.mem.zeroes([96]u8),
     len: u8 = 0,
 
-    pub fn text(self: ReasonText) []const u8 {
+    pub fn text(self: *const ReasonText) []const u8 {
         return self.buf[0..self.len];
     }
 };
@@ -647,7 +647,10 @@ test "MUBO-535 switch transport uses the switch_ai protocol and classifies switc
 
     Fake.reply = "{\"status\":\"refused\",\"reason\":\"unsupported_provider\"}";
     switch (switchChatWithTransport(identity, antigravity_agent, Fake.send)) {
-        .refused => |reason| try std.testing.expectEqualStrings("unsupported_provider", reason.text()),
+        .refused => |reason| {
+            const owned = reason;
+            try std.testing.expectEqualStrings("unsupported_provider", owned.text());
+        },
         else => return error.TestUnexpectedResult,
     }
 
@@ -683,7 +686,10 @@ test "MUBO-535 a refused reason is owned and survives the freed switch reply buf
     @memset(scratch, 'X');
     allocator.free(scratch);
     switch (outcome) {
-        .refused => |reason| try std.testing.expectEqualStrings("unsupported_provider", reason.text()),
+        .refused => |reason| {
+            const owned = reason;
+            try std.testing.expectEqualStrings("unsupported_provider", owned.text());
+        },
         else => return error.TestUnexpectedResult,
     }
 }
@@ -691,7 +697,10 @@ test "MUBO-535 a refused reason is owned and survives the freed switch reply buf
 test "MUBO-535 a refused reply with no reason still reports one" {
     const outcome = parseSwitchReply(std.testing.allocator, "{\"status\":\"refused\"}");
     switch (outcome) {
-        .refused => |reason| try std.testing.expectEqualStrings("the server refused this switch", reason.text()),
+        .refused => |reason| {
+            const owned = reason;
+            try std.testing.expectEqualStrings("the server refused this switch", owned.text());
+        },
         else => return error.TestUnexpectedResult,
     }
 }

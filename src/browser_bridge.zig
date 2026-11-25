@@ -2828,7 +2828,10 @@ fn zsbSessionSwitchAi(argv: []const []const u8, out: []u8, comptime ops: type) u
                     const text = std.fmt.bufPrint(out, "{{\"ok\":true,\"status\":\"busy\",\"reason\":\"chat_busy\",\"message\":\"Wait for the current reply first\",\"tab\":{d},\"provider\":\"{s}\"}}\n", .{ args.tab, current_name }) catch return 0;
                     return text.len;
                 },
-                .refused => |reason| return zsbSwitchAiOutcome(out, "refused", reason.text(), args.tab, current_name),
+                .refused => |reason| {
+                    const owned = reason;
+                    return zsbSwitchAiOutcome(out, "refused", owned.text(), args.tab, current_name);
+                },
                 .failed => |reason| return zsbSwitchAiOutcome(out, "failed", reason, args.tab, current_name),
             }
         },
