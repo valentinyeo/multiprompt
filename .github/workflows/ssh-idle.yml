@@ -25,6 +25,7 @@ jobs:
       - uses: ./.github/actions/setup-zig
         with:
           cache: 'false'
+          mirror: https://pkg.hexops.org/zig
       - run: node --test tools/shared-helper-channels.test.js tools/chat-transport.test.js tools/chat-transport-writer.test.js tools/token-ladder-panel.test.js
       - run: node tools/check-timer-ratchet.mjs
       - run: node tools/strip-comments.mjs --check
@@ -50,6 +51,7 @@ jobs:
       - uses: ./.github/actions/setup-zig
         with:
           cache: 'false'
+          mirror: https://pkg.hexops.org/zig
       - uses: Vampire/setup-wsl@887f39deb6c0976365e546926fe66f41b77d65ff
         with:
           distribution: Ubuntu-24.04
