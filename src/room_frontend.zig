@@ -1662,6 +1662,29 @@ fn dropSubmittedDraft(item: *const PendingCommand) void {
     dropDraft(.{ .store = item.location, .room_id = item.room_id }, text);
 }
 
+fn retireSubmittedDraft(item: *const PendingCommand) void {
+    dropSubmittedDraft(item);
+    _ = flushUi();
+}
+
+fn sameLoadedRoom(location: RoomLocation) bool {
+    const previous = retained_selection orelse return false;
+    if (!sameLocation(previous, location)) return false;
+    const current = owned_model orelse return false;
+    return std.mem.eql(u8, current.value.room_id, &location.room_id);
+}
+
+fn retireAcceptedDraft(record: *const journal.Record, location: StoreLocation) void {
+    if (record.state != .accepted or record.kind != .post or record.room_id.len != 36) return;
+    var parsed = std.json.parseFromSlice(std.json.Value, std.heap.page_allocator, record.request, .{ .allocate = .alloc_always }) catch return;
+    defer parsed.deinit();
+    const text = textField(parsed.value, "text") orelse return;
+    var room = RoomLocation{ .store = location, .room_id = undefined };
+    @memcpy(&room.room_id, record.room_id);
+    dropDraft(room, text);
+    _ = flushUi();
+}
+
 fn validReceiptBindings(item: *const PendingCommand, payload: std.json.Value) bool {
     if (item.kind != .edit) return true;
     if (payload != .object) return false;
@@ -1720,7 +1743,7 @@ fn finishCommand(c: *rooms.Controller, completion: rooms.Completion, fresh: bool
     var outcome: [192]u8 = undefined;
     diagnostics.syncLog(std.fmt.bufPrint(&outcome, "[rooms] command finished kind={s} state={s} fresh={} visible={}", .{ @tagName(item.kind), @tagName(state), fresh, visible }) catch unreachable);
     if (state == .accepted and item.kind == .post) {
-        dropSubmittedDraft(item);
+        retireSubmittedDraft(item);
     }
     if (evidence) |bytes| {
         journal.update(item.scope, &item.id, state, bytes) catch |err| {
@@ -1792,6 +1815,7 @@ fn driveRestore(c: *rooms.Controller) bool {
                     return true;
                 },
                 .accepted => {
+                    retireAcceptedDraft(value.record(), location);
                     if (!enqueueRefresh(location)) {
                         recovery_delay_ms = @min(recovery_delay_ms * 2, 60000);
                         _ = w.SetTimer(app_state.g_main_hwnd, TIMER_ROOM_UI, recovery_delay_ms, null);
@@ -2562,10 +2586,11 @@ pub fn select(location: RoomLocation) void {
     if (!enter()) return;
     diagnostics.syncLog("[rooms] view opened");
     var reusable = false;
-    if (front != .create and view.isRoomMode()) if (c) |value| if (owned_model) |current| {
-        reusable = value.has_host_uuid and std.mem.eql(u8, &value.host_uuid, &location.store.store_uuid) and std.mem.eql(u8, &current.value.room_id, &location.room_id);
+    if (front != .create and view.isRoomMode()) if (c) |value| {
+        reusable = value.has_host_uuid and std.mem.eql(u8, &value.host_uuid, &location.store.store_uuid) and sameLoadedRoom(location);
     };
     if (reusable) {
+        clearLoadingModel();
         if (owned_model) |current| _ = view.setModel(&current.value);
         diagnostics.syncLog("[rooms] view kept the loaded room while it refreshes");
     } else {

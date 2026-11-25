@@ -218,6 +218,21 @@ test('a saved room send is shown before the room is read again', () => {
   assert.match(run(`${fixture}\n${declaration(hidden, 'fn applyAcceptedPost(')}\n${declaration(hidden, 'fn wide(')}`, { 'room_post.zig': read('room_post.zig') }, 1), /a saved send is shown in the room before the room is read again[\s\S]*FAIL/);
 });
 
+test('an accepted room send leaves no draft behind for the next start', () => {
+  const frontend = read('room_frontend.zig');
+  const fixture = fs.readFileSync(path.join(__dirname, 'fixtures/MUBO-533/accepted-draft.zig'), 'utf8');
+  const declarations = ['pub const StoreLocation = struct {', 'pub const RoomLocation = struct {', 'pub const Front = union(enum) {'];
+  const functions = ['fn sameLocation(', 'fn textField(', 'fn dropDraft(', 'fn dropSubmittedDraft(', 'fn retireSubmittedDraft(', 'fn retireAcceptedDraft('];
+  const compose = source => `${fixture}\n${declarations.map(marker => declaration(source, marker)).join('\n')}\n${functions.map(marker => declaration(source, marker)).join('\n')}`;
+  run(compose(frontend));
+  const unsaved = frontend.replace('    dropDraft(room, text);\n    _ = flushUi();\n', '    dropDraft(room, text);\n');
+  assert.notEqual(unsaved, frontend);
+  assert.match(run(compose(unsaved), {}, 1), /an accepted receipt retires only its own saved draft after a restart[\s\S]*FAIL/);
+  const keepsUncertain = frontend.replace('if (record.state != .accepted or record.kind != .post or record.room_id.len != 36) return;', 'if (record.kind != .post or record.room_id.len != 36) return;');
+  assert.notEqual(keepsUncertain, frontend);
+  assert.match(run(compose(keepsUncertain), {}, 1), /an uncertain send keeps its saved draft and its original body[\s\S]*FAIL/);
+});
+
 test('a send pressed while a room opens is held for that room and never sent elsewhere', () => {
   const source = read('room_view.zig');
   const fixture = fs.readFileSync(path.join(__dirname, 'fixtures/MUBO-533/deferred-send.zig'), 'utf8');
