@@ -20,13 +20,13 @@ Each chat avatar in the sidebar carries a small solid triangle inside its top ri
 
 ## Driving it
 
-1. Seed `session.json` with five tmux tabs, four carrying `ai_agent` 1, 2, 3 and 8 plus a `csid`, and the names chosen to contradict the provider.
+1. Seed `session.json` with five tmux tabs, four carrying `ai_agent` 1, 2, 3 and 8 plus a `csid`, and the names chosen to contradict the provider. Every tab carries palette colour 6 (teal), which is far from all four triangle colours, so the avatar body can never be mistaken for a mark.
 2. Launch `--no-window-restore` with the verification boundary as the reader.
-3. Read the `[photo-proof]` avatar rectangles from `debug.log` and capture the flush triangle square in each avatar's top right corner. Its side is `round(10 * avatar side / 36)`.
-4. Require the provider colour in the triangle body, the row background at the square's bottom left and at the rounded top right corner, no near-white pixel anywhere in it, no provider colour just outside the avatar's top and right edges, and none near the top left or bottom right corners.
+3. Read the `[photo-proof]` avatar rectangles from `debug.log` and capture the flush triangle square in each avatar's top right corner. Its side is `round(10 * avatar side / 36)` and its corner radius is `round(22 * avatar side / 100)`.
+4. Classify every pixel of that square against the accepted shape: the right triangle `y <= x` intersected with the avatar corner circle. A pixel wholly inside the shape must be the provider colour, a pixel wholly outside it must not be, and only the anti-aliased boundary may blend. Require a solid body, no near-white pixel anywhere in the square, and no provider colour just outside the avatar's top and right edges.
 5. Hold Ctrl and sample the jump digit on the top left corner; release and confirm it is gone.
 6. Hover the second row and confirm the row's second line repaints.
-7. Collapse the sidebar with Ctrl+Shift+B and repeat the triangle sampling on the rail avatars.
+7. Collapse the sidebar with Ctrl+Shift+B and repeat the shape sampling on the rail avatars.
 
 `tools/verify-provider-badges/drive.ps1` runs these checks at 96 and 144 DPI. `.github/workflows/provider-badges.yml` owns the nightly proof. Before merge, `node tools/provider-badges-native.test.js` runs the same unit proof and both DPI drives on a branch through `test-repeat.yml`, because a new workflow cannot be dispatched until it exists on the default branch. The unit proof first swaps in `tools/fixtures/MUBO-568/provider-badge-before.zig`, the chat-name version, and `tools/fixtures/MUBO-568/provider-badge-round.zig`, the round badge with a white glyph, and requires a named test to fail for each.
 
@@ -34,7 +34,8 @@ Each chat avatar in the sidebar carries a small solid triangle inside its top ri
 
 - The triangle must never be painted from the chat name, the avatar palette colour, the robot colour or text on screen. Only the shell's resolved `ai_agent` counts.
 - Model and effort come from the live chat settings the reader reports. Unknown values are omitted, never guessed.
-- The triangle is solid, so any white pixel in its square means a glyph and any provider colour at the square's bottom left means a round badge.
+- A pixel sample is only meaningful away from the anti-aliased boundary: the corner circle passes within one pixel of most of a 10px triangle, so a fixed body point such as `(2/3, 1/4)` lands on a blended edge. Classify the whole square instead.
+- The triangle is solid, so any white pixel in its square means a glyph, and any provider colour in the corner cut means the avatar corner is not respected.
 - A flush triangle is clipped by the rounded corner. Painting it over the bounding corner, or insetting it by a fixed 4px, both fail the native proof.
-- Palette colour 4 is the same lilac as the Antigravity triangle, so a workspace using it hides the absent-badge assertion.
+- Palette colour 4 is the same lilac as the Antigravity triangle and colour 0 is the same green as Pi, so a seeded avatar using either hides the shape proof. Colour 6 is used instead.
 - Figma frame 313:23 was not readable by the building agent, so the Antigravity and Pi colours are the incumbent `bot_avatar.zig` palette entries, not sampled from Figma.

@@ -211,6 +211,37 @@ test "MUBO-568 the corner triangle fills and stays inside the avatar at every si
     try std.testing.expect(round.right - round.size > 50 and round.bottom() <= 52);
 }
 
+const Coverage = enum { outside, edge, inside };
+
+fn coverageOf(x: i32, y: i32, g: Geometry) Coverage {
+    const corners = [_][2]i32{ .{ x, y }, .{ x + 1, y }, .{ x, y + 1 }, .{ x + 1, y + 1 } };
+    var triangle_in = true;
+    var triangle_out = true;
+    for (corners) |corner| {
+        const below = corner[1] - g.top - (corner[0] - g.left());
+        if (below < 0) triangle_out = false else triangle_in = false;
+    }
+    var shape_in = triangle_in;
+    var shape_out = triangle_out;
+    if (g.clipped and g.radius > 0) {
+        const centre_x = g.right - g.radius;
+        const centre_y = g.top + g.radius;
+        const limit = g.radius * g.radius;
+        var circle_in = true;
+        var circle_out = true;
+        for (corners) |corner| {
+            const dx = corner[0] - centre_x;
+            const dy = corner[1] - centre_y;
+            if (dx * dx + dy * dy < limit) circle_out = false else circle_in = false;
+        }
+        shape_in = triangle_in and circle_in;
+        shape_out = triangle_out or circle_out;
+    }
+    if (shape_in) return .inside;
+    if (shape_out) return .outside;
+    return .edge;
+}
+
 fn triangleProof(avatar_side: i32, circle: bool) !void {
     const margin: i32 = 4;
     const width: i32 = avatar_side + margin * 2;
@@ -250,19 +281,21 @@ fn triangleProof(avatar_side: i32, circle: bool) !void {
             }
         }
     }
-    try std.testing.expectEqual(painted, at(pixels, stride, g.left() + @divTrunc(g.size * 2, 3), g.top + @divTrunc(g.size, 4)));
-    try std.testing.expectEqual(background, at(pixels, stride, g.left() + 1, g.bottom() - 1));
-    if (circle) {
-        try std.testing.expectEqual(painted, at(pixels, stride, g.right - 2, g.top));
-    } else {
-        try std.testing.expectEqual(background, at(pixels, stride, g.right - 1, g.top));
-    }
     var glyph: usize = 0;
-    var covered: usize = 0;
+    var solid: usize = 0;
     for (0..@intCast(g.size)) |row| {
         for (0..@intCast(g.size)) |column| {
-            const value = at(pixels, stride, g.left() + @as(i32, @intCast(column)), g.top + @as(i32, @intCast(row)));
-            if (value == painted) covered += 1;
+            const x = g.left() + @as(i32, @intCast(column));
+            const y = g.top + @as(i32, @intCast(row));
+            const value = at(pixels, stride, x, y);
+            switch (coverageOf(x, y, g)) {
+                .inside => {
+                    try std.testing.expectEqual(painted, value);
+                    solid += 1;
+                },
+                .outside => try std.testing.expectEqual(background, value),
+                .edge => {},
+            }
             const red = (value >> 16) & 0xFF;
             const green = (value >> 8) & 0xFF;
             const blue = value & 0xFF;
@@ -271,7 +304,12 @@ fn triangleProof(avatar_side: i32, circle: bool) !void {
     }
     try std.testing.expectEqual(@as(usize, 0), glyph);
     const box: usize = @intCast(g.size * g.size);
-    try std.testing.expect(covered * 100 >= box * 15 and covered * 100 <= box * 65);
+    try std.testing.expect(solid * 100 >= box * 8 and solid * 100 <= box * 80);
+    if (circle) {
+        try std.testing.expectEqual(painted, at(pixels, stride, g.right - 1, g.top));
+    } else {
+        try std.testing.expectEqual(background, at(pixels, stride, g.right - 1, g.top));
+    }
 }
 
 test "MUBO-568 the solid triangle fills the avatar corner at 100, 150 and pinned sizes" {

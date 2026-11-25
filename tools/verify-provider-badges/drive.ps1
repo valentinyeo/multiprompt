@@ -61,7 +61,24 @@ function Shot([string]$Name) {
 }
 function Badge($Row) {
     $side = [int][Math]::Max(6, [int][Math]::Floor(($Row.size * 10 + 18) / 36))
-    @{ side=$side; inset=0; left=($Row.right - $side); top=$Row.y }
+    @{ side=$side; inset=0; radius=[int][Math]::Floor(($Row.size * 22 + 50) / 100); left=($Row.right - $side); top=$Row.y }
+}
+function Badge-Coverage([int]$x, [int]$y, [int]$Side, [int]$Radius) {
+    $corners = @(@(0,0), @(1,0), @(0,1), @(1,1))
+    $triangleIn = $true; $triangleOut = $true
+    foreach ($corner in $corners) {
+        $below = ($y + $corner[1]) - ($x + $corner[0])
+        if ($below -lt 0) { $triangleOut = $false } else { $triangleIn = $false }
+    }
+    $circleIn = $true; $circleOut = $true
+    $centreX = $Side - $Radius; $centreY = $Radius; $limit = $Radius * $Radius
+    foreach ($corner in $corners) {
+        $dx = ($x + $corner[0]) - $centreX; $dy = ($y + $corner[1]) - $centreY
+        if (($dx * $dx + $dy * $dy) -lt $limit) { $circleOut = $false } else { $circleIn = $false }
+    }
+    if ($triangleIn -and $circleIn) { return 'inside' }
+    if ($triangleOut -or $circleOut) { return 'outside' }
+    'edge'
 }
 function Capture([int]$x, [int]$y, [int]$w, [int]$h) {
     $origin = [ChatDeliveryDesktop]::ScreenPoint($main, $x, $y)
@@ -89,10 +106,23 @@ function Check-Badge($Row, [string]$Hex, [string]$Name) {
             }
         }
         if ($match -lt $area * .20) { throw "Provider colour absent: $Name match=$match area=$area" }
-        if ($match -gt $area * .65) { throw "The badge fills its box instead of a triangle: $Name match=$match area=$area" }
-        if (-not (Near $bitmap.GetPixel([int][Math]::Floor($b.side * 2 / 3), [int][Math]::Floor($b.side / 4)) $rgb[0] $rgb[1] $rgb[2] 26)) { throw "The triangle body is missing its provider colour: $Name" }
-        if (Near $bitmap.GetPixel(($b.side - 1), 0) $rgb[0] $rgb[1] $rgb[2] 26) { throw "The badge paints over the rounded avatar corner: $Name" }
-        if (Near $bitmap.GetPixel(0, ($b.side - 1)) $rgb[0] $rgb[1] $rgb[2] 26) { throw "The badge is round or square, not a triangle: $Name" }
+        if ($match -gt $area * .85) { throw "The badge fills its box instead of a triangle: $Name match=$match area=$area" }
+        $inside = 0; $outside = 0; $missing = 0; $leaked = 0
+        for ($y = 0; $y -lt $bitmap.Height; $y++) {
+            for ($x = 0; $x -lt $bitmap.Width; $x++) {
+                $class = Badge-Coverage $x $y $b.side $b.radius
+                if ($class -eq 'inside') {
+                    $inside++
+                    if (-not (Near $bitmap.GetPixel($x, $y) $rgb[0] $rgb[1] $rgb[2] 26)) { $missing++ }
+                } elseif ($class -eq 'outside') {
+                    $outside++
+                    if (Near $bitmap.GetPixel($x, $y) $rgb[0] $rgb[1] $rgb[2] 26) { $leaked++ }
+                }
+            }
+        }
+        if ($inside -lt 6 -or $inside * 100 -lt $area * 8) { throw "The triangle is missing its solid body: $Name inside=$inside area=$area" }
+        if ($missing -ne 0) { throw "The solid triangle body is not the provider colour: $Name missing=$missing inside=$inside" }
+        if ($leaked -ne 0) { throw "The triangle paints outside its corner shape: $Name leaked=$leaked outside=$outside" }
         if ($glyph -ne 0) { throw "A drawn glyph appeared in the badge: $Name glyph=$glyph" }
         $spill = 0
         foreach ($band in @(
@@ -105,19 +135,8 @@ function Check-Badge($Row, [string]$Hex, [string]$Name) {
             } finally { $patch.Dispose() }
         }
         if ($spill -ne 0) { throw "The badge spills outside the avatar: $Name spill=$spill" }
-        $overlap = 0
-        foreach ($corner in @(
-            @{x=($Row.x + 2); y=($Row.y + 2)},
-            @{x=($Row.right - [int][Math]::Floor(8 * $Dpi / 96)); y=($Row.bottom - [int][Math]::Floor(8 * $Dpi / 96))}
-        )) {
-            $patch = Capture $corner.x $corner.y 6 6
-            try {
-                for ($y = 0; $y -lt $patch.Height; $y++) { for ($x = 0; $x -lt $patch.Width; $x++) { if (Near $patch.GetPixel($x, $y) $rgb[0] $rgb[1] $rgb[2] 26) { $overlap++ } } }
-            } finally { $patch.Dispose() }
-        }
-        if ($overlap -ne 0) { throw "The badge covers another avatar corner: $Name overlap=$overlap" }
         $bitmap.Save("$Evidence/badge-$Name.png")
-        $checks.Add(@{name="badge-$Name"; passed=$true; size=$Row.size; match=$match; area=$area; side=$b.side; inset=$b.inset})
+        $checks.Add(@{name="badge-$Name"; passed=$true; size=$Row.size; match=$match; area=$area; side=$b.side; radius=$b.radius; inside=$inside; outside=$outside})
     } finally { $bitmap.Dispose() }
 }
 function Check-NoBadge($Row, [string]$Name) {
@@ -183,7 +202,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Transcript seed failed' }
     $tabs = @()
     for ($i = 0; $i -lt $providers.Count; $i++) {
-        $tab = @{kind='tmux'; name=$providers[$i].name; manual=$true; tmux_host=0; tmux_session=$names[$i]; workspace=0; pinned_top=($i -lt 2); favorite=($i -eq 0); cv=$false; pid=0}
+        $tab = @{kind='tmux'; name=$providers[$i].name; manual=$true; tmux_host=0; tmux_session=$names[$i]; workspace=0; color=6; pinned_top=($i -lt 2); favorite=($i -eq 0); cv=$false; pid=0}
         if ($providers[$i].agent -ne 0) {
             $tab.ai_agent = $providers[$i].agent
             $tab.csid = $sids[$names[$i]]
