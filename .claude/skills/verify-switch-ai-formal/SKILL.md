@@ -35,7 +35,7 @@ One logical chat address, at most two pending switch requests, five successful s
 
 ## Coverage and sync
 
-Last reviewed source/model sync commit is `90f504e13fabf89b998e070a98c7feab9f41057c`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
+Last reviewed source/model sync commit is `532ebff5055394f1765fd6b217e419cce79c0258`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
 
 SOFT-2681 publishes Claude's current native session and changes transcript selection. All twelve covered reader functions are unchanged from the prior sync, as are every other covered file, the model, bounds, decisions, probes and mutations. Only the reader hash and sync commit move. Hosted CI must rerun the full self-test and native replay; this review does not extend the model to transcript rotation.
 
@@ -50,6 +50,8 @@ MUBO-246 handles a prompt a UserPromptSubmit hook blocked before the chat read i
 MUBO-454 rewrites the mention wire note and drops `currentLive`'s exclude argument. That sits outside every covered switch function, whose behavior, probes, decisions and mutations are unchanged, so only the reader's whole-file hash and the sync commit move.
 
 MUBO-286 adds the owner browser relay endpoint, the hosted-session registration and every documented runtime name for the browser CLI. All of it sits outside the covered switch functions, whose behavior, probes, decisions and mutations are unchanged, so only the reader's whole-file hash and the sync commit move.
+
+MUBO-525 changes only the reader's event push: a synced live snapshot now reads the store read-only, the minute retention sweep probes read-only before it writes, the folder watch drops `IN_CLOSE_WRITE`, and the push loop wakes only for `store.sqlite3` or its `-wal`. The twelve covered `host_switch_*`, `host_usage_limit` and `host_auto_switch_*` functions are unchanged, including `host_switch_follow`, so only the reader's whole-file hash and the sync commit move. Bounds, decisions, probes and mutations stay the same.
 
 MUBO-278 lets a non-hosted hax chat read its saved transcript. `resolve_response_path` returns the empty-history reply for hax only when a host config exists, so a runner tab falls through to `resolve_tmux_agent` and reads the transcript it already owns, while a hosted hax chat still answers from the host history only. hax is not a switch target and no covered switch, usage-limit or auto-switch function calls that resolver, so the model, bounds, decisions, probes and mutations are unchanged. Only the reader's whole-file hash and the sync commit move.
 
