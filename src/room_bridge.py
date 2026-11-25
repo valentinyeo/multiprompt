@@ -156,9 +156,12 @@ class RoomBridge:
         pending = self.store.db.execute("SELECT DISTINCT d.room_id FROM deliveries d JOIN members m ON m.id=d.member_id LEFT JOIN reply_progress p ON p.delivery_id=d.id WHERE d.status='pending' AND m.active=1 AND COALESCE(p.done,0)=0 AND (? IS NULL OR m.provider_sid=?) ORDER BY COALESCE(p.checked,0) LIMIT 16", (sid, sid)).fetchall()
         if not pending or not scoped_runtime():
             return
+        deadline = time.monotonic() + 2
         for row in pending:
+            if time.monotonic() >= deadline:
+                break
             try:
-                self.sync_replies(row['room_id'], sid)
+                self.sync_replies(row['room_id'], sid, deadline)
             except (RoomError, OSError, TimeoutError):
                 continue
 
@@ -239,9 +242,10 @@ class RoomBridge:
             result = self.store.execute(command)
         return result
 
-    def sync_replies(self, room_id, sid=None):
+    def sync_replies(self, room_id, sid=None, deadline=None):
         deliveries = self.store.db.execute("SELECT d.id, d.member_id FROM deliveries d JOIN members m ON m.id=d.member_id LEFT JOIN reply_progress p ON p.delivery_id=d.id WHERE d.room_id=? AND d.status='pending' AND m.active=1 AND COALESCE(p.done,0)=0 AND (? IS NULL OR m.provider_sid=?) ORDER BY (SELECT MAX(COALESCE(q.checked,0)) FROM deliveries e LEFT JOIN reply_progress q ON q.delivery_id=e.id WHERE e.member_id=d.member_id AND e.status='pending' AND COALESCE(q.done,0)=0),d.member_id,d.delivery_seq LIMIT 64", (room_id, sid, sid)).fetchall()
-        deadline = time.monotonic() + 2
+        if deadline is None:
+            deadline = time.monotonic() + 2
         waiting = set()
         for delivery in deliveries:
             if time.monotonic() >= deadline:

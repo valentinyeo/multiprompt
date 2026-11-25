@@ -92,22 +92,51 @@ test "names resolve to stable aliases" {
 `, { 'room_post.zig': read('room_post.zig') });
 });
 
+test('the member picker accepts unopened server chats without requiring local shells', () => {
+  const source = read('room_frontend.zig');
+  run(`
+const std = @import("std");
+const rooms = struct { const Controller = struct { host_uuid: [36]u8 = @splat('s') }; };
+${declaration(source, 'const Candidate = struct {')}
+var candidates: [768]Candidate = undefined;
+var candidate_count: usize = 0;
+var status_generation: u64 = 1;
+var candidate_generation: u64 = 1;
+${declaration(source, 'fn textField(')}
+${declaration(source, 'fn acceptMembers(')}
+test "unopened chats retain their shown names and stable bindings" {
+    const data = "{\\"members\\":[{\\"provider\\":\\"claude\\",\\"sid\\":\\"unopened-server-chat\\",\\"display_name\\":\\"Research Notes\\",\\"alive\\":false}]}";
+    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, data, .{});
+    defer parsed.deinit();
+    const c = rooms.Controller{};
+    try std.testing.expect(acceptMembers(&c, parsed.value));
+    try std.testing.expectEqual(@as(usize, 1), candidate_count);
+    try std.testing.expectEqualStrings("Research Notes", candidates[0].display_name[0..candidates[0].display_name_len]);
+    try std.testing.expectEqualStrings("claude:unopened-server-chat", candidates[0].session_identity[0..candidates[0].session_identity_len]);
+    const alias = candidates[0].alias;
+    const alias_len = candidates[0].alias_len;
+    try std.testing.expect(acceptMembers(&c, parsed.value));
+    try std.testing.expectEqualSlices(u8, alias[0..alias_len], candidates[0].alias[0..candidates[0].alias_len]);
+    try std.testing.expect(!candidates[0].online);
+}
+`);
+});
+
 test('fresh-profile room discovery probes configured hosts without local pins or tabs', () => {
   const source = read('room_frontend.zig');
   const fixture = fs.readFileSync(path.join(__dirname, 'fixtures/MUBO-533/store-discovery.zig'), 'utf8');
-  run(`${fixture}\n${declaration(source, 'const StoreDiscovery = struct {')}\nvar store_discovery: [3]?*StoreDiscovery = @splat(null);\n${declaration(source, 'fn discoverStores(')}\n${declaration(source, 'fn clearStoreDiscovery(')}\n${declaration(source, 'pub fn catalog(')}`);
+  run(`${fixture}\n${declaration(source, 'const StoreDiscovery = struct {')}\nvar store_discovery: [3]?*StoreDiscovery = @splat(null);\n${declaration(source, 'fn discoverStores(')}\n${declaration(source, 'fn clearStoreDiscovery(')}\n${declaration(source, 'fn cacheCatalog(')}\n${declaration(source, 'pub fn catalog(')}`);
 });
 
 test('unavailable creation reports a reason instead of silently returning', () => {
   const source = read('room_frontend.zig');
-  const open = declaration(source, 'pub fn openCreate(');
-  assert.match(open, /showError|MessageBoxW/);
-  assert.doesNotMatch(open, /if \(!saveDraft\(\) or !enter\(\)\) return;/);
+  const fixture = fs.readFileSync(path.join(__dirname, 'fixtures/MUBO-533/create-errors.zig'), 'utf8');
+  run(`${fixture}\n${declaration(source, 'pub fn openCreate(')}`, { 'workspaces.zig': 'pub fn updateMainWindowTitle() void {}\n' });
 });
 
 test('room picker inserts the shown name and does not offer a stub restart', () => {
   const source = read('room_view.zig');
-  const choose = declaration(source, 'fn chooseMention(');
-  assert.match(choose, /members\[index\]\.name/);
+  const fixture = fs.readFileSync(path.join(__dirname, 'fixtures/MUBO-533/mention-picker.zig'), 'utf8');
+  run(`${fixture}\n${declaration(source, 'fn chooseMention(')}\n${declaration(source, 'fn mentionStart(')}`);
   assert.doesNotMatch(source, /text\(dc, L\("Restart"\)/);
 });

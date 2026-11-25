@@ -650,6 +650,26 @@ fn discoverStores() void {
     }
 }
 
+fn cacheCatalog(c: *const rooms.Controller) void {
+    for (store_discovery) |entry| if (entry) |probe| {
+        if (probe.generation != account_generation or probe.controller.job != null or !std.mem.eql(u8, &probe.key, &route_key) or !probe.controller.has_host_uuid or !std.mem.eql(u8, &probe.controller.host_uuid, &c.host_uuid)) continue;
+        probe.complete = false;
+        probe.arena.deinit();
+        probe.arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        probe.rows = .empty;
+        const a = probe.arena.allocator();
+        for (catalog_rows.items) |row| {
+            const id = a.dupe(u8, row.id) catch return;
+            const name = a.dupe(u8, row.name) catch return;
+            probe.rows.append(a, .{ .store_uuid = row.store_uuid, .id = id, .name = name, .revision = row.revision, .sequence = row.sequence }) catch return;
+        }
+        probe.after = catalog_after;
+        probe.through = catalog_through;
+        probe.complete = true;
+        return;
+    };
+}
+
 fn storeDiscoveryPending() bool {
     for (store_discovery) |entry| if (entry) |probe| {
         if (probe.controller.job != null) return true;
@@ -1868,6 +1888,7 @@ pub fn pollTimer(id: usize) bool {
                 _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM_DISCOVERY);
                 catalog_store_uuid = c.host_uuid;
                 catalog_complete = true;
+                cacheCatalog(c);
                 finishRefresh(c, true);
                 if (created_selection != null and (!isVisible() or !view.ownsFocus())) created_selection = null;
                 if (driveRestore(c)) return true;
@@ -2244,6 +2265,7 @@ pub fn openCreate() void {
         return;
     }
     discovery_attempts = 0;
+    discoverStores();
     beginDiscovery(false);
     if (controller) |*c| if (c.job == null and nextStatus(c)) armPoll();
 }
