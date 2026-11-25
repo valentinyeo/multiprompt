@@ -141,7 +141,7 @@ Unknown names return `{"ok":false,"error":"unknown_workspace"|"unknown_group"|"u
 
 ## Repairing tabs from the command line
 
-Six more app-level commands fix a tab layout without a keyboard, a restart or a window switch. Each runs in the background, never changes the active tab, workspace or foreground window, and saves the layout at once so a restart keeps it. Every reply is JSON, and a refusal exits nonzero with `ok:false` and an `error` code.
+Seven more app-level commands fix a tab layout without a keyboard, a restart or a window switch. Each runs in the background, never changes the active tab, workspace or foreground window, and saves the layout at once so a restart keeps it. Every reply is JSON, and a refusal exits nonzero with `ok:false` and an `error` code.
 
 ```bash
 zsb session-rename --tab 42 --name "Runner 7"
@@ -151,6 +151,7 @@ zsb session-move --tab 42 --ungrouped
 zsb session-close --tab 42
 zsb session-pin --tab 42
 zsb session-unpin --tab 42
+zsb session-wait --tab 42
 ```
 
 - `session-rename` sets a manual title (1–63 UTF-16 units, no control characters) and replies `{"ok":true,"renamed":true,"tab":42}`.
@@ -158,8 +159,9 @@ zsb session-unpin --tab 42
 - `session-move` takes `--workspace`, `--group` or `--ungrouped` (one of them is required, `--group` and `--ungrouped` are exclusive) and matches names exactly, like `session-open`. Moving to another workspace without `--group` leaves the tab ungrouped. Unknown names return `unknown_workspace` or `unknown_group` with `valid_names`, and a snoozed workspace returns `workspace_snoozed`.
 - `session-close` closes one tab and replies `{"ok":true,"closed":true,"tab":42}`. It does not touch the remote tmux session.
 - `session-pin` pins one tab to the top of the sidebar in every view and replies `{"ok":true,"pinned":true,"tab":42}`; `session-unpin` clears that pin and replies `{"ok":true,"unpinned":true,"tab":42}`. Both work on the active tab, and running either twice leaves the same layout.
+- `session-wait` moves one background tab to Waiting until it needs attention and replies `{"ok":true,"waiting":true,"tab":42}`. A tab that already waits replies `{"ok":true,"already":true,"tab":42}` and changes nothing.
 
-`session-move`, `session-rebind` and `session-close` refuse the active tab with `active_tab`, because moving or closing it would change what the user is looking at. `session-close` refuses a pinned tab with `pinned_tab`. An unknown tab id returns `unknown_tab`. `workspace-list` now also reports each remote tab's `state` (`connecting`, `connected` or `disconnected`), and `null` for local shells.
+`session-move`, `session-rebind`, `session-close` and `session-wait` refuse the active tab with `active_tab`, because moving or closing it would change what the user is looking at. `session-close` refuses a pinned tab with `pinned_tab`. An unknown tab id returns `unknown_tab`. `workspace-list` now also reports each remote tab's `state` (`connecting`, `connected` or `disconnected`), and `null` for local shells.
 
 ## Routing Rule
 
