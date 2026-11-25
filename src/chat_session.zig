@@ -1603,7 +1603,10 @@ pub fn chatFileOnReady() void {
                     app_state.shells[idx].ai_agent = if (entry.key.pi) 3 else if (entry.key.codex) 2 else 1;
                     changed = true;
                 }
-                if (changed) saveSession();
+                if (changed) {
+                    saveSession();
+                    @import("window_layout.zig").invalidateSidebar();
+                }
             }
             if (preview_index) |idx| {
                 if (!std.meta.eql(old_preview.?, @import("agent_second_line.zig").forShell(idx))) preview_changed = true;

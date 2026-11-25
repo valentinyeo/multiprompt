@@ -1970,6 +1970,12 @@ pub fn invalidateDraftMarker(shell_idx: u32) void {
     }
 }
 
+fn drawProviderBadge(hdc: HANDLE, avatar_rect: RECT, agent: u8) void {
+    const badge = @import("provider_badge.zig");
+    const mark = badge.mark(agent) orelse return;
+    badge.draw(hdc, badge.geometry(avatar_rect.right, avatar_rect.top, uiScaled), mark);
+}
+
 fn drawRobotMarker(hdc: HANDLE, rect: RECT, marker: @import("star_badge_geometry.zig").Marker, background: DWORD) void {
     const badge = @import("star_badge_geometry.zig");
     const g = badge.geometry(rect.right, rect.bottom, uiScaled);
@@ -2009,6 +2015,7 @@ fn paintChatSidebarRow(hdc: HANDLE, column: RECT, y: i32, index: u32, avatar_rec
         debugLog(std.fmt.bufPrint(&log, "[sidebar-avatar] target={d} face={d} color={d}", .{ index, appearance.face, appearance.color }) catch "[sidebar-avatar] unavailable");
     }
     if (!@import("bot_photo.zig").draw(shell, hdc, avatar_rect)) avatar.draw(hdc, avatar_rect, appearance);
+    drawProviderBadge(hdc, avatar_rect, shell.ai_agent);
     if (@import("star_badge_geometry.zig").marker(shell.disconnected, shell.needs_attention, shell.favorite, app_state.g_starred_workspace)) |marker| {
         const background = if (index == app_state.active_shell and !@import("room_frontend.zig").isActive()) selectedSessionBackground() else themeSidebarBg();
         drawRobotMarker(hdc, avatar_rect, marker, background);
@@ -2018,11 +2025,24 @@ fn paintChatSidebarRow(hdc: HANDLE, column: RECT, y: i32, index: u32, avatar_rec
     var name = RECT{ .left = avatar_rect.right + uiScaled(10), .top = y + uiScaled(10), .right = right, .bottom = y + uiScaled(29) };
     if (shell.name_len > 0) _ = @import("dwrite_text.zig").draw(hdc, &shell.name, @intCast(shell.name_len), &name, DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
     _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.preview));
+    var line = RECT{ .left = name.left, .top = y + uiScaled(31), .right = right, .bottom = y + uiScaled(57) };
+    var detail_text: [96]u8 = undefined;
+    const detail: ?[]const u8 = if (app_state.g_sidebar_hover == index) blk: {
+        const badge = @import("provider_badge.zig");
+        const mark = badge.forShell(shell) orelse break :blk null;
+        break :blk badge.detail(&detail_text, mark, @import("chat_live.zig").settings(shell.shell_id));
+    } else null;
+    if (detail) |text| {
+        _ = SetTextColor(hdc, hint);
+        var wide: [96]u16 = undefined;
+        const wide_len = std.unicode.utf8ToUtf16Le(&wide, text) catch 0;
+        if (wide_len > 0) _ = @import("dwrite_text.zig").draw(hdc, &wide, @intCast(wide_len), &line, DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+        return;
+    }
     const second_line = @import("agent_second_line.zig").forShell(@intCast(index));
     _ = SetTextColor(hdc, if (second_line.question) RGB(137, 180, 248) else hint);
     var preview: [128]u16 = undefined;
     const len = std.unicode.utf8ToUtf16Le(&preview, second_line.text[0..second_line.len]) catch 0;
-    var line = RECT{ .left = name.left, .top = y + uiScaled(31), .right = right, .bottom = y + uiScaled(57) };
     if (len > 0) {
         _ = @import("dwrite_text.zig").draw(hdc, &preview, @intCast(len), &line, DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
     }
@@ -2050,6 +2070,7 @@ fn paintPinnedBot(hdc: HANDLE, row: Row, y: i32) void {
         debugLog(std.fmt.bufPrint(&log, "[photo-proof] pinned target={d} rect={d},{d},{d},{d}", .{ row.shell_idx, avatar_rect.left, avatar_rect.top, avatar_rect.right, avatar_rect.bottom }) catch "[photo-proof] unavailable");
     }
     if (!@import("bot_photo.zig").draw(shell, hdc, avatar_rect)) avatar.draw(hdc, avatar_rect, avatar.forShell(shell));
+    drawProviderBadge(hdc, avatar_rect, shell.ai_agent);
     if (@import("star_badge_geometry.zig").marker(shell.disconnected, shell.needs_attention, shell.favorite, app_state.g_starred_workspace)) |marker| {
         const background = if (row.shell_idx == app_state.active_shell and !@import("room_frontend.zig").isActive()) (if (app_state.g_light_theme) RGB(214, 214, 214) else RGB(58, 58, 58)) else if (shell.selected and !@import("room_frontend.zig").isActive()) RGB(53, 53, 53) else themeSidebarBg();
         drawRobotMarker(hdc, avatar_rect, marker, background);
@@ -2354,6 +2375,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     var draft_rc = RECT{ .left = 0, .top = y + tabRowH() - uiScaled(14), .right = sw, .bottom = y + tabRowH() };
                     _ = DrawTextW(hdc, L("DRAFT"), -1, &draft_rc, DT_SINGLELINE | DT_CENTER | DT_NOPREFIX);
                 }
+                drawProviderBadge(hdc, avatar_rect, app_state.shells[i].ai_agent);
                 if (@import("star_badge_geometry.zig").marker(app_state.shells[i].disconnected, app_state.shells[i].needs_attention, app_state.shells[i].favorite, app_state.g_starred_workspace)) |marker| {
                     const background = if (i == app_state.active_shell and !@import("room_frontend.zig").isActive()) themeConsoleBg() else themeSidebarBg();
                     drawRobotMarker(hdc, avatar_rect, marker, background);

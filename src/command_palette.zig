@@ -2773,6 +2773,7 @@ pub fn finishSwitchAi(lp: @import("win32.zig").LPARAM) void {
     if (switch_ai.adoptShellAgent(&shell.ai_agent, &shell.claude_sid, &shell.claude_sid_len, result.agent, result.sid[0..result.sid_len])) {
         shell.hook_capable = true;
         saveSession();
+        @import("window_layout.zig").invalidateSidebar();
         if (app_state.g_chat_active and index == app_state.active_shell) @import("chat_session.zig").chatFileRequest(@import("chat_session.zig").chatFileIdentityForShell(index));
     }
     if (result.notice_len > 0) restartChatNotice(result.notice[0..result.notice_len]);
