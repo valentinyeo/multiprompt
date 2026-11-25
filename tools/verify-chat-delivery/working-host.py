@@ -200,6 +200,9 @@ def install_fresh(namespace, root, record, deliver):
         namespace['host_event']('claude', SID, 'verify-agent', session, 'turn.started',
                                 dict(message_id='standin-resume', text_sha256='', uuids=[]))
         record('working-host.jsonl', stage='fresh-start-pending', sid=SID, turn=session['turn'])
+        if session.get('db') is not None:
+            session['db'].close()
+            del session['db']
 
         def stream():
             text = RESUME_REPLY
