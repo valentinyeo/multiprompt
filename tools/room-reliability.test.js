@@ -100,8 +100,11 @@ const journal = struct {
     }
     fn abandon(_: Scope, id: []const u8) !void {
         const record = existing_record orelse return error.NotFound;
+        if (record.state == .uncertain) return error.UnresolvedCommand;
+        if (record.state != .prepared) return error.TerminalCommand;
         if (!std.mem.eql(u8, record.command_id, id)) return error.WrongCommand;
         existing_record = null;
+        abandoned += 1;
     }
     fn prepare(_: Scope, kind: Kind, id: []const u8, room: []const u8, revision: u64, request: []const u8, bindings: []const Binding) !void {
         if (existing_record) |saved| {
@@ -133,14 +136,64 @@ test "legacy requests remain valid and unknown capabilities or extra fields are 
     defer _ = parsed.value.object.swapRemove("unexpected");
     try std.testing.expect(!journal.validPostRequest(record, parsed.value));
 }
-test "a new message clears an unresolved send for the same room" {
+const rewritten_draft = std.unicode.utf8ToUtf16LeStringLiteral("Hello rooms");
+fn sentRequest(buffer: []u8) []const u8 {
+    @memcpy(buffer, staged_record.?.request);
+    return buffer[0..staged_record.?.request.len];
+}
+test "a send the room may have accepted is confirmed before a changed draft replaces it" {
     defer reset();
-    existing_record = .{ .account_digest = &test_scope.account_digest, .store_uuid = test_store, .kind = .post, .command_id = "40000000-0000-4000-8000-000000000004", .room_id = test_room, .revision = 1, .request = "earlier", .bindings = &.{}, .state = .uncertain, .evidence = "" };
+    var buffer: [4096]u8 = undefined;
     try std.testing.expectEqual(room_view.ActionResult.pending, beginPost(test_token, test_room, 1, draft));
-    try std.testing.expect(existing_record == null);
+    const earlier_request = sentRequest(&buffer);
+    reset();
+    existing_record = .{ .account_digest = &test_scope.account_digest, .store_uuid = test_store, .kind = .post, .command_id = test_command, .room_id = test_room, .revision = 1, .request = earlier_request, .bindings = &.{}, .state = .uncertain, .evidence = "" };
+    try std.testing.expectEqual(room_view.ActionResult.failed, beginPost(test_token, test_room, 1, rewritten_draft));
+    try std.testing.expectEqual(@as(usize, 0), abandoned);
+    try std.testing.expect(existing_record != null);
+    try std.testing.expect(staged_record == null);
+    try std.testing.expectEqual(@as(?journal.Kind, null), sent_kind);
+    try std.testing.expect(confirmed != null);
+    try std.testing.expect(std.mem.eql(u8, confirmed.?.command_id, test_command));
+    try std.testing.expect(std.mem.eql(u8, confirmed.?.request, earlier_request));
+    try std.testing.expect(std.mem.indexOf(u8, last_error, "still being confirmed") != null);
+    try std.testing.expect(std.mem.indexOf(u8, last_error, "draft is kept") != null);
+    try std.testing.expect(std.mem.indexOf(u8, last_log[0..last_log_len], "confirming") != null);
+}
+test "a send that never reached the room is resent with its own body instead of the changed draft" {
+    defer reset();
+    var buffer: [4096]u8 = undefined;
+    try std.testing.expectEqual(room_view.ActionResult.pending, beginPost(test_token, test_room, 1, draft));
+    const earlier_request = sentRequest(&buffer);
+    reset();
+    existing_record = .{ .account_digest = &test_scope.account_digest, .store_uuid = test_store, .kind = .post, .command_id = test_command, .room_id = test_room, .revision = 1, .request = earlier_request, .bindings = &.{}, .state = .uncertain, .evidence = "" };
+    try std.testing.expectEqual(room_view.ActionResult.failed, beginPost(test_token, test_room, 1, rewritten_draft));
+    try std.testing.expect(confirmed != null);
+    try std.testing.expect(std.mem.indexOf(u8, confirmed.?.request, "Hello room") != null);
+    try std.testing.expect(std.mem.indexOf(u8, confirmed.?.request, "Hello rooms") == null);
+    try std.testing.expect(staged_record == null);
+}
+test "a definite refusal lets the next message start a fresh command" {
+    defer reset();
+    existing_record = .{ .account_digest = &test_scope.account_digest, .store_uuid = test_store, .kind = .post, .command_id = "40000000-0000-4000-8000-000000000004", .room_id = test_room, .revision = 1, .request = "refused", .bindings = &.{}, .state = .rejected, .evidence = "{\"error\":\"room_host_upgrade_required\"}" };
+    try std.testing.expectEqual(room_view.ActionResult.pending, beginPost(test_token, test_room, 1, draft));
+    try std.testing.expectEqual(@as(usize, 0), abandoned);
     try std.testing.expectEqual(journal.Kind.post, sent_kind.?);
     try std.testing.expect(!std.mem.eql(u8, staged_record.?.command_id, "40000000-0000-4000-8000-000000000004"));
-    try std.testing.expect(std.mem.indexOf(u8, staged_record.?.request, "Hello room") != null);
+    try std.testing.expect(std.mem.eql(u8, staged_record.?.command_id, test_command));
+}
+test "retrying the same draft keeps its original command id" {
+    defer reset();
+    var buffer: [4096]u8 = undefined;
+    try std.testing.expectEqual(room_view.ActionResult.pending, beginPost(test_token, test_room, 1, draft));
+    const earlier_request = sentRequest(&buffer);
+    reset();
+    existing_record = .{ .account_digest = &test_scope.account_digest, .store_uuid = test_store, .kind = .post, .command_id = test_command, .room_id = test_room, .revision = 1, .request = earlier_request, .bindings = &.{}, .state = .uncertain, .evidence = "" };
+    try std.testing.expectEqual(room_view.ActionResult.pending, beginPost(test_token, test_room, 1, draft));
+    try std.testing.expectEqual(@as(usize, 0), abandoned);
+    try std.testing.expect(confirmed == null);
+    try std.testing.expect(std.mem.eql(u8, staged_record.?.command_id, test_command));
+    try std.testing.expect(std.mem.eql(u8, staged_record.?.request, earlier_request));
 }
 `;
   const files = { 'room_post.zig': read('room_post.zig') };
@@ -148,6 +201,22 @@ test "a new message clears an unresolved send for the same room" {
   const before = source.replace(/    const features = field\(obj, "room_features"\);[\s\S]*?    const op = text\(obj, "op"\) orelse return false;/, '    if (obj.object.count() != 7 or r.bindings.len != 0 or r.revision == 0 or !uuidValid(r.room_id)) return false;\n    const op = text(obj, "op") orelse return false;');
   assert.notEqual(before, source);
   assert.match(run(before, files, 1), /a freshly created room with events loaded sends kind post through the saved command validator\.\.\.[\s\S]*FAIL \(TestExpectedEqual\)/);
+  const replaced = source.replace('if (earlier.? == .uncertain) {', 'if (earlier.? == .accepted) {');
+  assert.notEqual(replaced, source);
+  const unresolved = run(replaced, files, 1);
+  assert.match(unresolved, /a send the room may have accepted is confirmed before a changed draft replaces it\.\.\.[\s\S]*FAIL/);
+  assert.match(unresolved, /a send that never reached the room is resent with its own body instead of the changed draft\.\.\.[\s\S]*FAIL/);
+});
+
+test('a saved room send keeps the command identity the room store deduplicates on', () => {
+  const frontend = read('room_frontend.zig');
+  const journal = read('room_journal.zig');
+  const service = read('room_service.py');
+  assert.ok(journal.includes('if (record.state == .uncertain) return error.UnresolvedCommand;'), 'a command that may have reached the room is never deleted');
+  assert.ok(journal.includes('return validErrorCode(code);'), 'a definite refusal is kept under any code the room host reports');
+  assert.ok(frontend.includes('retryCommand(location) catch |err| return rejectPost'), 'a saved command is resent before a changed draft replaces it');
+  assert.ok(frontend.includes('journal.abandon(scope, &item.id)'), 'only a command that never left this computer may be replaced');
+  assert.ok(service.includes("result = json.loads(previous['receipt'])"), 'an identical retry returns the original receipt instead of a second message');
 });
 
 test('shown-name mentions support spaces, case, legacy aliases and reject ambiguous names', () => {

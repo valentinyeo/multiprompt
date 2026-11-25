@@ -118,6 +118,12 @@ fn validMember(member: std.json.Value, store: []const u8) bool {
     return identity.len == provider.len + 1 + sid.len and std.mem.startsWith(u8, identity, provider) and identity[provider.len] == ':' and std.mem.eql(u8, identity[provider.len + 1 ..], sid);
 }
 
+fn validErrorCode(code: []const u8) bool {
+    if (code.len == 0 or code.len > 64) return false;
+    for (code) |ch| if (!((ch >= 'a' and ch <= 'z') or (ch >= '0' and ch <= '9') or ch == '_')) return false;
+    return true;
+}
+
 fn validAlias(alias: []const u8) bool {
     if (alias.len == 0 or alias.len > 32) return false;
     for (alias) |ch| if (!(ch >= 'a' and ch <= 'z') and !(ch >= 'A' and ch <= 'Z') and !(ch >= '0' and ch <= '9') and ch != '_' and ch != '-') return false;
@@ -221,8 +227,7 @@ fn validateEvidence(r: Record) bool {
     if (r.state == .rejected) {
         if (obj.object.count() != 1) return false;
         const code = text(obj, "error") orelse return false;
-        for ([_][]const u8{ "invalid_fields", "invalid_id", "invalid_text", "invalid_number", "invalid_members", "invalid_alias", "invalid_provider", "duplicate_member", "binding_immutable", "room_not_found", "revision_conflict", "unsupported_provider", "unsupported_remote_capability", "invalid_session", "host_disabled", "runtime_unavailable", "request_too_large", "invalid_json", "unknown_op", "invalid_recipients", "invalid_mentions" }) |known| if (std.mem.eql(u8, code, known)) return true;
-        return false;
+        return validErrorCode(code);
     }
     const event = field(obj, "event") orelse return false;
     const deliveries = field(obj, "deliveries") orelse return false;
@@ -362,7 +367,8 @@ pub fn abandon(scope: Scope, command_id: []const u8) !void {
     var entry = (try load(scope)) orelse return error.NotFound;
     defer entry.deinit();
     const record = entry.record();
-    if (record.state != .prepared and record.state != .uncertain) return error.TerminalCommand;
+    if (record.state == .uncertain) return error.UnresolvedCommand;
+    if (record.state != .prepared) return error.TerminalCommand;
     if (!std.mem.eql(u8, record.command_id, command_id)) return error.WrongCommand;
     var path_buf: [700]u8 = undefined;
     const path = try pathFor(scope, &path_buf);
@@ -452,6 +458,18 @@ test "post journal request refuses a body that does not match the record" {
         "{\"op\":\"post_human\",\"command_id\":\"" ++ test_command ++ "\",\"room_id\":\"" ++ test_room ++ "\",\"expected_revision\":3,\"text\":\"hello\",\"recipients\":[]}",
     };
     for (bad) |request| try std.testing.expect(!(try roundTrips(scope, testRecord(&scope, request, .prepared, ""))));
+}
+
+test "a definite refusal is kept for any code the room host reports" {
+    const scope = testScope();
+    for ([_][]const u8{ "room_host_upgrade_required", "ambiguous_mentions", "runtime_unavailable", "command_conflict", "request_too_large" }) |code| {
+        var buf: [128]u8 = undefined;
+        const evidence = std.fmt.bufPrint(&buf, "{{\"error\":\"{s}\"}}", .{code}) catch unreachable;
+        try std.testing.expect(try roundTrips(scope, testRecord(&scope, test_request, .rejected, evidence)));
+    }
+    try std.testing.expect(!(try roundTrips(scope, testRecord(&scope, test_request, .rejected, "{\"error\":\"Not A Code\"}"))));
+    try std.testing.expect(!(try roundTrips(scope, testRecord(&scope, test_request, .rejected, "{\"error\":\"\"}"))));
+    try std.testing.expect(!(try roundTrips(scope, testRecord(&scope, test_request, .rejected, "{\"error\":\"invalid_json\",\"extra\":1}"))));
 }
 
 test "post journal evidence must match the request" {

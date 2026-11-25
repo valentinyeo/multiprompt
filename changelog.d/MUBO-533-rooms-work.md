@@ -8,4 +8,5 @@ Rooms work on a server where you never sent a chat from the app.
 Room screens no longer re-send the server helper on every refresh, so they open faster.
 Room messages send after creating a room or changing its members, and failures explain what went wrong without blaming your connection.
 A chat that was already running picks up the room helper the app published, so a room send no longer calls the helper old.
-After a room send fails, the next message sends instead of being blocked by the failed one.
+After the room refuses a message, the next message sends instead of being blocked by the failed one.
+A message that was still being confirmed is sent once before your rewritten message, so nothing is lost or sent twice.

@@ -62,11 +62,20 @@ const rooms = struct {
 };
 var staged_record: ?journal.Record = null;
 var existing_record: ?journal.Record = null;
+var abandoned: usize = 0;
+var confirmed: ?journal.Record = null;
+var busy = false;
 const test_scope = journal.Scope{ .account_digest = @splat('a'), .store_uuid = test_store.* };
 fn commandScope(_: StoreLocation) ?journal.Scope { return test_scope; }
 fn sameLocation(a: RoomLocation, b: RoomLocation) bool { return std.meta.eql(a, b); }
 fn dropDraft(_: RoomLocation, _: []const u8) void {}
 fn retryCommandEvidence() !void {}
+fn retryCommand(_: StoreLocation) !void {
+    if (busy) return error.CommandBusy;
+    const record = existing_record orelse return error.NotFound;
+    if (record.state != .prepared and record.state != .uncertain) return error.TerminalCommand;
+    confirmed = record;
+}
 fn startSnapshot(_: *rooms.Controller) bool { return true; }
 fn reset() void {
     if (pending_command) |item| {
@@ -76,6 +85,9 @@ fn reset() void {
     pending_command = null;
     staged_record = null;
     existing_record = null;
+    abandoned = 0;
+    confirmed = null;
+    busy = false;
     sent_kind = null;
     last_error = "";
     last_log_len = 0;

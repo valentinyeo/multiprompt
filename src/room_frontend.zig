@@ -1604,7 +1604,7 @@ fn finishCommand(c: *rooms.Controller, completion: rooms.Completion, fresh: bool
             if (fresh and commandVisible(item)) showFailure(failure);
             if (failure.kind == rooms.requestKind(item.kind) and failure.reason == .remote and failure.code_len > 0) {
                 const code = failure.code[0..failure.code_len];
-                if (!std.mem.eql(u8, code, "different_host") and !std.mem.eql(u8, code, "command_conflict")) {
+                if (!std.mem.eql(u8, code, "different_host")) {
                     evidence = std.json.Stringify.valueAlloc(item.arena.allocator(), .{ .@"error" = code }, .{}) catch null;
                     if (evidence != null) { state = .rejected; conflict = std.mem.eql(u8, code, "revision_conflict"); }
                 }
@@ -2245,19 +2245,24 @@ fn beginPost(token: room_view.ActionToken, room_id: []const u8, revision: u64, v
     @memcpy(&item.room_id, room_id);
     var existing = (journal.load(scope) catch |err| return rejectPost(@errorName(err), "Could not read the saved room action on this computer. Reopen the room and try again."));
     defer if (existing) |*entry| entry.deinit();
-    var unresolved = false;
+    var earlier: ?journal.State = null;
     if (existing) |*entry| {
         const record = entry.record();
         if (record.state == .prepared or record.state == .uncertain) {
             if (record.kind != .post or record.revision != revision or !std.mem.eql(u8, record.room_id, room_id)) return rejectPost("unresolved_command", "The previous room action needs to finish. Reopen the room to retry it.");
             @memcpy(&item.id, record.command_id);
-            unresolved = true;
+            earlier = record.state;
         } else item.id = journal.newCommandId() orelse return rejectPost("command_id_unavailable", "Could not prepare this message on this computer. Try again.");
     } else item.id = journal.newCommandId() orelse return rejectPost("command_id_unavailable", "Could not prepare this message on this computer. Try again.");
     item.request = postRequest(a, &location.store_uuid, &item.id, room_id, revision, text, picked[0..count]) catch |err| return rejectPost(@errorName(err), "Could not prepare this message on this computer. Try again.");
     if (existing) |*entry| {
-        if (unresolved and !std.mem.eql(u8, entry.record().request, item.request)) {
-            diagnostics.syncLog("[rooms] cleared an unresolved post for this room");
+        if (earlier != null and !std.mem.eql(u8, entry.record().request, item.request)) {
+            if (earlier.? == .uncertain) {
+                diagnostics.syncLog("[rooms] confirming the saved message before sending a changed draft");
+                retryCommand(location) catch |err| return rejectPost(@errorName(err), "The earlier message is still being confirmed with the room. Your draft is kept. Send it again in a moment.");
+                return rejectPost("command_confirming", "The earlier message is still being confirmed with the room. Your draft is kept. Send it again in a moment.");
+            }
+            diagnostics.syncLog("[rooms] replaced a message that never left this computer");
             journal.abandon(scope, &item.id) catch |err| return rejectPost(@errorName(err), "Could not clear the previous room action on this computer. Reopen the room and try again.");
             item.id = journal.newCommandId() orelse return rejectPost("command_id_unavailable", "Could not prepare this message on this computer. Try again.");
             item.request = postRequest(a, &location.store_uuid, &item.id, room_id, revision, text, picked[0..count]) catch |err| return rejectPost(@errorName(err), "Could not prepare this message on this computer. Try again.");
