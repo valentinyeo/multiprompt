@@ -1,0 +1,48 @@
+name: MUBO-17 unit tests
+run-name: MUBO-17 unit tests ${{ github.run_id }}
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - proof/mubo-17-tests
+permissions:
+  contents: read
+concurrency:
+  group: mubo-17-tests-${{ github.run_id }}
+  cancel-in-progress: false
+jobs:
+  tests:
+    name: Zig unit tests, group 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Restore the Zig archive
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ runner.temp }}/zig-archive-0.16.0
+          key: ${{ runner.os }}-zig-archive-0.16.0
+          restore-keys: |
+            ${{ runner.os }}-zig-archive-0.16.0
+      - name: Install Zig 0.16.0
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/zig-archive-0.16.0/zig.tar.xz"
+          toolchain="$RUNNER_TEMP/zig-x86_64-linux-0.16.0"
+          expected=70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00
+          mkdir -p "$(dirname "$archive")"
+          echo "$toolchain" >> "$GITHUB_PATH"
+          if [ -x "$toolchain/zig" ]; then exit 0; fi
+          if [ -f "$archive" ] && ! echo "$expected  $archive" | sha256sum -c - >/dev/null 2>&1; then rm -f "$archive"; fi
+          for attempt in 1 2 3 4 5 6; do
+            if [ ! -f "$archive" ]; then
+              curl -fsSL --connect-timeout 30 --max-time 1200 --retry 0 "https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz" -o "$archive" || continue
+            fi
+            if echo "$expected  $archive" | sha256sum -c - >/dev/null 2>&1; then break; fi
+            rm -f "$archive"
+          done
+          echo "$expected  $archive" | sha256sum -c -
+          tar -xf "$archive" -C "$RUNNER_TEMP"
+          "$toolchain/zig" version
+      - name: Run the desktop and chat CPU tests
+        run: zig build test --summary all -Dtest-group=1 -Dcpu=x86_64_v3
