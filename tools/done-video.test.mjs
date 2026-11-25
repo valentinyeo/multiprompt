@@ -102,15 +102,19 @@ for (const event of ['pull_request', 'workflow_dispatch']) test(`main downloads 
         ] }) };
       }
       if (endpoint.includes('/runs/901/artifacts')) {
-        return { status: 0, stdout: JSON.stringify([{ artifacts: [{ id: 10, name: 'pr-verifier-selection', expired: false }] }]) };
+        return { status: 0, stdout: JSON.stringify({ artifacts: [{ id: 10, name: 'pr-verifier-selection', expired: false }] }) };
+      }
+      if (endpoint.includes('/runs/900/artifacts') && endpoint.endsWith('page=1')) {
+        return { status: 0, stdout: JSON.stringify({ artifacts: Array.from({ length: 100 }, (_, id) => ({ id, name: `other-${id}` })) }) };
       }
       if (endpoint.includes('/runs/900/artifacts')) {
-        return { status: 0, stdout: JSON.stringify([{ artifacts: [
+        assert.ok(!args.includes('--slurp'));
+        return { status: 0, stdout: JSON.stringify({ artifacts: [
           { id: 20, name: 'pr-verifier-selection', expired: false, created_at: '2026-11-24T10:00:00Z' },
           { id: 21, name: 'verify-appearance', expired: false, created_at: '2026-11-24T10:01:00Z' },
           { id: 22, name: 'verify-server-chat', expired: false, created_at: '2026-11-24T10:02:00Z' },
           { id: 23, name: `verify-server-chat-${'b'.repeat(40)}`, expired: false },
-        ] }]) };
+        ] }) };
       }
       return { status: 1, stderr: 'unexpected endpoint' };
     },

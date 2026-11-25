@@ -167,9 +167,13 @@ function ghJson(io, args) {
 }
 
 function fetchRunArtifacts(io, repo, runId) {
-  const pages = ghJson(io, ['api', '--paginate', '--slurp', `repos/${repo}/actions/runs/${runId}/artifacts?per_page=100`]);
-  const list = Array.isArray(pages) ? pages : [pages];
-  return list.flatMap(page => Array.isArray(page?.artifacts) ? page.artifacts : []);
+  const artifacts = [];
+  for (let page = 1; ; page++) {
+    const response = ghJson(io, ['api', `repos/${repo}/actions/runs/${runId}/artifacts?per_page=100&page=${page}`]);
+    const batch = Array.isArray(response?.artifacts) ? response.artifacts : [];
+    artifacts.push(...batch);
+    if (batch.length < 100) return artifacts;
+  }
 }
 
 function readSelectionFeatures(io, repo, artifacts, scratchDir, expectedHead = '') {
