@@ -3127,10 +3127,20 @@ fn browserRectMatchesTarget(rect: RECT, x: i32, y: i32, w: i32, h: i32) bool {
 }
 
 fn browserWindowNeedsPosition(hwnd: HANDLE, x: i32, y: i32, w: i32, h: i32) bool {
-    if (IsWindowVisible(hwnd) == 0) return true;
+    const vis = IsWindowVisible(hwnd) != 0;
+    if (!vis) {
+        if (verboseLoggingEnabled()) browserTrace("posBrowser needs: hwnd hidden");
+        return true;
+    }
     var current: RECT = std.mem.zeroes(RECT);
     if (GetWindowRect(hwnd, &current) == 0) return true;
-    return !browserRectMatchesTarget(current, x, y, w, h);
+    const needs = !browserRectMatchesTarget(current, x, y, w, h);
+    if (needs and verboseLoggingEnabled()) {
+        var lbuf: [128]u8 = undefined;
+        const ls = std.fmt.bufPrint(&lbuf, "posBrowser needs: vis=1 rect=({d},{d},{d},{d})", .{ current.left, current.top, current.right, current.bottom }) catch "";
+        browserTrace(ls);
+    }
+    return needs;
 }
 
 test "settle positioning is idempotent once Chromium reaches its dock" {
@@ -4344,9 +4354,8 @@ pub fn updateBrowserVisibility() void {
         return;
     }
     parkStrayBrowserPanes(activeBrowserPaneToKeep());
-    if (!foregroundIsOurs()) {
-        return;
-    }
+    const sh_vis = &app_state.shells[app_state.active_shell];
+    if (!foregroundIsOurs() and !browser_pane_redock.browserVisibilityAllowsBackgroundRedock(sh_vis.browser_hwnd != null and IsWindow(sh_vis.browser_hwnd) != 0, app_state.g_main_hwnd != null and IsIconic(app_state.g_main_hwnd) == 0)) return;
     if (app_state.shells[app_state.active_shell].browser_docking) return;
     if (app_state.shells[app_state.active_shell].browser_hwnd) |bh| {
         if (IsWindow(bh) != 0) {
@@ -4866,35 +4875,7 @@ pub fn browserConnectionState(sh: *const Shell) []const u8 {
     return "connected";
 }
 
-fn browserPlaceholderPure(reserved: bool, covered: bool, shown_ms: u64, launch_in_flight: bool) BrowserPlaceholder {
-    if (!reserved or covered) return .none;
-    if (shown_ms >= BROWSER_PLACEHOLDER_NOT_OPEN_MS and !launch_in_flight) return .not_open;
-    return .opening;
-}
-
-fn browserPlaceholderDelay(state: BrowserPlaceholder, elapsed: u64, launching: bool) ?UINT {
-    if (state != .opening or launching) return null;
-    return @intCast(@max(1, BROWSER_PLACEHOLDER_NOT_OPEN_MS -| elapsed));
-}
-
-test "browserPlaceholderPure applies the deadline only to uncovered slots" {
-    try std.testing.expectEqual(BrowserPlaceholder.none, browserPlaceholderPure(false, false, 0, false));
-    try std.testing.expectEqual(BrowserPlaceholder.none, browserPlaceholderPure(true, true, 99_000, false));
-    try std.testing.expectEqual(BrowserPlaceholder.opening, browserPlaceholderPure(true, false, 0, false));
-    try std.testing.expectEqual(BrowserPlaceholder.opening, browserPlaceholderPure(true, false, 19_999, false));
-    try std.testing.expectEqual(BrowserPlaceholder.opening, browserPlaceholderPure(true, false, 60_000, true));
-    try std.testing.expectEqual(BrowserPlaceholder.not_open, browserPlaceholderPure(true, false, 20_000, false));
-}
-
-test "browser placeholder wakes only for its opening deadline" {
-    try std.testing.expectEqual(@as(?UINT, 20_000), browserPlaceholderDelay(.opening, 0, false));
-    try std.testing.expectEqual(@as(?UINT, 1), browserPlaceholderDelay(.opening, 19_999, false));
-    try std.testing.expectEqual(@as(?UINT, 1), browserPlaceholderDelay(.opening, 20_000, false));
-    try std.testing.expectEqual(@as(?UINT, null), browserPlaceholderDelay(.opening, 0, true));
-    try std.testing.expectEqual(@as(?UINT, null), browserPlaceholderDelay(.not_open, 20_000, false));
-    try std.testing.expectEqual(@as(?UINT, null), browserPlaceholderDelay(.failed, 20_000, false));
-    try std.testing.expectEqual(@as(?UINT, null), browserPlaceholderDelay(.none, 0, false));
-}
+const browser_pane_redock = @import("browser_pane_redock.zig");
 
 test "IGSH-523 opening close keeps URL, reopen isolates replies, timeout permits retry" {
     var sh = app_state.empty_shell;
@@ -4920,8 +4901,6 @@ test "IGSH-523 opening close keeps URL, reopen isolates replies, timeout permits
     sh.browser_open_failed = true;
     try std.testing.expectEqualStrings("failed", browserConnectionState(&sh));
     try std.testing.expect(!browserConnectionMatches(&sh, 2));
-    try std.testing.expectEqual(BrowserPlaceholder.opening, browserPlaceholderPure(true, false, 20_000, true));
-    try std.testing.expectEqual(@as(?UINT, 20_000), browserPlaceholderDelay(.opening, 0, false));
     beginBrowserOpening(&sh, 23_000, 3);
     try std.testing.expectEqualStrings("opening", browserConnectionState(&sh));
     try std.testing.expect(browserConnectionMatches(&sh, 3));
@@ -4930,7 +4909,7 @@ test "IGSH-523 opening close keeps URL, reopen isolates replies, timeout permits
     sh.browser_launch_tick = 0;
     try std.testing.expectEqualStrings("connected", browserConnectionState(&sh));
     try std.testing.expect(!browserOpeningExpired(&sh, 100_000));
-    try std.testing.expectEqual(BrowserPlaceholder.none, browserPlaceholderPure(true, true, 100_000, true));
+    try std.testing.expectEqual(BrowserPlaceholder.none, browser_pane_redock.browserPlaceholderPure(true, true, 100_000, true, true));
 }
 
 test "IGSH-523 adoption retries preserve the first opening deadline" {
@@ -4967,7 +4946,7 @@ test "IGSH-523 connected pane stays visible without an extension past the openin
     try std.testing.expectEqual(@as(i64, 0), sh.browser_window_id);
     try std.testing.expectEqualStrings("connected", browserConnectionState(&sh));
     try std.testing.expect(!browserOpeningExpired(&sh, 100_000));
-    try std.testing.expectEqual(BrowserPlaceholder.none, browserPlaceholderPure(true, true, 99_000, false));
+    try std.testing.expectEqual(BrowserPlaceholder.none, browser_pane_redock.browserPlaceholderPure(true, true, 99_000, false, true));
     sh.browser_launch_tick = 1000;
     try std.testing.expect(!browserOpeningExpired(&sh, 100_000));
     try std.testing.expectEqualStrings("connected", browserConnectionState(&sh));
@@ -5002,7 +4981,8 @@ fn currentBrowserPlaceholder() BrowserPlaceholder {
     }
     const sh = &app_state.shells[app_state.active_shell];
     if (sh.browser_open_failed) return .failed;
-    return browserPlaceholderPure(true, false, now -| app_state.g_slot_placeholder_since, sh.browser_launch_tick != 0);
+    const connected = sh.browser_hwnd != null and sh.browser_launch_tick == 0 and !sh.browser_docking;
+    return browser_pane_redock.browserPlaceholderPure(true, false, now -| app_state.g_slot_placeholder_since, sh.browser_launch_tick != 0, connected);
 }
 
 pub fn browserPlaceholderRect() ?RECT {
@@ -5020,6 +5000,15 @@ pub fn paintBrowserPlaceholder(hdc: HANDLE) void {
     const state = currentBrowserPlaceholder();
     if (state == .none) {
         if (app_state.g_main_hwnd != null) _ = KillTimer(app_state.g_main_hwnd, TIMER_BROWSER_PLACEHOLDER);
+        return;
+    }
+    if (state == .redock) {
+        if (app_state.g_main_hwnd != null) _ = KillTimer(app_state.g_main_hwnd, TIMER_BROWSER_PLACEHOLDER);
+        const sh = &app_state.shells[app_state.active_shell];
+        if (browser_pane_redock.activePaneNeedsRedock(sh.browser_enabled, sh.browser_hwnd != null and IsWindow(sh.browser_hwnd) != 0, false, sh.browser_docking, app_state.g_chat_browser_swap.shell_id != 0, browserChromeHiddenForOverlay())) {
+            positionActiveBrowser();
+            armBrowserVisibilitySettle(12);
+        }
         return;
     }
     var rc = browserPlaceholderRect() orelse return;
@@ -5052,8 +5041,8 @@ pub fn paintBrowserPlaceholder(hdc: HANDLE) void {
     _ = SelectObject(hdc, old_font);
     if (app_state.g_main_hwnd != null) {
         _ = KillTimer(app_state.g_main_hwnd, TIMER_BROWSER_PLACEHOLDER);
-        if (browserPlaceholderDelay(state, GetTickCount64() -| app_state.g_slot_placeholder_since, app_state.shells[app_state.active_shell].browser_launch_tick != 0)) |delay| {
-            _ = SetTimer(app_state.g_main_hwnd, TIMER_BROWSER_PLACEHOLDER, delay, null);
+        if (browser_pane_redock.browserPlaceholderDelay(state, GetTickCount64() -| app_state.g_slot_placeholder_since, app_state.shells[app_state.active_shell].browser_launch_tick != 0)) |delay| {
+            _ = SetTimer(app_state.g_main_hwnd, TIMER_BROWSER_PLACEHOLDER, @intCast(delay), null);
         }
     }
 }

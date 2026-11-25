@@ -207,7 +207,7 @@
   ["app_state.zig", "var g_browser_orphan_sweep_tick"],
   ["browser_pane.zig", "fn sweepBrowserOrphans"],
   ["app_state.zig", "const BROWSER_PLACEHOLDER_NOT_OPEN_MS"],
-  ["browser_pane.zig", "fn browserPlaceholderPure"],
+  ["browser_pane_redock.zig", "fn browserPlaceholderPure"],
   ["app_state.zig", "var g_slot_placeholder_shell_id"],
   ["browser_pane.zig", "fn browserPaneCoversSlot"],
   ["app_state.zig", "const WebView2CreateFn"],

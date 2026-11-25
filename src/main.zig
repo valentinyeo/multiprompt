@@ -1295,6 +1295,7 @@ comptime {
         _ = @import("sidebar.zig");
         _ = @import("themes.zig");
         _ = @import("browser_pane.zig");
+        _ = @import("browser_pane_redock.zig");
         _ = @import("computer_pane.zig");
         _ = @import("capacity.zig");
         _ = @import("status_line.zig");

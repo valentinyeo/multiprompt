@@ -2865,7 +2865,7 @@ pub var g_browser_switch_preparing: bool = false;
 
 pub const BROWSER_PLACEHOLDER_NOT_OPEN_MS: u64 = 20_000;
 
-pub const BrowserPlaceholder = enum { none, opening, not_open, failed };
+pub const BrowserPlaceholder = enum { none, opening, not_open, failed, redock };
 
 pub var g_slot_placeholder_shell_id: u32 = 0;
 pub var g_slot_placeholder_since: u64 = 0;

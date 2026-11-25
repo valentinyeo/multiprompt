@@ -1503,6 +1503,9 @@ fn zsbWorkerThread(ctx_ptr: usize) void {
         return;
     }
 
+    if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_window_id == window_id)
+        @import("browser_pane.zig").armBrowserVisibilitySettle(12);
+
     zsbRetryAfterStaleBinding(session, window_id, argv[0..argc], out_buf, &run);
 
     if (run.out_len > 0) {

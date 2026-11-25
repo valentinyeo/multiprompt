@@ -22,7 +22,10 @@ for (const [file, names] of [
     'IGSH-523 docked pane without an extension never resolves on health ticks',
     'IGSH-523 adoption retries preserve the first opening deadline',
     'IGSH-523 bench launch guard does not arm an opening deadline',
+  ]],
+  ['src/browser_pane_redock.zig', [
     'browserPlaceholderPure applies the deadline only to uncovered slots',
+    'MUBO-232 a connected pane off its dock is re-docked, never shown as Opening browser',
   ]],
   ['src/shortcuts.zig', [
     'Alt browser toggle accepts twenty immediate released presses',
@@ -257,16 +260,19 @@ function healthContract(source) {
 }
 healthContract(pane);
 assert.throws(() => healthContract(pane.replace('pub fn browserHealthTick() void {', 'pub fn browserHealthTick() void {\n    startBrowserWindowResolve(0);')));
-function placeholderContract(source) {
-  const pure = body(source, 'browserPlaceholderPure');
+function placeholderContract(paneSource, redockSource) {
+  const pure = body(redockSource, 'browserPlaceholderPure');
+  assert.ok(pure.includes('if (connected) return .redock;'));
   assert.ok(pure.includes('shown_ms >= BROWSER_PLACEHOLDER_NOT_OPEN_MS and !launch_in_flight) return .not_open;'));
   assert.ok(!pure.includes('.failed'), 'an uncovered live slot is not a failed launch');
-  assert.ok(body(source, 'currentBrowserPlaceholder').includes('if (sh.browser_open_failed) return .failed;'));
-  assert.ok(body(source, 'paintBrowserPlaceholder').includes('L("Browser not open — Alt+W to open")'));
-  assert.ok(body(source, 'browserPlaceholderClick').includes('if (currentBrowserPlaceholder() != .failed) return false;'));
+  assert.ok(body(paneSource, 'currentBrowserPlaceholder').includes('if (sh.browser_open_failed) return .failed;'));
+  assert.ok(body(paneSource, 'paintBrowserPlaceholder').includes('L("Browser not open — Alt+W to open")'));
+  assert.ok(body(paneSource, 'paintBrowserPlaceholder').includes('state == .redock'));
+  assert.ok(body(paneSource, 'browserPlaceholderClick').includes('if (currentBrowserPlaceholder() != .failed) return false;'));
 }
-placeholderContract(pane);
-assert.throws(() => placeholderContract(pane.replace('return .not_open;', 'return .failed;')));
+const redock = read('src/browser_pane_redock.zig');
+placeholderContract(pane, redock);
+assert.throws(() => placeholderContract(pane, redock.replace('return .redock;', 'return .opening;')));
 function openingClockContract(source) {
   assert.ok(body(source, 'beginBrowserOpening').includes('if (sh.browser_first_launch_tick == 0) sh.browser_first_launch_tick = now;'));
   assert.ok(body(source, 'resetBrowserConnection').includes('sh.browser_first_launch_tick = 0;'));

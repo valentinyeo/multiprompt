@@ -1,0 +1,1 @@
+A connected browser pane that drifted off its slot docks again instead of showing “Opening browser…”.
