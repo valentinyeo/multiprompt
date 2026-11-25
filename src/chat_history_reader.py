@@ -823,10 +823,15 @@ def conversation_event(event, agent):
         text = visible_prompt(clean_command_markup(text))
     if not text.strip():
         return None
-    identity = (event.get("id") if agent == "pi" else message.get("id") or event.get("uuid")) or ""
+    if event.get("kind") in ("user", "assistant"):
+        identity = event.get("message_id") or event.get("id") or event.get("uuid") or ""
+    else:
+        identity = (event.get("id") if agent == "pi" else message.get("id") or event.get("uuid")) or ""
     timestamp = event.get("timestamp") or ""
     result = dict(role=role, timestamp=timestamp if isinstance(timestamp, str) else "",
                   text=text, id=identity if isinstance(identity, str) else "")
+    if isinstance(identity, str) and identity and role == "assistant":
+        result["reply_id"] = ("hax-" + identity) if event.get("kind") == "assistant" else identity
     if not result["id"] and result["timestamp"]:
         result["read_id"] = "event:" + hashlib.sha256(json.dumps(event, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
     return result
@@ -4135,10 +4140,23 @@ def host_history_append(provider, sid, session, row):
                timestamp=row.get("timestamp") or datetime.now().isoformat())
     path = host_paths(provider, sid)["history"]
     data = (json.dumps(dict(type="multiprompt_history", row=row), separators=(",", ":")) + "\n").encode("utf-8")
+    tail = session.get("history_tail") if isinstance(session.get("history_tail"), dict) else None
+    if (row.get("role") == "assistant" and isinstance(tail, dict) and tail.get("id") == row["id"] and isinstance(tail.get("start"), int) and
+            isinstance(tail.get("end"), int) and path.is_file() and path.stat().st_size == tail["end"]):
+        with path.open("r+b") as stream:
+            stream.truncate(tail["start"])
+            stream.seek(tail["start"])
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        session["history_tail"] = dict(id=row["id"], start=tail["start"], end=tail["start"] + len(data))
+        return
+    start = path.stat().st_size if path.is_file() else 0
     with path.open("ab") as stream:
         stream.write(data)
         stream.flush()
         os.fsync(stream.fileno())
+    session["history_tail"] = dict(id=row["id"], start=start, end=start + len(data))
 
 
 @contextmanager
@@ -4214,6 +4232,7 @@ def host_fresh_archive(provider, sid, tmux, session):
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)
+        session["history_tail"] = None
         session["state"]["display_history"] = True
         host_state_write(provider, sid, session["state"])
     finally:
@@ -5004,7 +5023,7 @@ def host_session_reset(session, agent=None):
     session.update(agent=agent, inflight=None, buffer=b"", stop=False, pending={}, parked={},
                    messages={}, current={}, sends=[], turn=None, interrupted=False, ready=False, rpc={}, seq=0,
                    thread=None, native_turn=None, codex_tokens={}, pi_run=False, pi_message=0, pi_last=None,
-                   control_wait={}, clear_restart=False)
+                   control_wait={}, hax_reply=None, history_tail=None, clear_restart=False)
 
 
 def host_clear_context(provider, sid, tmux, session):
@@ -6509,6 +6528,7 @@ def host_pi_set_model(provider, sid, tmux, session, request):
 def host_hax_open(provider, sid, tmux, session):
     session["ready"] = True
     session["hax_message"] = 0
+    session["hax_reply"] = None
     host_log(provider, sid, "init", dict(session=session["state"].get("native_session")))
     host_event(provider, sid, tmux, session, "host.status", dict(state="ready"))
 
@@ -6517,13 +6537,34 @@ def host_hax_write(provider, sid, session, token, text):
     return host_control_send(session, dict(type="prompt", id=token, message=text))
 
 
+def host_hax_message_id(record):
+    for key in ("message_id", "id", "uuid"):
+        value = record.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return ""
+
+
 def host_hax_record(provider, sid, tmux, session, record):
     kind = record.get("kind")
     if kind == "assistant" and isinstance(record.get("text"), str) and record["text"]:
-        session["hax_message"] += 1
-        block = host_stream_block(session, "hax-" + str(session["hax_message"]), "text")
-        host_complete(provider, sid, tmux, session, block, record["text"])
+        text = record["text"]
+        ident = host_hax_message_id(record)
+        current = session.get("hax_reply") if isinstance(session.get("hax_reply"), dict) else None
+        grows = (isinstance(current, dict) and current.get("block") is not None and
+                 (not ident or not current.get("id") or ident == current.get("id")) and
+                 text.startswith(current.get("text") or "\x00"))
+        if grows:
+            block = current["block"]
+        elif ident:
+            block = host_stream_block(session, "hax-" + ident, "text", 0)
+        else:
+            session["hax_message"] += 1
+            block = host_stream_block(session, "hax-" + str(session["hax_message"]), "text")
+        host_complete(provider, sid, tmux, session, block, text)
+        session["hax_reply"] = dict(block=block, text=text, id=ident)
     elif kind == "tool_call" and isinstance(record.get("call_id"), str):
+        session["hax_reply"] = None
         tool = record.get("tool_name") if isinstance(record.get("tool_name"), str) else "tool"
         try:
             arguments = json.loads(record.get("arguments") or "{}")

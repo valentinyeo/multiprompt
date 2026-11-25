@@ -596,7 +596,7 @@ jobs:
         run: node --test tools/install-mp-talk.test.js
       - name: Run account Worker tests
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
-        run: node --test service/test/infra.test.js service/test/worker.test.js service/test/keys.test.js service/test/mp-layout.test.js service/test/journey.test.js tools/mp-open-group.test.js tools/mp-layout-host.test.js tools/mb.test.js tools/mb-tab-pin.test.js tools/palette-verbs.test.js tools/palette-driver-queries.test.js
+        run: node --test service/test/infra.test.js service/test/worker.test.js service/test/keys.test.js service/test/mp-layout.test.js service/test/journey.test.js tools/mp-open-group.test.js tools/mp-layout-host.test.js tools/mb.test.js tools/mb-tab-archive.test.js tools/mb-tab-pin.test.js tools/palette-verbs.test.js tools/palette-driver-queries.test.js
 
   build-windows:
     name: build-windows (${{ matrix.arch }})
@@ -646,6 +646,9 @@ jobs:
       - name: Test hosted rows retire once above their replies
         if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
         run: timeout 180 node --test tools/chat-row-identity.test.js
+      - name: Test a reply shows once beside its history row
+        if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
+        run: timeout 180 node --test tools/chat-live-once.test.js
       - name: Test Zig syntax preflight
         if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
         run: node --test tools/check-zig-syntax.test.mjs

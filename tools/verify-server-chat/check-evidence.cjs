@@ -8,7 +8,7 @@ const text = name => fs.readFileSync(path.join(root, name), 'utf8').replace(/^\u
 const json = name => JSON.parse(text(name));
 const result = json('result.json');
 assert.equal(result.status, 'passed');
-assert.deepEqual(result.cases.map(row => [row.name, row.passed]), [['open', true], ['send', true], ['clear', true], ['after-clear', true]]);
+assert.deepEqual(result.cases.map(row => [row.name, row.passed]), [['open', true], ['send', true], ['clear', true], ['after-clear', true], ['reload', true]]);
 assert.equal(result.cleanup.activeAfterStop, 0);
 assert.equal(result.keyRemoved, true);
 assert.ok(Array.isArray(json('video.json').streams) && json('video.json').streams.length === 1);
@@ -16,7 +16,7 @@ assert.ok(text('open-copied.txt').includes('Server received: server seed'));
 for (const [name, message] of [['send', 'windows send proof'], ['after-clear', 'windows after clear']]) {
   const wireText = message;
   assert.equal(json(`${name}-server.json`).inputs.filter(row => row.text === wireText).length, 1);
-  assert.ok(text(`${name}-copied.txt`).includes(`Server received: ${message}`));
+  assert.equal(text(`${name}-copied.txt`).split(`Server received: ${message}`).length - 1, 1);
   assert.ok(fs.statSync(path.join(root, `${name}.png`)).size > 1000);
 }
 assert.equal(text('clear-copied.txt').trim(), '');
@@ -26,6 +26,9 @@ assert.equal(json('clear-server.json').host.state.context_session, json('clear-s
 assert.equal(json('after-clear-server.json').inputs.filter(row => row.text.trim() === '/clear').length, 0);
 assert.doesNotMatch(text('after-clear-copied.txt'), /Not sent|server seed|windows send proof/);
 assert.ok(fs.statSync(path.join(root, 'clear.png')).size > 1000);
+assert.ok(fs.statSync(path.join(root, 'reloaded.png')).size > 1000);
+assert.equal(text('reloaded-copied.txt').split('Server received: windows after clear').length - 1, 1);
+assert.doesNotMatch(text('reloaded-copied.txt'), /Not sent|server seed|windows send proof/);
 const acl = json('key-acl.json');
 assert.equal(acl.protected, true);
 assert.equal(acl.rules.length, 1);

@@ -52,6 +52,10 @@ function Type-Text([string]$Text) {
     $actions.Add(@{ input = 'type'; text = $Text; at = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() })
     foreach ($letter in $Text.ToCharArray()) { Doctor; [ChatDeliveryDesktop]::Character($letter); Start-Sleep -Milliseconds 20 }
 }
+function Reply-Count([string]$Text, [string]$Reply) {
+    if ([string]::IsNullOrEmpty($Reply)) { return 0 }
+    return ([regex]::Matches($Text, [regex]::Escape($Reply))).Count
+}
 function Copy-Chat([string]$Name) {
     $offset = (Log-Text).Length
     Press @(0x11, 0x4B) 'Ctrl+K: open command palette'
@@ -109,6 +113,7 @@ try {
     if (-not $opened.Contains('Server received: server seed')) { throw 'Open did not show the real server reply' }
     Shot 'open'
     $result.cases += @{ name = 'open'; passed = $true; detail = 'Copied the host-persisted seed reply from the real UI' }
+    $replies = @('Server received: server seed')
     foreach ($case in @(@{ name = 'send'; text = 'windows send proof' }, @{ name = 'clear'; text = '/clear' }, @{ name = 'after-clear'; text = 'windows after clear' })) {
         Send-Line $case.text
         if ($case.name -eq 'clear') {
@@ -129,17 +134,35 @@ try {
             [void](Wait-For 'server reload requested' { (Log-Text).Substring($offset).Contains('[chat] resync requested') })
             [void](Wait-For 'empty Chat View after reload' { (Copy-Chat 'clear-reloaded-copied').Trim() -eq '' } 30)
             Shot 'clear-reloaded'
+            $replies = @()
         } else {
             [void](Wait-For ('server receipt for ' + $case.name) { $snapshot = Server-Snapshot ($case.name + '-server'); @($snapshot.inputs | Where-Object { $_.text -ceq $case.text }).Count -eq 1 })
             [void](Wait-For ('painted reply for ' + $case.name) {
                 $copied = Copy-Chat ($case.name + '-copied')
-                $copied.Contains('Server received: ' + $case.text) -and -not $copied.Contains('Not sent')
+                (Reply-Count $copied ('Server received: ' + $case.text)) -eq 1 -and -not $copied.Contains('Not sent')
             } 30)
             if ($case.name -eq 'after-clear' -and ((Copy-Chat 'after-clear-copied').Contains('server seed') -or (Copy-Chat 'after-clear-copied').Contains('windows send proof'))) { throw 'Old messages returned after clear' }
             Shot $case.name
+            $replies += 'Server received: ' + $case.text
         }
         $result.cases += @{ name = $case.name; passed = $true; detail = 'Clear leaves an empty view after reload; ordinary sends reach the provider once with no Not sent' }
     }
+    $reloadOffset = (Log-Text).Length
+    Press @(0x11, 0x4B) 'Ctrl+K: open command palette'
+    [void](Wait-For 'palette ready before resync' { (Log-Text).Substring($reloadOffset) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
+    Type-Text 'resync chat'
+    [void](Wait-For 'resync command' { (Log-Text).Substring($reloadOffset) -match '\[palette\] ready chars=11 count=1 target=6493(?:\s|$)' })
+    Press @(0x0D) 'Enter: resync the transcript from the server'
+    [void](Wait-For 'resync requested' { (Log-Text).Substring($reloadOffset) -match '\[chat\] resync requested' })
+    [void](Wait-For 'server transcript reloaded' { (Log-Text).Substring($reloadOffset) -match '\[chat\] transcript load shell=\d+ ok' })
+    $reloaded = Copy-Chat 'reloaded-copied'
+    foreach ($reply in $replies) {
+        $count = Reply-Count $reloaded $reply
+        if ($count -ne 1) { throw ('Reloaded Chat View showed ' + $reply + ' ' + $count + ' times') }
+    }
+    if ($reloaded -match 'server seed|windows send proof|Not sent') { throw 'Old messages or a failed send returned after reload' }
+    Shot 'reloaded'
+    $result.cases += @{ name = 'reload'; passed = $true; detail = 'Resyncing the transcript from the server shows every server reply once' }
     Save @{ pid = $app.Id; hwnd = $main.ToInt64(); exe = $app.Path; sha256 = $ExpectedHash; visible = $true } "$Evidence/doctor.json"
     $result.status = 'passed'
 } catch {
