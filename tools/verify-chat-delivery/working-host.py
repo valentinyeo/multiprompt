@@ -84,6 +84,9 @@ def install(namespace, root, record, steady=False, fresh=False):
         record('working-host.jsonl', stage='deliver', sid=sid, id=token, text=text)
         session = {'turn': 'standin-turn', 'state': dict(display_history=True) if display else {},
                    'sends': [dict(id=token, attempt=attempt, accepted=False)]}
+        if display:
+            namespace['host_history_append'](provider, sid, session, dict(role='user', id=token, text=text))
+            record('working-host.jsonl', stage='user-row', sid=sid, id=token)
         namespace['host_event'](provider, sid, 'verify-agent', session, 'turn.started',
                                 dict(message_id=token, text_sha256=hashlib.sha256(text.encode()).hexdigest(), uuids=[]))
         record('working-host.jsonl', stage='turn.started', sid=sid, id=token)
