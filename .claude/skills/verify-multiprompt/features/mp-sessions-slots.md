@@ -1,6 +1,6 @@
 # Multi Bot session verbs and server slots
 
-Source files: src/mp_sessions.py, src/mp_send.py, src/mp_layout.mjs, tools/mp-sessions, tools/mp-sessions-test.py, tools/mp-layout.mjs, tools/mp-layout-host.test.js, tools/mb.mjs, tools/check-servers-slots.mjs, tools/check-servers-slots.test.js, tools/fixtures/MUBO-194/*, tools/fixtures/MUBO-294/*, tools/fixtures/MUBO-558/*, tools/fixtures/SOFT-3139/*, .github/workflows/mp-sessions-slots.yml
+Source files: src/mp_sessions.py, src/mp_send.py, src/mp_layout.mjs, src/mp_zsb.sh, tools/vps-multiprompt-browser.sh, tools/zsb-port-holder.test.py, tools/mp-sessions, tools/mp-sessions-test.py, tools/mp-layout.mjs, tools/mp-layout-host.test.js, tools/mb.mjs, tools/check-servers-slots.mjs, tools/check-servers-slots.test.js, tools/fixtures/MUBO-194/*, tools/fixtures/MUBO-294/*, tools/fixtures/MUBO-558/*, tools/fixtures/MUBO-566/*, tools/fixtures/SOFT-3139/*, .github/workflows/mp-sessions-slots.yml
 CI workflow: mp-sessions-slots.yml
 
 ## Sub-features
@@ -10,6 +10,8 @@ A verb aimed at a chat that already exists addresses it by tmux or tab name, so 
 Creating a tab resolves its server slot in one order: `--host`, the chat's recorded host, `MULTIPROMPT_HOST`, `multiprompt_slot` on this machine's entry in the installed `servers.json`, then the caller's own tab host or its recorded `spawn_host`. With none of those it stops and names the exact file and the field to add.
 
 `mp-sessions start` also runs with the desktop closed. It keeps the keyless helper path: it writes the chat's host configuration, enables and starts the host, and matches `--workspace` against the synced `layout.json` and `chat-names.json` this map already lists. A name in neither file, with a non-empty synced workspace list, stops with `no workspace named <name>`. With the desktop closed it records the workspace on the chat and reports `"visible":false` with `visible_error` `desktop_offline` instead of opening a tab, plus `visible_error_detail` naming the transport code and message that stopped it (a squatted port 19548, a dead tunnel, or a stopped app), and a second start reuses the same chat.
+
+When reopening a saved chat, resolve its recorded numeric host slot through the current desktop host list before using its old recorded host name. The caller's slot must not move that chat to a different server. The notification relay is a supported browser bridge on port 19548; an empty response behind that bridge is not a foreign port conflict.
 
 Every `servers.json` the repository ships names a slot for each server, and an installed file whose entries carry only `id` and `hostname` still lets an existing chat be messaged.
 
@@ -22,6 +24,8 @@ Nobody opens this from the app. An agent runs `mp-sessions send <chat> <text>` o
 One Linux job runs `node --test --test-reporter=tap tools/mp-layout-host.test.js tools/check-servers-slots.test.js` and `python3 tools/mp-sessions-test.py` on the pull request head. It then checks out the base source into a worktree, copies the head test files and the `tools/fixtures/MUBO-294/servers.json` snapshot into it, and runs the same two commands there. Both exit codes and both logs go into `summary.json` as parts `layout` and `sessions`, with `repro` recording the base red and the head green.
 
 On the base, which is master with 1302 reverted, the head tests fail: nothing reads `multiprompt_slot` from the installed servers file, a create with no slot does not name the file and the field, the reverted layout module has no recorded-host reopen, and `mp-sessions start` stops on an offline desktop before it writes the chat. On head the same tests pass. One artifact named `mp-sessions-slots` holds `summary.json` and both logs. The PR selector owns these files through `CI workflow:`, not a nearest desktop name. The verifier waits for this workflow on the exact PR head, requires success, and gives the independent judge its summary and run receipt.
+
+The same job also runs `tools/zsb-port-holder.test.py`, `tools/mp-sessions-health.test.py`, and the notification relay fixture suite. The browser fixture runs both shipped wrappers with fixture process listings and socket replies. A relay or SSH bridge returns `empty_reply` or `tunnel_down` when unavailable; an unrelated listener still returns `port_conflict` with its identity. The saved-chat fixture starts and restarts an existing Codex chat whose slot 1 was recorded as `remote-2`, while the live listing uses another name. Both must open its tab on slot 1 even when the caller uses slot 0. A fresh chat must use the current host list too. The artifact retains bridge, health and relay logs alongside the session receipt.
 
 ## Gotchas
 

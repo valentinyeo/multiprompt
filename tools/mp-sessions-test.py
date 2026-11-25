@@ -52,7 +52,7 @@ elif sys.argv[1] == "session-open":
         sys.exit(1)
     tmux = sys.argv[sys.argv.index("--tmux") + 1]
     state.setdefault("tabs", [])
-    state["tabs"].append(dict(id=55, title=sys.argv[sys.argv.index("--name") + 1], host="remote-1", tmux=tmux))
+    state["tabs"].append(dict(id=55, title=sys.argv[sys.argv.index("--name") + 1], host=host, tmux=tmux))
     Path(os.environ["MP_SESSIONS_TEST_STATE_FILE"]).write_text(json.dumps(state), encoding="utf-8")
     print(json.dumps(dict(ok=True, created=True, tab=55)))
 elif sys.argv[1] == "session-rename":
@@ -513,7 +513,7 @@ class MpSessionsTest(unittest.TestCase):
         self.assertEqual(rows[0], dict(name="Hosted Lead", provider="claude", sid="hosted-session", tmux="live-hosted",
                                        cwd=str(self.work), state="idle", link="@Hosted Lead{live-hosted}",
                                        workspace=None, group=None, busy=False, running=True, self=False,
-                                       in_layout=False, visible=False, hidden_reason="not in layout", waiting=None,
+                                       in_layout=False, visible=False, hidden_reason="not in layout", offline_detail=None, waiting=None,
                                        pinned=None, archived=None, user_hidden=None, active_workspace="Home", sidebar_view=None))
 
     def seed_hosted_fixture(self, entries):
@@ -777,7 +777,7 @@ class MpSessionsTest(unittest.TestCase):
         self.assertIsInstance(detail, str)
         self.assertIn("port_conflict", detail)
         self.assertIn("19548", detail)
-        self.assertIn("mp_notify_relay.py", detail)
+        self.assertIn("stale_listener.py", detail)
         self.assertIn("4211", detail)
         self.assertNotIn("session-open", [call[0] for call in self.events("zsb")])
 

@@ -514,9 +514,10 @@ def ensure_visible(send, listing, target, display):
     workspace = target.get("workspace")
     if not workspace:
         workspace = default_workspace(listing)
-    host = target.get("host") or target.get("recorded_host_name")
+    host = target.get("host")
     if not host and isinstance(target.get("recorded_host"), int):
         host = host_name(listing, target["recorded_host"])
+    host = host or target.get("recorded_host_name")
     if not host:
         raise ValueError("this chat has no recorded host; start it again to record the server it runs on")
     present = send.find_tab(listing, target["tmux"])[2]

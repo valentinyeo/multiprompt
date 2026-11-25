@@ -292,7 +292,7 @@ class MpSessionsHealthTest(unittest.TestCase):
         self.assertEqual(row["status"], "BROKEN UNKNOWN desktop offline")
         self.assertTrue(row["offline_detail"].startswith("port_conflict: "))
         self.assertIn("19548", row["offline_detail"])
-        self.assertIn("mp_notify_relay.py", row["offline_detail"])
+        self.assertIn("stale_listener.py", row["offline_detail"])
         text = self.run_with_reply(conflict, "health", **extra)
         self.assertEqual(text.returncode, 1, text.stderr + text.stdout)
         self.assertIn("unreachable: port_conflict", text.stdout)
