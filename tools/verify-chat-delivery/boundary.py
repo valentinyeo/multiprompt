@@ -1248,6 +1248,13 @@ def reader_namespace():
                 record("working-host.jsonl", stage="subscribed", sid=fixture.SID, provider=query.get("provider"))
 
         namespace["serve_request"] = working_request
+    if state().get("name") == "workspace-switch":
+        fixture_path = Path(__file__).with_name("workspace-switch-host.py")
+        assert fixture_path.is_file(), "Workspace switch host fixture is missing"
+        spec = importlib.util.spec_from_file_location("workspace_switch_host", fixture_path)
+        fixture = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fixture)
+        fixture.install(namespace, ROOT, record)
     if state().get("name") == "startup-failure":
         original = namespace["serve_request"]
         sid = "a1b2c3d4-1593-4000-8000-000000001593"
