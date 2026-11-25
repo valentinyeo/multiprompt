@@ -83,6 +83,16 @@ Press @(0x0D) 'Enter: send during the reload' $true
 Copy-Item "$settings/chat-outbox.json" "$caseDir/outbox-held.json"
 Shot 'fresh-message-waiting'
 $observation.held = $true
+$sentAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+[void](Wait-For 'the message waits out a watchdog-length reload' {
+    if (@(Working-Stage 'fresh-start-finished').Count -gt 0) { throw 'The reload finished before the waiting window elapsed' }
+    if (-not (Test-Path "$settings/chat-outbox.json")) { return $false }
+    $outbox = Read-Shared "$settings/chat-outbox.json" | ConvertFrom-Json
+    $waiting = @($outbox.queues | ForEach-Object { $_.messages } | Where-Object { $_.t -ceq $plan.text })
+    if ($waiting.Count -ne 1 -or $waiting[0].s -eq 2 -or $waiting[0].phase -ceq 'failed') { throw 'The waiting message was marked Not sent during the reload' }
+    return ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $sentAt) -ge 105000
+} 140)
+$observation.pendingMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $sentAt
 [IO.File]::WriteAllText("$state/working-resume-done", '')
 [void](Wait-For 'the reload finished' { @(Working-Stage 'fresh-start-finished').Count -ge 1 } 60)
 [void](Wait-For 'the waiting message reached the chat exactly once' {

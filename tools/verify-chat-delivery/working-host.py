@@ -215,7 +215,7 @@ def install_fresh(namespace, root, record, deliver):
                 namespace['host_event']('claude', SID, 'verify-agent', session, 'text.delta',
                                         dict(text=text, done=False), 'standin-resume-reply')
                 record('working-host.jsonl', stage='fresh-resume-delta', sid=SID, segment=index)
-            deadline = time.monotonic() + 120
+            deadline = time.monotonic() + 400
             while not (root / 'working-resume-done').exists() and time.monotonic() < deadline:
                 time.sleep(0.05)
             namespace['host_event']('claude', SID, 'verify-agent', session, 'text.done',
