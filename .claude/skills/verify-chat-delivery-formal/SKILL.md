@@ -39,6 +39,8 @@ No liveness is claimed when a connection can stay down forever. This does not ve
 
 ## Coverage and sync
 
+MUBO-558 reviewed source at `bdcae14efdf94831fc2ca390fccf045aaa714aae`. The reader's runtime publish step records the app version that published each helper and refuses to move a helper back to an older version. It runs in the bootstrap before any request, outside `message_store_transaction`, `message_poll` and `message_poll_locked`, and every other covered file is unchanged. The model, bounds, decisions, probes and mutations are unchanged; only the reader's whole-file hash and the sync commit move.
+
 SOFT-2681 reviewed source at `28135885b5b63344a2b71e2e278d502658fd6ea8`. The reader now publishes Claude's native session and selects its current transcript; its added tests cover that routing. `message_store_transaction`, `message_poll`, `message_poll_locked` and `IGSH_1266_SharedMessageHostTest` are unchanged from the prior sync. Every other covered file is unchanged. Only the reader and reader-test hashes move; the fixed-session model, bounds, decisions, probes and mutations remain unchanged. Hosted CI must rerun the full self-test and native replay.
 
 SOFT-2380 reviewed the merged source against master `62f7e727f02e78a3ae364fd4e225ebe55d865f7a`. Its only covered-file difference is the optional sidebar view and three palette IDs in `src/app_state.zig`; `ChatOutboxEntry` is byte-for-byte unchanged. All seven other covered files, native probes, replay code and the model match that master. The hashes below include this unrelated state addition.

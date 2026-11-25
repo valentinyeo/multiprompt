@@ -315,7 +315,8 @@ class MpSessionsTest(unittest.TestCase):
         sessions = self.older_send_runtime()
         done = subprocess.run([sys.executable, str(sessions), "send", "Peer", "hello there"], capture_output=True,
                               text=True, env=self.env(MULTIPROMPT_READER_SOURCE=str(READER)), timeout=60)
-        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn(done.returncode, (0, 3), done.stderr)
+        self.assertNotIn("AttributeError", done.stderr)
         sent = json.loads(done.stdout)
         self.assertEqual(sent["sid"], peer["sid"])
         self.assertRegex(sent.get("id") or "", r"\Amp-[0-9a-f]{32}\Z")
