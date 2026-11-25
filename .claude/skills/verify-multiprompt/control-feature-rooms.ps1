@@ -114,6 +114,26 @@ function Shot([string]$Name) {
     [IO.File]::WriteAllText("$Evidence/$Name-visible.txt", $text)
     return $text
 }
+function Picker-Shot([string]$Name) {
+    [void](Shot $Name)
+    $focus = [IntPtr]([ChatDeliveryDesktop]::Focus($main)[1])
+    if ([ChatDeliveryDesktop]::Class($focus) -ne 'Edit') { throw 'Member search is not focused' }
+    $bounds = [Windows.Automation.AutomationElement]::FromHandle($focus).Current.BoundingRectangle
+    $roomBounds = [Windows.Automation.AutomationElement]::FromHandle((Room-Window)).Current.BoundingRectangle
+    $scale = $bounds.Height / 32
+    $top = [int]($bounds.Bottom + 12 * $scale)
+    $height = [int][Math]::Min(250 * $scale, $roomBounds.Bottom - $top - 84 * $scale)
+    if ($height -lt 1) { throw 'Member result list has no readable area' }
+    $source = [Drawing.Bitmap]::new("$Evidence/$Name.png")
+    try {
+        $crop = $source.Clone([Drawing.Rectangle]::new([int]$bounds.Left, $top, [int]$bounds.Width, $height), $source.PixelFormat)
+        try { $crop.Save("$Evidence/$Name-list.png", [Drawing.Imaging.ImageFormat]::Png) } finally { $crop.Dispose() }
+    } finally { $source.Dispose() }
+    $text = Invoke-ServerNative -FilePath $ocr -Arguments @("$Evidence/$Name-list.png", 'stdout', '--psm', '11') -Evidence $Evidence -Name ("$Name-list-ocr")
+    $text = $text -replace '\s+', ' '
+    [IO.File]::WriteAllText("$Evidence/$Name-list-visible.txt", $text)
+    return $text
+}
 function Shot-Room([string]$Name) {
     Doctor
     $room = Room-Window
@@ -253,8 +273,13 @@ try {
         if ([ChatDeliveryDesktop]::Class($edit) -ne 'Edit') { throw 'New room did not focus its name field' }
         Type-Text 'Rooms534'
         [void](Wait-For 'room name typed' { [ChatDeliveryDesktop]::Text($edit) -ceq 'Rooms534' })
+        Press @(0x09) 'Tab: find the first room member'
+        Type-Text 'Alpha'
+        [void](Wait-For 'Alpha available in the creation member results' { (Picker-Shot 'create-alpha') -match '\bAlpha\b' })
+        Press @(0x0D) 'Enter: select Alpha as the first member'
+        [void](Wait-For 'one selected creation member' { (Shot 'create-selected') -match 'Create\s*[^0-9]{0,3}1\b' })
         [void](Shot 'create-before')
-        Press @(0x0D) 'Enter: create empty room'
+        Press @(0x11, 0x0D) 'Ctrl+Enter: create the room with its first member'
         [void](Wait-For 'room persisted' { (Room-Data (Snapshot 'create-poll')).Count -eq 1 })
         if ((Shot 'create-after') -notmatch 'Rooms534') { throw 'Saved room is not shown in its room view' }
     }
@@ -287,11 +312,12 @@ try {
         $room = Wait-For 'room editor' { Room-Window }
         Press @(0x09) 'Tab: search member chats'
         Type-Text 'Alpha'
-        [void](Wait-For 'Alpha visible in member list' { (Shot 'members-alpha') -match 'Alpha' })
-        Press @(0x0D) 'Enter: select Alpha'
+        [void](Wait-For 'Alpha visible in member results' { (Picker-Shot 'members-alpha') -match '\bAlpha\b' })
+        $alpha = @((Snapshot 'members-before').rooms | ForEach-Object { $_.tables.members } | Where-Object { $_.active -eq 1 -and $_.display_name -ceq 'Alpha' })
+        if ($alpha.Count -eq 0) { Press @(0x0D) 'Enter: select Alpha' }
         Press @(0x11, 0x41) 'Ctrl+A: replace member search'
         Type-Text 'Bravo'
-        [void](Wait-For 'Bravo visible in member list' { (Shot 'members-bravo') -match 'Bravo' })
+        [void](Wait-For 'Bravo visible in member list' { (Picker-Shot 'members-bravo') -match '\bBravo\b' })
         Press @(0x0D) 'Enter: select Bravo'
         Press @(0x11, 0x0D) 'Ctrl+Enter: save room members'
         [void](Wait-For 'both saved members' { $s = Snapshot 'members-poll'; @($s.rooms | ForEach-Object { $_.tables.members } | Where-Object { $_.active -eq 1 }).Count -eq 2 })
@@ -310,7 +336,7 @@ try {
         foreach ($name in @('Alpha', 'Bravo')) {
             Press @(0x11, 0x41) 'Ctrl+A: replace member search'
             Type-Text $name
-            [void](Wait-For "$name listed" { (Shot "reopened-picker-$name") -match $name })
+            [void](Wait-For "$name listed" { (Picker-Shot "reopened-picker-$name") -match ([regex]::Escape($name)) })
             $members = @((Snapshot 'reopened-members').rooms | ForEach-Object { $_.tables.members } | Where-Object { $_.active -eq 1 -and $_.display_name -ceq $name })
             if ($members.Count -eq 0) { Press @(0x0D) "Enter: select $name" }
         }

@@ -8,7 +8,7 @@ Create a shared conversation, add two live chats, send to everyone, mention one 
 
 ## How to get to it (user POV)
 
-Ctrl+K **New room** (also available as Ctrl+Shift+N), enter a name and create. Ctrl+K **Edit room**, search each member and press Enter to select it, then Ctrl+Enter to save. Open the room by its name in Ctrl+K. Type into its composer and press Enter. Type `@Alpha TARGET534` to address Alpha alone. Open Alpha and Bravo through Ctrl+K to inspect their own Chat Views.
+Ctrl+K **New room** (also available as Ctrl+Shift+N), enter a name, Tab into member search, select Alpha with Enter, then Ctrl+Enter to create. The app requires at least one member when creating. Ctrl+K **Edit room**, search each additional member and press Enter to select it, then Ctrl+Enter to save. Open the room by its name in Ctrl+K. Type into its composer and press Enter. Type `@Alpha TARGET534` to address Alpha alone. Open Alpha and Bravo through Ctrl+K to inspect their own Chat Views.
 
 ## Driving it with control.ps1
 
@@ -20,7 +20,7 @@ First try Ctrl+K New room on the fresh profile, before private chat driving can 
 
 | Step | Action and observable proof |
 | --- | --- |
-| 1 / a | On the fresh profile, create Rooms534 with no members through Ctrl+K. Require the named native room view, screenshot/OCR, and exactly one room in the read-only server snapshot. |
+| 1 / a | On the fresh profile, create Rooms534 with Alpha through Ctrl+K, name, member search/Enter, Ctrl+Enter. Require the named native room view, screenshot/OCR, and exactly one room in the read-only server snapshot. A zero-member creation is invalid and must never be reported as a product break. |
 | private | Both private chats must reply through the desktop composer. A failure here is a precondition failure, not proof that room replies broke. If fresh creation failed, a separately reported warm retry tries the same UI path so independent later checks can still run. The fresh-profile result never changes. |
 | 2 / b | Close Bravo's tab, prove its absence in saved tabs, edit the room, select Alpha and Bravo using real search/Enter, save. Require two active persisted members and the reopened room screenshot. |
 | 2-open | Independently reopen Bravo through the palette and try adding both open chats. This lets later checks proceed when the closed-chat picker fails; it never changes step b's result. |
@@ -32,7 +32,7 @@ First try Ctrl+K New room on the fresh profile, before private chat driving can 
 | 8 / f | Send RESTART534, prove both unanswered provider receipts, leave the room, stop only the owned desktop, relaunch with its saved profile, release replies without opening the room. Require both saved answers before returning and both on screen afterward. |
 | 9 / g | UNREACHABLE without an Android Rooms client harness. Paired ticket MUBO-536 owns phone reading. |
 | 10 / h | UNREACHABLE without an Android Rooms retry harness. Paired ticket MUBO-536 owns phone retries. |
-| 12 | Fail each provider's first FAIL534 turn, use the room's Restart control, require the original question to receive both answers. |
+| 12 | Fail Alpha's first FAIL534 turn while Bravo succeeds, use the room's Restart control, require the original question to receive both answers. |
 | 13 | UNREACHABLE without a controllable lost-acknowledgement boundary. Ordinary successful sends do not prove retry safety. |
 | 14 | Leave and reload history. Compare saved reply IDs and order and require the replies in screenshots while scrolling the native room. |
 | 11 | Launch a second fresh profile with only the same disposable account credentials and SSH configuration, no room cache or saved sessions. Require discovery of Rooms534 and its saved history through Ctrl+K. |
@@ -43,7 +43,7 @@ Download with `gh run download <id> -n verify-rooms -D <directory>`. Inspect the
 
 ## Gotchas
 
-- Room text is custom-painted and has no copy-all action. Tesseract reads actual desktop screenshots; saved room events independently prove what persisted. OCR failures need visual review before being called product bugs.
+- Room text is custom-painted and has no copy-all action. Tesseract reads actual desktop screenshots; saved room events independently prove what persisted. Member checks also retain `*-list.png`, cropped below the native member-search field, so typed query text or sidebar names cannot masquerade as picker results. OCR failures need visual review before being called product bugs.
 - Display names and the app's generated mention aliases are different. This journey deliberately checks the requested `@<name>` user path; do not replace it with a private generated ID to hide a failed name mention.
 - A failed broadcast reply does not prevent testing a targeted send or opening both member views. No reply order can be proven when no replies exist; report that missing prerequisite explicitly.
 - This checks one desktop plus both member chat views and saved server state, not a second physical desktop or Android. `tools/verify-account-photos/android.sh` is a photo-only companion instrumentation harness; it has no Rooms read/retry actions and cannot run in this Windows job. Cases g/h name that missing prerequisite.

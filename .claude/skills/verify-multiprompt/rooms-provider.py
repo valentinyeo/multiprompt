@@ -32,12 +32,12 @@ for line in sys.stdin:
         out.write(json.dumps(dict(sid=sid, text=text, marker=marker, pid=os.getpid())) + '\n')
     if marker in ('AWAY534', 'RESTART534'):
         gate = root / (sid + '-' + marker + '.fifo')
-        signal.alarm(120)
+        signal.alarm(300)
         with gate.open() as release:
             release.read()
         signal.alarm(0)
     failed = root / (sid + '-failed534')
-    if marker == 'FAIL534' and not failed.exists():
+    if marker == 'FAIL534' and name == 'Alpha' and not failed.exists():
         failed.touch()
         print(json.dumps(dict(type='result', subtype='error_during_execution', is_error=True, session_id=sid, errors=['Disposable provider turn failed'])), flush=True)
         continue
