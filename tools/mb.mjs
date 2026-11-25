@@ -34,6 +34,7 @@ commands:
   workspace rename <old> <new>
   workspace delete <name> [--move-to <workspace>]
   workspace color <name> <color>
+  workspace switch-ai <workspace> <claude|codex|pi> [--json]
   group list
   group create <name>
   group rename <old> <new>
@@ -479,6 +480,76 @@ async function archiveSession(ctx, flags, archived) {
   else ctx.out(`${word} ${target.title}`);
 }
 
+const SWITCH_AI_TARGETS = new Set(['claude', 'codex', 'pi']);
+
+async function workspaceSwitchAi(ctx, flags) {
+  if (flags._.length !== 2) throw new Failure('workspace switch-ai needs <workspace> <claude|codex|pi>');
+  const wsInput = workspaceName(flags._[0]);
+  const target = clean(String(flags._[1] || '')).toLowerCase();
+  if (!SWITCH_AI_TARGETS.has(target)) throw new Failure('target AI must be claude, codex or pi');
+  const listing = zsbCall(ctx, ['workspace-list']);
+  const workspace = (listing.workspaces || []).find(item => item.name === wsInput);
+  if (!workspace) throw new Failure(`no workspace named '${wsInput}'`);
+  const tabs = [
+    ...(workspace.tabs || []),
+    ...(workspace.groups || []).flatMap(group => group.tabs || [])
+  ];
+  const isChatTab = tab => tab.chat === true || (tab.chat !== false && typeof tab.provider === 'string' && tab.provider.length > 0);
+  const results = [];
+  let switched = 0;
+  let already = 0;
+  let busy = 0;
+  let failed = 0;
+  let ignored = 0;
+  for (const tab of tabs) {
+    if (!isChatTab(tab)) {
+      ignored += 1;
+      continue;
+    }
+    const title = tab.title || tab.tmux || String(tab.id);
+    const current = typeof tab.provider === 'string' ? tab.provider.toLowerCase() : null;
+    if (current === target) {
+      already += 1;
+      results.push({ tab: tab.id, title, tmux: tab.tmux || null, outcome: 'already', provider: target });
+      continue;
+    }
+    try {
+      const reply = zsbCall(ctx, ['session-switch-ai', '--tab', String(tab.id), '--to', target]);
+      if (reply.status === 'switched') {
+        switched += 1;
+        results.push({ tab: tab.id, title, tmux: tab.tmux || null, outcome: 'switched', from: current, provider: reply.provider || target, sid: reply.sid || null });
+      } else if (reply.status === 'already') {
+        already += 1;
+        results.push({ tab: tab.id, title, tmux: tab.tmux || null, outcome: 'already', provider: reply.provider || target });
+      } else if (reply.status === 'busy') {
+        busy += 1;
+        results.push({ tab: tab.id, title, tmux: tab.tmux || null, outcome: 'busy', reason: reply.reason || 'Wait for the current reply first', provider: reply.provider || current });
+      } else {
+        failed += 1;
+        results.push({ tab: tab.id, title, tmux: tab.tmux || null, outcome: 'failed', reason: reply.reason || reply.message || reply.error || 'switch failed', provider: reply.provider || current });
+      }
+    } catch (error) {
+      failed += 1;
+      results.push({ tab: tab.id, title, tmux: tab.tmux || null, outcome: 'failed', reason: error.message || 'switch failed', provider: current });
+    }
+  }
+  const ok = failed === 0;
+  if (flags.json) {
+    ctx.out(JSON.stringify({ ok, verb: 'workspace switch-ai', workspace: workspace.name, target, switched, already, busy, failed, ignored, chats: results }));
+  } else if (results.length === 0) {
+    ctx.out(`no chats in workspace ${workspace.name}`);
+  } else {
+    for (const item of results) {
+      if (item.outcome === 'switched') ctx.out(`switched ${item.title} -> ${item.provider}`);
+      else if (item.outcome === 'already') ctx.out(`already ${item.title} (${item.provider})`);
+      else if (item.outcome === 'busy') ctx.out(`skipped ${item.title} (busy: ${item.reason})`);
+      else ctx.out(`failed ${item.title}: ${item.reason}`);
+    }
+    ctx.out(`workspace ${workspace.name}: ${switched} switched, ${already} already, ${busy} busy, ${failed} failed`);
+  }
+  return ok ? 0 : 1;
+}
+
 async function waitSession(ctx, flags) {
   if (flags._.length !== 1) throw new Failure('wait needs one tab name');
   const host = flags.host === undefined ? null : hostSlot(flags.host);
@@ -654,7 +725,7 @@ async function workspaceCommand(ctx, sub, flags) {
     ctx.out(result.changed ? `colored workspace ${name} (revision ${result.revision})` : `workspace ${name} already colored ${color} (revision ${result.revision})`);
     return;
   }
-  throw new Failure('workspace needs create, rename, delete, list or color');
+  throw new Failure('workspace needs create, rename, delete, list, color or switch-ai');
 }
 
 async function groupCommand(ctx, sub, flags) {
@@ -1048,6 +1119,10 @@ export async function run(argv, overrides = {}) {
     if (command === 'wait') {
       await waitSession({ env, out, err }, parse(rest));
       return 0;
+    }
+    if (command === 'workspace' && rest[0] === 'switch-ai') {
+      const flags = parse(rest.slice(1));
+      return await workspaceSwitchAi({ env, out, err }, flags);
     }
     if (command === 'move') {
       const flags = parse(rest);

@@ -3991,6 +3991,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             @import("command_palette.zig").finishSwitchAi(lp);
             return 0;
         },
+        app_state.WM_APP_WORKSPACE_SWITCH_AI => { @import("workspace_switch_ai.zig").handleUiTask(lp); return 0; },
         app_state.WM_APP_PI_MODEL_RESULT => {
             @import("chat_send.zig").chatPiModelFinish(lp);
             return 0;
@@ -5516,6 +5517,9 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = @import("command_palette.zig").startSwitchAi(app_state.active_shell, if (target == app_state.SEARCH_CHAT_SWITCH_CLAUDE_OFFSET) 1 else if (target == app_state.SEARCH_CHAT_SWITCH_CODEX_OFFSET) 2 else 3);
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
+                }
+                if (target == app_state.SEARCH_WS_SWITCH_CLAUDE_OFFSET or target == app_state.SEARCH_WS_SWITCH_CODEX_OFFSET or target == app_state.SEARCH_WS_SWITCH_PI_OFFSET) {
+                    if (@import("workspace_switch_ai.zig").activatePalette(hwnd, target)) return 0;
                 }
                 if (target == SEARCH_CHAT_RESTART_OFFSET or target == SEARCH_CHAT_RESTART_ALL_OFFSET) {
                     app_state.g_search_active = false;

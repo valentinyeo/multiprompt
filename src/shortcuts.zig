@@ -277,6 +277,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+Shift+Y", .b = "Snooze this workspace until a chosen time", .header = false },
     .{ .a = "Ctrl+K -> Workspace: Wake <name>", .b = "Wake a snoozed workspace now and switch to it", .header = false },
     .{ .a = "Ctrl+K -> Workspace: Bring Back All Sessions", .b = "Reopen every recorded tmux session of this workspace", .header = false },
+    .{ .a = "Ctrl+K -> Workspace: Switch every chat to Codex (Claude, Pi)", .b = "Move every live chat in this workspace to another AI and keep each chat's name, picture, place and readable history; busy chats wait", .header = false },
     .{ .a = "Alt+Left / Alt+Right", .b = "Cycle prev / next workspace", .header = false },
     .{ .a = "Ctrl+N / Alt+N pill", .b = "New workspace", .header = false },
     .{ .a = "Inbox (Alt+I)", .b = "", .header = true },

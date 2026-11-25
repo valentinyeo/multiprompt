@@ -1,0 +1,1 @@
+Switch every chat in a workspace to another AI
