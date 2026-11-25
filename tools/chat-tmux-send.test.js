@@ -72,7 +72,7 @@ const chat_echo = struct { fn fileTimeToUnixMs(_: u64) i64 { return 12345; } };
 const ChatTmuxSendJob = struct {
     key: Key = .{}, echo_id: u64 = 1, text: []u16, retry: bool = false, held: bool = false, written: bool = false, rejected: bool = false, box_not_clear: bool = false,
     queued_at: i64 = 0, queue_id: u64 = 0, message_nonce: u64 = 0, request_nonce: u64 = 0,
-    message_v1: bool = false, message_status: bool = false, message_reset: bool = false, message_dismiss: bool = false,
+    message_v1: bool = false, message_status: bool = false, message_reset: bool = false, clear_context: bool = false, message_dismiss: bool = false,
     reset_cutoff: u64 = 0, history_instance: u64 = 0, message_generation: u64 = 0, message_epoch: u64 = 0, reset_result_epoch: u64 = 0,
     message_state: [16]u8 = @splat(0), message_wire_id: [81]u8 = @splat(0), message_replaces: [81]u8 = @splat(0),
     finished: std.atomic.Value(bool) = .init(true),
@@ -101,6 +101,16 @@ fn chatUpgradeToHostMessage(_: u32, entry: *Entry) bool {
 }
 fn showHeaderNoticeAscii(_: []const u8, _: u32, _: bool) void {}
 fn debugLog(_: []const u8) void {}
+fn chatLiveStreamStop() void {}
+fn chatLiveRelease(_: u32) void {}
+fn chatResetLocalForShell(_: u32) void {}
+fn chatDraftFlush() void {}
+fn L(comptime text: []const u8) [*:0]const u16 { return std.unicode.utf8ToUtf16LeStringLiteral(text); }
+fn GetWindowTextW(_: anytype, _: [*]u16, _: i32) i32 { return 0; }
+fn SetWindowTextW(_: anytype, _: [*:0]const u16) i32 { return 1; }
+var active_shell: u32 = 0;
+const g_chat_composer_hwnd: ?*anyopaque = null;
+var g_chat_draft_dirty = false;
 const CHAT_MESSAGE_SYNC_POLL_MS: u64 = 3000;
 const CHAT_MESSAGE_SYNC_RETRY_CAP_MS: u64 = 30_000;
 test "IGSH-1289 each chat retries promptly without a shared one-minute pause" {
@@ -277,7 +287,7 @@ function execute(disabled = false) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-tmux-routing-'));
   try {
     require('./fixtures/inline-stubs').writeChatMention(dir);
-    const functions = ['chatTmuxSendEligible', 'sendTextToShellVerifiedAt', 'chatSendViaConsole', 'chatTmuxSendFinish', 'chatMessageSyncRetryDelayMs', 'chatResetConfirmed', 'chatResetGiveUp', 'chatMessageGoesToHost', 'chatSendRoute'].map(body).join('\n').replaceAll('@import("inbox.zig").findShellById', 'findShellById').replaceAll('@import("app_state.zig").ShellKind', 'ShellKind').replaceAll('@import("diagnostics.zig").debugLog', 'debugLog');
+    const functions = ['chatBareClear', 'chatTmuxSendEligible', 'sendTextToShellVerifiedAt', 'chatSendViaConsole', 'chatTmuxSendFinish', 'chatMessageSyncRetryDelayMs', 'chatResetConfirmed', 'chatResetGiveUp', 'chatMessageGoesToHost', 'chatSendRoute'].map(body).join('\n').replaceAll('@import("inbox.zig").findShellById', 'findShellById').replaceAll('@import("app_state.zig").ShellKind', 'ShellKind').replaceAll('@import("diagnostics.zig").debugLog', 'debugLog').replaceAll('@import("chat_session.zig").chatLiveStreamStop', 'chatLiveStreamStop').replaceAll('@import("chat_live.zig").release', 'chatLiveRelease');
     const checks = disabled ? prelude.slice(0, prelude.indexOf('test "IGSH-1640')) + String.raw`
       test "a disabled worker never types a hosted message into the pane" {
         reset();

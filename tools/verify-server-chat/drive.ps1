@@ -123,9 +123,10 @@ try {
             $offset = (Log-Text).Length
             Press @(0x11, 0x4B) 'Ctrl+K: reload chat'
             [void](Wait-For 'reload palette ready' { (Log-Text).Substring($offset) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
-            Type-Text 'chat view resync chat'
-            [void](Wait-For 'reload command ready' { (Log-Text).Substring($offset) -match '\[palette\] ready chars=21 count=\d+ target=\d+' })
+            Type-Text 'resync'
+            [void](Wait-For 'reload command ready' { (Log-Text).Substring($offset) -match '\[palette\] ready chars=6 count=\d+ target=6493(?:\s|$)' })
             Press @(0x0D) 'Enter: reload messages from the server'
+            [void](Wait-For 'server reload requested' { (Log-Text).Substring($offset).Contains('[chat] resync requested') })
             [void](Wait-For 'empty Chat View after reload' { (Copy-Chat 'clear-reloaded-copied').Trim() -eq '' } 30)
             Shot 'clear-reloaded'
         } else {

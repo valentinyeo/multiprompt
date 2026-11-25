@@ -141,10 +141,12 @@
     "chatSendNowFinish: SEND_NOW_UNSUPPORTED=>showHeaderNoticeAscii(\"This chat cannot take a queued message early; it runs at its next step\",5000,true)",
     "chatSendVerifyTick: showHeaderNoticeAscii(\"Delivery unconfirmed - check the terminal before sending again\",8000,true)",
     "chatSettingNotice: showHeaderNoticeAscii(text,3000,false)",
+    "chatTmuxSendFinish: showHeaderNoticeAscii(\"Could not clear this chat. Wait for its reply, then try again\",5000,true)",
     "chatTmuxSendFinish: showHeaderNoticeAscii(\"Could not remove yet. Try again\",3500,true)",
     "chatTmuxSendFinish: showHeaderNoticeAscii(\"Could not save reset. Retrying\",5000,true)",
     "chatTmuxSendFinish: showHeaderNoticeAscii(\"Reset unconfirmed. Messages remain here\",5000,true)",
     "sendChatPrompt: showHeaderNoticeAscii(\"Chat View could not compose the skill prompt\",3500,true)",
+    "sendChatPrompt: showHeaderNoticeAscii(\"Could not clear this chat. Try again\",4000,true)",
     "sendChatPrompt: showHeaderNoticeAscii(\"Could not save the message; keep it here and try again\",3500,true)",
     "sendChatPrompt: showHeaderNoticeAscii(\"Model picker is coming soon\",4000,false)",
     "sendChatPrompt: showHeaderNoticeAscii(\"Not available in live chat\",4000,false)",
@@ -154,7 +156,8 @@
     "sendChatPrompt: showHeaderNoticeAscii(\"The selected skill contains invalid text\",3500,true)",
     "sendChatPrompt: showHeaderNoticeAscii(\"The skill prompt contains invalid text\",3500,true)",
     "sendChatPrompt: showHeaderNoticeAscii(\"This quoted reply is too large to send\",3500,true)",
-    "sendChatPrompt: showHeaderNoticeAscii(\"Wait for chat settings to update\",3500,false)"
+    "sendChatPrompt: showHeaderNoticeAscii(\"Wait for chat settings to update\",3500,false)",
+    "sendChatPrompt: showHeaderNoticeAscii(\"Wait for this chat to clear\",3000,false)"
   ],
   "command_palette.zig": [
     "showMissingWorkspaceFolder: @import(\"console.zig\").showHeaderNoticeAscii(notice,8000,true)",
