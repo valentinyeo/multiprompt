@@ -168,6 +168,17 @@ test "room and chat bootstraps quote identically" {
 `);
 });
 
+test('room bridge failures log full stderr and the exit code even after the dialog error fills', () => {
+  const source = read('room_transport.zig');
+  const fixture = fs.readFileSync(path.join(__dirname, 'fixtures/MUBO-533/bridge-errors.zig'), 'utf8');
+  const start = source.indexOf('    defer {\n        if (w.WaitForSingleObject(process.hProcess, 1000)');
+  assert.notEqual(start, -1);
+  const end = source.indexOf('    const worker_handle = ', start);
+  assert.notEqual(end, -1);
+  assert.match(source, /bridge start failed win32_error=\{d\}/);
+  run(`${fixture}\n${declaration(source, 'fn readErrors(')}\nfn finish(job: *Job, process: Process, errors: w.HANDLE) void {\n${source.slice(start, end)}\n}`);
+});
+
 test('a room host that never answers says it could not start and offers a retry', () => {
   const rooms = read('rooms.zig');
   const frontend = read('room_frontend.zig');

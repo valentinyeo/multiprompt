@@ -2,6 +2,7 @@ const std = @import("std");
 const w = @import("win32.zig");
 const console = @import("console.zig");
 const app_state = @import("app_state.zig");
+const diagnostics = @import("diagnostics.zig");
 extern "kernel32" fn OpenThread(w.DWORD, w.BOOL, w.DWORD) callconv(w.WINAPI) w.HANDLE;
 extern "kernel32" fn CancelSynchronousIo(w.HANDLE) callconv(w.WINAPI) w.BOOL;
 
@@ -97,6 +98,8 @@ fn readErrors(job: *Job, handle: w.HANDLE) void {
     while (w.PeekNamedPipe(handle, null, 0, null, &available, null) != 0 and available > 0) {
         var count: w.DWORD = 0;
         if (w.ReadFile(handle, &buffer, @min(available, buffer.len), &count, null) == 0 or count == 0) break;
+        var message: [4128]u8 = undefined;
+        diagnostics.syncLog(std.fmt.bufPrint(&message, "[rooms] bridge stderr: {s}", .{buffer[0..count]}) catch unreachable);
         const keep = @min(count, job.error_text.len - job.error_len);
         @memcpy(job.error_text[job.error_len .. job.error_len + keep], buffer[0..keep]);
         job.error_len += keep;
@@ -139,7 +142,6 @@ fn run(job: *Job) void {
     defer _ = w.CloseHandle(errors);
     defer { if (child_errors != null) _ = w.CloseHandle(child_errors); }
     if (w.SetHandleInformation(errors, app_state.HANDLE_FLAG_INHERIT, 0) == 0) return;
-    defer readErrors(job, errors);
     var startup = std.mem.zeroes(w.STARTUPINFOW);
     startup.cb = @sizeOf(w.STARTUPINFOW);
     startup.dwFlags = 0x00000100;
@@ -147,9 +149,27 @@ fn run(job: *Job) void {
     startup.hStdOutput = child_output;
     startup.hStdError = child_errors;
     var process = std.mem.zeroes(w.PROCESS_INFORMATION);
-    if (w.CreateProcessW(null, @ptrCast(&cmd), null, null, 1, 0x08000000, null, null, &startup, &process) == 0) return;
+    if (w.CreateProcessW(null, @ptrCast(&cmd), null, null, 1, 0x08000000, null, null, &startup, &process) == 0) {
+        const last_error = w.GetLastError();
+        var message: [128]u8 = undefined;
+        diagnostics.syncLog(std.fmt.bufPrint(&message, "[rooms] bridge start failed win32_error={d}", .{last_error}) catch unreachable);
+        return;
+    }
     _ = w.CloseHandle(process.hThread);
     defer _ = w.CloseHandle(process.hProcess);
+    defer {
+        if (w.WaitForSingleObject(process.hProcess, 1000) != 0) {
+            _ = w.TerminateProcess(process.hProcess, 1);
+            _ = w.WaitForSingleObject(process.hProcess, 15000);
+        }
+        readErrors(job, errors);
+        if (!job.success) {
+            var exit_code: w.DWORD = 0;
+            const exit_code_known = w.GetExitCodeProcess(process.hProcess, &exit_code) != 0;
+            var message: [192]u8 = undefined;
+            diagnostics.syncLog(std.fmt.bufPrint(&message, "[rooms] bridge failed exit_code={d} exit_code_known={} reply_bytes={d} timed_out={} cancelled={}", .{ exit_code, exit_code_known, job.output_len, job.timed_out, job.cancelled.load(.acquire) }) catch unreachable);
+        }
+    }
     const worker_handle = OpenThread(0x0001, 0, w.GetCurrentThreadId()) orelse {
         _ = w.TerminateProcess(process.hProcess, 1);
         return;
@@ -162,12 +182,6 @@ fn run(job: *Job) void {
     };
     defer watchdog.join();
     defer watch.io_finished.store(true, .release);
-    defer {
-        if (w.WaitForSingleObject(process.hProcess, 1000) != 0) {
-            _ = w.TerminateProcess(process.hProcess, 1);
-            _ = w.WaitForSingleObject(process.hProcess, 15000);
-        }
-    }
     _ = w.CloseHandle(child_input);
     child_input = null;
     _ = w.CloseHandle(child_output);
