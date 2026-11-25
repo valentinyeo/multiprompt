@@ -351,12 +351,14 @@ try {
 
     Write-Host 'Computer pane: the hidden chat sleeps with its last picture'
     try {
+        $sleepMark = (Read-PaneTrace).Length
         Invoke-JourneyCommand 'Computer host B' -Session -Confirm {
             Press @(0x0D) 'Enter: switch to Computer host B'
         }
-        Wait-Until { (Read-PaneTrace) -match '\[computer\] state sleeping' } 'the hidden pane slept' 30
+        Wait-Until { (Read-PaneTrace).Substring($sleepMark) -match '\[computer\] state sleeping' } 'the hidden pane slept' 30
         Snapshot 'computer-sleeping'
         $watch = [Diagnostics.Stopwatch]::StartNew()
+        $returnMark = (Read-PaneTrace).Length
         Invoke-JourneyCommand 'Computer host A' -Session -Confirm {
             Press @(0x0D) 'Enter: return to Computer host A'
         }
@@ -368,7 +370,7 @@ try {
         }
         if ($firstPicture -lt 0) { throw 'Returning to the sleeping chat never restored the last picture' }
         if ($firstPicture -gt 2500) { throw ('The last picture took ' + $firstPicture + ' ms to come back; it was re-read from the host instead of memory') }
-        Wait-PaneState @('live') 120 'the returned chat reached Live again'
+        Wait-Until { (Read-PaneTrace).Substring($returnMark) -match '\[computer\] state live' } 'the returned chat reached Live again' 120
         Save-Json @{ millisecondsToLastPicture = $firstPicture; states = (Get-PaneStates) } 'computer-sleeping.json'
         Set-ItemVerdict '5' 'proven' ('the hidden chat logged state sleeping and its last picture was back after ' + $firstPicture + ' ms, before a fresh discovery could paint')
         Record 'Item 5 proven: the hidden chat sleeps with its last picture'
@@ -381,11 +383,13 @@ try {
             return @([regex]::Matches($trace, '\[computer\] forwarding viewer port \d+ on ')).Count
         }
         $forwardsBefore = & $opens
+        $switchMark = (Read-PaneTrace).Length
         Invoke-JourneyCommand 'Computer host B' -Session -Confirm { Press @(0x0D) 'Enter: back to Computer host B' }
-        Wait-PaneState @('live') 120 'the second chat reached Live'
+        Wait-Until { (Read-PaneTrace).Substring($switchMark) -match '\[computer\] state live' } 'the second chat reached Live' 120
         $forwardsMiddle = & $opens
+        $backMark = (Read-PaneTrace).Length
         Invoke-JourneyCommand 'Computer host A' -Session -Confirm { Press @(0x0D) 'Enter: back to Computer host A' }
-        Wait-PaneState @('live') 120 'the first chat reached Live again'
+        Wait-Until { (Read-PaneTrace).Substring($backMark) -match '\[computer\] state live' } 'the first chat reached Live again' 120
         $forwardsAfter = & $opens
         if ($forwardsMiddle -ne $forwardsBefore -or $forwardsAfter -ne $forwardsBefore) { throw ('Switching between two chats on one host opened another connection: ' + $forwardsBefore + ' then ' + $forwardsMiddle + ' then ' + $forwardsAfter) }
         $forwards = @(Get-CimInstance Win32_Process -Filter "Name = 'ssh.exe'" | Where-Object { $_.ParentProcessId -eq $process.Id -and $_.CommandLine -match '-L 127\.0\.0\.1:' })
@@ -424,9 +428,10 @@ try {
         if ($choice -notmatch '\A[0-9a-f]{64}1\r?\n?\z') { throw ('The saved viewing choice is malformed: ' + $choice) }
         Copy-Item -LiteralPath $choicePath (Join-Path $Evidence 'computer-choice.txt')
         Save-Json (Read-Session) 'session-before-relaunch.json'
+        $relaunchMark = (Read-PaneTrace).Length
         Restart-SessionRestore 'computer-relaunch' $false
         Wait-Until { $state = Read-Session; $state.tabs[$state.active_tab].name -ceq 'Computer host A' } 'the relaunched app restored the chat that owns the pane' 60
-        Wait-PaneState @('live') 150 'the relaunched app reopened the Computer view on the same chat'
+        Wait-Until { (Read-PaneTrace).Substring($relaunchMark) -match '\[computer\] state live' } 'the relaunched app reopened the Computer view on the same chat' 150
         $restored = (Get-Content -LiteralPath $choicePath -Raw)
         if ($restored -cne $choice) { throw 'The relaunched app changed or cleared the saved viewing choice' }
         $picture = Measure-PaneMarker 'computer-pane-relaunched' 0.55 0.40
