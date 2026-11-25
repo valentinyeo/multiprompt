@@ -16,7 +16,7 @@ MP_SESSIONS = ROOT / "tools" / "mp-sessions"
 MUBO_194_FIXTURES = ROOT / "tools" / "fixtures" / "MUBO-194"
 
 FAKE_READER = r'''
-import json, os, sys
+import hashlib, json, os, sys
 from pathlib import Path
 LOG = Path(os.environ["MP_SESSIONS_TEST_LOG"])
 
@@ -26,8 +26,33 @@ def note(kind, value):
 
 if __name__ == "__main__" and sys.argv[1:2] == ["host"]:
     note("host", sys.argv[2:])
-    status = dict(enable="enabled", start="started", stop="stopped").get(sys.argv[2], "error")
-    print(json.dumps(dict(status=status, sid=sys.argv[3] if len(sys.argv) > 3 else None)))
+    command, provider, sid = sys.argv[2:5]
+    root = Path.home() / ".local/state/multiprompt/agent-host"
+    key = hashlib.sha256((provider + ":" + sid).encode()).hexdigest()[:32]
+    config_path = root / (key + ".config.json")
+    state_path = root / (key + ".state.json")
+    config = json.loads(config_path.read_text()) if config_path.exists() else {}
+    failure = os.environ.get("MP_SESSIONS_TEST_START_FAILURE")
+    pid = int(os.environ["MP_SESSIONS_TEST_PID"])
+    if command == "enable":
+        config["enabled"] = True
+        config_path.write_text(json.dumps(config))
+    if command == "start":
+        state = dict(pid=pid, agent_pid=pid, provider=provider, sid=sid)
+        if failure == "host_exited":
+            state["pid"] = 0
+        if failure == "agent_exited":
+            state["agent_pid"] = 0
+        state_path.write_text(json.dumps(state))
+    if command == "stop":
+        state_path.unlink(missing_ok=True)
+    if command == "status":
+        state = json.loads(state_path.read_text()) if state_path.exists() else {}
+        print(json.dumps(dict(status="ok", alive=state.get("pid", 0) > 0,
+                              pid=state.get("pid"), owner="host", tmux=config.get("tmux"))))
+    else:
+        status = dict(enable="enabled", start="started", stop="stopped").get(command, "error")
+        print(json.dumps(dict(status=status, sid=sid)))
 '''
 
 FAKE_ZSB = r'''#!/usr/bin/env python3
@@ -105,13 +130,16 @@ class MpSessionsTest(unittest.TestCase):
         zsb = self.bin / "zsb"
         zsb.write_text(FAKE_ZSB.replace("/usr/bin/env python3", sys.executable), encoding="utf-8")
         zsb.chmod(0o755)
+        tmux = self.bin / "tmux"
+        tmux.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+        tmux.chmod(0o755)
         self.host = self.home / ".local/state/multiprompt/agent-host"
         (self.home / ".local/state/multiprompt").mkdir(parents=True, exist_ok=True)
 
     def env(self, **extra):
         base = dict(os.environ, HOME=str(self.home), MULTIPROMPT_READER_SOURCE=str(self.reader),
                     MP_SESSIONS_TEST_LOG=str(self.log), MP_SESSIONS_TEST_LIST=json.dumps(LISTING),
-                    MP_SESSIONS_TEST_STATE_FILE=str(self.state_file),
+                    MP_SESSIONS_TEST_STATE_FILE=str(self.state_file), MP_SESSIONS_TEST_PID=str(os.getpid()),
                     PATH=str(self.bin) + os.pathsep + os.environ.get("PATH", ""))
         for name in ("MULTIPROMPT_RUNTIME_DIR", "TMUX_PANE", "MULTIPROMPT_TAB", "MULTIBOT_PROVIDER",
                      "MULTIBOT_SID", "MULTIBOT_SESSION", "ZSB_SESSION", "MULTIPROMPT_LAYOUT_PATH",
@@ -750,6 +778,38 @@ class MpSessionsTest(unittest.TestCase):
                 opened = [call for call in self.events("zsb") if call[0] == "session-open"][-1]
                 self.assertEqual(opened[opened.index("--host") + 1], desktop["hosts"][config["spawn_host"]])
                 self.assertNotEqual(opened[opened.index("--host") + 1], desktop["hosts"][0])
+
+    def test_MUBO_566_start_and_restart_refuse_a_host_or_agent_that_exited(self):
+        fixture = ROOT / "tools/fixtures/MUBO-566"
+        desktop = json.loads((fixture / "listing-current-desktop.json").read_text())
+        config = json.loads((fixture / "saved-chat.json").read_text())
+        config["cwd"] = str(self.work)
+        self.host.mkdir(parents=True, exist_ok=True)
+        key = hashlib.sha256((config["provider"] + ":" + config["sid"]).encode()).hexdigest()[:32]
+        for command in (("restart", config["spawn_display"]),
+                        ("start", "--name", config["spawn_display"], "--workspace", "Multiprompt", "--provider", "codex")):
+            for failure in ("host_exited", "agent_exited"):
+                with self.subTest(command=command, failure=failure):
+                    self.state_file.write_text("{}")
+                    (self.host / (key + ".config.json")).write_text(json.dumps(config))
+                    (self.host / (key + ".state.json")).unlink(missing_ok=True)
+                    failed = self.run_sessions(*command, MP_SESSIONS_TEST_LIST=json.dumps(desktop),
+                                               MP_SESSIONS_TEST_START_FAILURE=failure)
+                    self.assertEqual(failed.returncode, 2, failed.stdout + failed.stderr)
+                    self.assertEqual(failed.stdout, "")
+                    self.assertIn(failure, failed.stderr)
+                    self.assertIn(config["tmux"], failed.stderr)
+                    self.assertNotIn("Traceback", failed.stderr)
+                    self.assertIn(["start", "codex", config["sid"]], self.events("host"))
+
+    def test_MUBO_566_live_hosted_chat_succeeds_without_a_physical_tmux_session(self):
+        started = self.parsed(self.run_sessions("start", "--name", "Headless", "--provider", "codex"))
+        self.assertTrue(started["ok"])
+        self.assertEqual(started["status"], "started")
+        again = self.parsed(self.run_sessions("restart", "Headless"))
+        self.assertTrue(again["ok"])
+        self.assertEqual(again["status"], "already")
+        self.assertEqual(again["tmux"], started["tmux"])
 
     def test_MUBO_566_fresh_chat_uses_the_live_desktop_host_list(self):
         desktop = json.loads((ROOT / "tools/fixtures/MUBO-566/listing-current-desktop.json").read_text())
