@@ -36,6 +36,8 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
+      - name: Clear a hosted conversation and accept the next send
+        run: python3 tools/clear-server-chat-test.py -v
       - name: Run the original check and verify lifecycle
         run: |
           node <<'NODE'

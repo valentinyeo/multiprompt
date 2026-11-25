@@ -720,6 +720,12 @@ fn selectMidSentenceSkill(text: []const u16) void {
 }
 
 pub fn sendChatPrompt() void {
+    if (app_state.g_chat_tmux_send_job) |job| {
+        if (job.clear_context and app_state.active_shell < app_state.shell_count and job.key.shell_id == app_state.shells[app_state.active_shell].shell_id) {
+            showHeaderNoticeAscii("Wait for this chat to clear", 3000, false);
+            return;
+        }
+    }
     if (app_state.g_chat_active and app_state.active_shell < app_state.shell_count and @import("chat_session.zig").chatSettingsPending(app_state.shells[app_state.active_shell].shell_id)) {
         showHeaderNoticeAscii("Wait for chat settings to update", 3500, false);
         return;
@@ -4007,7 +4013,7 @@ test "IGSH-1266 a submit that never landed is typeable again on the next tick" {
 }
 
 fn chatBareClear(text: []const u16) bool {
-    return std.mem.eql(u16, std.mem.trim(u16, text, &.{ ' ', '\t', '\r', '\n' }), L("/clear"));
+    return std.mem.eql(u16, std.mem.trim(u16, text, &.{ ' ', '\t', '\r', '\n' }), std.unicode.utf8ToUtf16LeStringLiteral("/clear"));
 }
 
 fn chatTmuxSendEligible(idx: u32) bool {
