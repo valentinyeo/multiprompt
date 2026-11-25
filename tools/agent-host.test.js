@@ -14,6 +14,8 @@ test('IGSH-1266 new Claude sessions start on the app owned host and typing a com
   assert.match(host, /try std\.testing\.expect\(!eligible\("codex"\)\);/);
   assert.match(host, /try std\.testing\.expect\(!eligible\("pi"\)\);/);
   assert.match(host, /try std\.testing\.expect\(eligible\("cursor"\)\);/);
+  assert.match(host, /try std\.testing\.expect\(eligible\("antigravity"\)\);/);
+  assert.match(host, /try std\.testing\.expect\(eligible\("agy"\)\);/);
 
   const palette = read('src/command_palette.zig');
   const start = palette.indexOf('pub fn spawnWorkspaceTmuxSession() bool {');
@@ -141,11 +143,12 @@ test('IGSH-1546 Codex and Pi chats start the same live chat host with their own 
   const palette = read('src/command_palette.zig');
   const send = read('src/chat_send.zig');
   const transcript = read('src/chat_transcript.zig');
-  assert.match(host, /pub const Provider = enum \{\s*claude,\s*codex,\s*pi,\s*cursor,/);
+  assert.match(host, /pub const Provider = enum \{\s*claude,\s*codex,\s*pi,\s*cursor,\s*antigravity,/);
   assert.match(host, /pub fn launchCommandFor\(out: \[\]u8, provider: Provider,/);
   assert.match(palette, /pub fn spawnCodexTmuxSession\(\) bool \{\s*return spawnHostedChatSession\(\.codex\);/);
   assert.match(palette, /pub fn spawnPiTmuxSession\(\) bool \{\s*return spawnHostedChatSession\(\.pi\);/);
   assert.match(palette, /pub fn spawnCursorTmuxSession\(\) bool \{\s*return spawnHostedChatSession\(\.cursor\);/);
+  assert.match(palette, /pub fn spawnAntigravityTmuxSession\(\) bool \{\s*return spawnHostedChatSession\(\.antigravity\);/);
   assert.match(palette, /ai_agent = provider\.aiAgent\(\)/);
   const hosted = palette.slice(palette.indexOf('fn spawnHostedChatSession('), palette.indexOf('pub fn spawnCodexTmuxSession('));
   assert.match(hosted, /g_pending_chat_view = false;/);
@@ -155,8 +158,9 @@ test('IGSH-1546 Codex and Pi chats start the same live chat host with their own 
   assert.match(transcript, /if \(self\.pi\) return "pi";\s*if \(self\.codex\) return "codex";/);
   assert.match(transcript, /fn providerAgentLabel\(agent: u8\)/);
   assert.match(transcript, /7 => "cursor"/);
+  assert.match(transcript, /8 => "antigravity"/);
   assert.match(send, /\.provider = job\.key\.provider\(\), \.sid = /);
-  assert.match(send, /return kind == \.tmux and \(ai_agent == 1 or ai_agent == 2 or ai_agent == 3 or ai_agent == 7\);/);
+  assert.match(send, /return kind == \.tmux and \(ai_agent == 1 or ai_agent == 2 or ai_agent == 3 or ai_agent == 7 or ai_agent == 8\);/);
   assert.doesNotMatch(send, /if \(job\.key\.codex\) "codex" else "claude"/);
 });
 

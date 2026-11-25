@@ -344,6 +344,37 @@ test('IGSH-1072 branch build identity is embedded and independently checked by t
   assert.match(driver, /Doctor: executable version mismatch/);
 });
 
+test('MUBO-221 comparison journeys use the shared build version when a newer tag arrives', { skip: process.platform !== 'win32' }, () => {
+  const os = require('node:os');
+  const { spawnSync } = require('node:child_process');
+  const identity = workflow.match(/name: Identify branch executable[\s\S]*?run: \|\n([\s\S]*?)\n      - /)[1]
+    .replace(/^ {10}/gm, '')
+    .replaceAll('${{ needs.build-app.outputs.version }}', '0.28.1980');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-comparison-version-'));
+  try {
+    for (const appRevision of ['', 'b'.repeat(40)]) {
+      const output = path.join(directory, appRevision ? 'before-env' : 'head-env');
+      const result = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', `
+$ErrorActionPreference = 'Stop'
+$global:LASTEXITCODE = 0
+function git { if ($args -contains 'describe') { 'v0.28.1981' } else { '${appRevision || 'a'.repeat(40)}' } }
+${identity}`], {
+        cwd: directory,
+        env: { ...process.env, FEATURE: 'session-actions', VERIFY_APP_REVISION: appRevision, CHAT_SHAPE_PROOF: '', CHAT_SWITCH_PROFILE: '', GITHUB_ENV: output },
+        encoding: 'utf8', timeout: 20000,
+      });
+      assert.ifError(result.error);
+      assert.equal(result.status, 0, result.stdout + result.stderr);
+      const recorded = fs.readFileSync(output, 'utf8');
+      assert.match(recorded, /VERIFY_VERSION=0\.28\.1980/);
+      assert.ok(recorded.includes(`VERIFY_REVISION=${appRevision || 'a'.repeat(40)}`));
+      assert.doesNotMatch(recorded, /VERIFY_VERSION=0\.28\.1981/);
+    }
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('IGSH-1072 executable resolver rejects stale revisions and wrong versions before any journey', { skip: process.platform !== 'win32' }, () => {
   const os = require('node:os');
   const { spawnSync } = require('node:child_process');

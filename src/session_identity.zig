@@ -19,7 +19,7 @@ pub const Session = struct {
     owner: u32,
     sid: [40]u8,
     tmux: [64]u8,
-    agent: enum { claude, codex, pi, hax, grok, cursor },
+    agent: enum { claude, codex, pi, hax, grok, cursor, antigravity },
 
     pub fn checked(key: anytype) ?Session {
         const host = Host.fromIndex(key.host) orelse return null;
@@ -50,6 +50,7 @@ pub const Session = struct {
             5 => .hax,
             6 => .grok,
             7 => .cursor,
+            8 => .antigravity,
             else => .claude,
         };
         return identity;

@@ -1285,6 +1285,49 @@ def reader_namespace():
     return namespace
 
 
+def install_antigravity_worker(namespace):
+    import threading
+    from contextlib import closing
+
+    workers = {}
+    lock = threading.Lock()
+
+    def start(query, source, only_if_work=False):
+        if source is None:
+            return
+        key = (query['provider'], query['sid'])
+        with lock:
+            if key in workers:
+                workers[key].set()
+                return
+            wake = threading.Event()
+            workers[key] = wake
+
+        def run():
+            try:
+                while True:
+                    wake.clear()
+                    namespace['message_poll'](query['tmux'], *key)
+                    dispatched = namespace['message_store_request'](dict(message_protocol=1, tmux=query['tmux'], provider=key[0], sid=key[1], op='message_dispatch'))
+                    record('antigravity-worker.jsonl', stage='dispatch', provider=key[0], sid=key[1], message=dispatched.get('message'))
+                    with closing(namespace['message_store_db'](query['tmux'])) as db:
+                        pending = db.execute("SELECT 1 FROM shared_messages WHERE provider=? AND sid=? AND state IN ('queued','sent') LIMIT 1", key).fetchone()
+                    with lock:
+                        if not pending and not wake.is_set():
+                            del workers[key]
+                            return
+                    wake.wait(0.1)
+            except Exception as error:
+                record('antigravity-worker.jsonl', stage='error', provider=key[0], sid=key[1], error=repr(error))
+                with lock:
+                    workers.pop(key, None)
+
+        record('antigravity-worker.jsonl', stage='started', provider=key[0], sid=key[1], boundary='app reader thread; production poll and dispatch unchanged')
+        threading.Thread(target=run, daemon=True).start()
+
+    namespace['start_message_worker'] = start
+
+
 def run_message_worker():
     if os.name != "nt" or state().get("name") != "cancel-held" or len(ARGS) != 3:
         raise ValueError("message worker adapter requires the owned Windows cancellation fixture")
@@ -1579,6 +1622,113 @@ def transport_reader():
             close(cid)
 
 
+AGY_PANE_SESSION = "agy-pane|1700000000|0|/verify/work|agy|Antigravity\n"
+
+ANTIGRAVITY_RELEASE_EVENT = "Local\\multiprompt-verify-antigravity-release"
+
+
+def wait_for_antigravity_release(seconds):
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.OpenEventW.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR]
+    kernel.OpenEventW.restype = wintypes.HANDLE
+    kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    kernel.WaitForSingleObject.restype = wintypes.DWORD
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+    handle = kernel.OpenEventW(0x00100000, False, ANTIGRAVITY_RELEASE_EVENT)
+    if not handle:
+        raise RuntimeError("The journey never created the Antigravity release event")
+    try:
+        return kernel.WaitForSingleObject(handle, int(seconds * 1000)) == 0
+    finally:
+        kernel.CloseHandle(handle)
+
+
+def install_antigravity_host(namespace):
+    sid = state()["sid"]
+    namespace["host_write"](namespace["host_paths"]("claude", sid)["config"],
+                            dict(enabled=True, provider="claude", sid=sid, tmux="verify-agent", cwd=state()["cwd"]))
+    previous_switch = namespace["host_dispatch_switch"]
+    previous_owned = namespace["host_owned"]
+    previous_deliver = namespace["host_deliver"]
+    previous_event = namespace["host_event"]
+    previous_accept = namespace["host_accept"]
+    previous_start = namespace["host_start"]
+    previous_switch_ai = namespace["host_switch_ai"]
+
+    def mine(provider, candidate):
+        moved = namespace["host_switch_follow"](candidate)
+        if moved is not None:
+            provider, candidate = moved
+        if candidate == sid or provider == "antigravity":
+            return provider, candidate, True
+        switched = namespace["host_read"](namespace["host_switched_path"]()) or {}
+        targets = [value for value in switched.values() if isinstance(value, list) and len(value) == 2]
+        return provider, candidate, [provider, candidate] in targets
+
+    def dispatch_switch(provider, candidate):
+        return mine(provider, candidate)[2] or previous_switch(provider, candidate)
+
+    def owned(provider, candidate):
+        return mine(provider, candidate)[2] or previous_owned(provider, candidate)
+
+    def deliver(provider, candidate, token, attempt, epoch, text):
+        provider, candidate, ours = mine(provider, candidate)
+        if not ours:
+            return previous_deliver(provider, candidate, token, attempt, epoch, text)
+        record("antigravity-deliver.jsonl", provider=provider, sid=candidate, text=text)
+        paths = namespace["host_paths"](provider, candidate)
+        kept = namespace["host_read"](paths["state"]) or {}
+        kept["display_history"] = True
+        namespace["host_state_write"](provider, candidate, kept)
+        session = dict(turn=token, state=kept, pending={}, messages={},
+                       sends=[dict(id=token, attempt=attempt, accepted=False, text=text)])
+        previous_event(provider, candidate, "verify-agent", session, "turn.started", dict(message_id=token, uuids=[token]))
+        previous_accept(provider, candidate, "verify-agent", session, dict(type="standin-accepted"), token)
+        block = namespace["host_stream_block"](session, "standin-reply", "text", 0)
+        reply = "Antigravity stand-in reply." if provider == "antigravity" else "Claude stand-in answer."
+        if provider == "antigravity" and (ROOT / "hold-reply").exists():
+            held = dict(namespace["host_read"](paths["state"]) or {})
+            held["inflight"] = dict(id=token, attempt=attempt, epoch=epoch, accepted=True, at=time.time())
+            namespace["host_state_write"](provider, candidate, held)
+            record("antigravity-hold.jsonl", stage="replying", provider=provider, sid=candidate, text=text, reply=reply)
+            if not wait_for_antigravity_release(180):
+                record("antigravity-hold.jsonl", stage="timeout", provider=provider, sid=candidate, text=text, reply=reply)
+                raise RuntimeError("The journey never released the held Antigravity reply")
+            released = dict(namespace["host_read"](paths["state"]) or {})
+            released.pop("inflight", None)
+            namespace["host_state_write"](provider, candidate, released)
+            record("antigravity-hold.jsonl", stage="released", provider=provider, sid=candidate, text=text, reply=reply, released=True)
+        namespace["host_delta"](session, block, reply)
+        namespace["host_complete"](provider, candidate, "verify-agent", session, block)
+        previous_event(provider, candidate, "verify-agent", session, "turn.ended", dict(status="completed"))
+        if session.get("db") is not None:
+            session["db"].close()
+        return dict(status="sent")
+
+    def start(provider, candidate, source=None):
+        if provider != "claude":
+            return previous_start(provider, candidate, source)
+        record("antigravity-claude-start.jsonl", provider=provider, sid=candidate, standin="no live Claude process; the fixture serves the production host store")
+        return dict(status="started", pid=os.getpid())
+
+    def switch_ai(provider, candidate, target, reason=None):
+        reply = previous_switch_ai(provider, candidate, target, reason)
+        record("antigravity-switch.jsonl", provider=provider, sid=candidate, target=target, status=reply.get("status"),
+               reason=reply.get("reason"), switched_to=(reply.get("sid") if reply.get("status") == "switched" else None))
+        outbox = ROOT.parent / "roaming" / "ZigShell" / "chat-outbox.json"
+        if outbox.is_file():
+            (ROOT / ("antigravity-outbox-" + str(reply.get("status")) + ".json")).write_bytes(outbox.read_bytes())
+        return reply
+
+    namespace["host_dispatch_switch"] = dispatch_switch
+    namespace["host_owned"] = owned
+    namespace["host_deliver"] = deliver
+    namespace["host_start"] = start
+    namespace["host_switch_ai"] = switch_ai
+    install_antigravity_worker(namespace)
+
+
 def serve_reader():
     namespace = reader_namespace()
     if state().get("name") == "model-settings":
@@ -1592,6 +1742,8 @@ def serve_reader():
         record("model-host-start.jsonl", result=started)
         if started.get("status") not in ("started", "already"):
             raise RuntimeError("Production host failed to start: " + str(started))
+    if state().get("name") == "antigravity-chats":
+        install_antigravity_host(namespace)
     if state().get("name") == "recall-handed":
         import hashlib
         sid = state()["sid"]
@@ -1681,6 +1833,15 @@ def ssh():
             if command.endswith("done"):
                 output += "@@ZS_END@@\n"
             record("invocations.jsonl", kind="list", operation="native host inventory", argv=ARGS)
+            sys.stdout.write(output)
+            return 0
+        if kind == "capacity-poll" and state().get("name") == "antigravity-chats":
+            output = "@capacity|4|0.1|8000000|6000000|0|0|0|0|0\n"
+            if "vps" in ARGS:
+                output += AGY_PANE_SESSION
+            if command.endswith("done"):
+                output += "@@ZS_END@@\n"
+            record("invocations.jsonl", kind="list", operation="antigravity pane inventory", argv=ARGS)
             sys.stdout.write(output)
             return 0
         record("declined.jsonl", operation="remote command", kind=kind, argv=ARGS, command=command, exitCode=exit_code)
