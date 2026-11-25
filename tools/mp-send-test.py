@@ -145,7 +145,7 @@ class MpSendTest(unittest.TestCase):
             with self.subTest(target=target):
                 done = self.run_send("--to", target, "note " + target, MULTIPROMPT_TAB="live-verify")
                 self.assertIn(done.returncode, (0, 3), done.stderr)
-                self.assertEqual([row[2] for row in self.rows()], [SID])
+        self.assertEqual([row[2] for row in self.rows()], [SID, SID])
 
     def test_MUBO_556_a_shared_name_is_refused_with_every_match(self):
         self.hosted_fixture("live-bugs", SID, "HT Bugs", os.getpid(), workspace="Studio")
