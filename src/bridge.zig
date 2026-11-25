@@ -12,6 +12,9 @@ const isolated_pipe_name = "\\\\.\\pipe\\multiprompt-browser-isolated";
 const legacy_extension_id = "eakdogphfehclpdnjecifppkcnfjnheh";
 const isolated_extension_id = "fgclkhodglfogcckilgnihofmlpmiiao";
 const browser_request_attempts = 4;
+const PROFILE_MUTEX_WAIT_MS: u32 = 10_000;
+const WAIT_ABANDONED: u32 = 0x80;
+const WAIT_TIMEOUT: u32 = 0x102;
 
 var g_window_id: ?i64 = null;
 var g_profile_token: []const u8 = "";
@@ -1614,12 +1617,12 @@ fn runNativeHost(allocator: std.mem.Allocator, command_pipe_name: [*:0]const u8)
         var name_buf: [128]u8 = undefined;
         const name = try std.fmt.bufPrintZ(&name_buf, "Local\\multiprompt-browser-isolated-{s}", .{g_profile_token});
         const mutex = CreateMutexA(null, 0, name.ptr) orelse return error.ProfileMutexUnavailable;
-        const wait = WaitForSingleObject(mutex, 0xFFFFFFFF);
-        if (wait != 0 and wait != 0x80) {
-            _ = CloseHandle(mutex);
-            return error.ProfileMutexUnavailable;
-        }
-        break :blk mutex;
+        const wait = WaitForSingleObject(mutex, PROFILE_MUTEX_WAIT_MS);
+        if (wait == 0 or wait == WAIT_ABANDONED) break :blk mutex;
+        _ = CloseHandle(mutex);
+        if (wait != WAIT_TIMEOUT) return error.ProfileMutexUnavailable;
+        logChromeLaunch("native host handover: a previous host still holds the profile mutex");
+        break :blk null;
     } else null;
     defer if (profile_mutex) |mutex| {
         _ = ReleaseMutex(mutex);
