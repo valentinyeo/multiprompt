@@ -18,6 +18,7 @@ function execute(code) {
   try {
     fs.writeFileSync(path.join(dir, 'switch_timing.zig'), 'pub const Step = enum { read_marker, draft_bind, save_session, chat_history, console_shown, hide_prev_browser, park, browser_visible, arm_settle, position, focus, reposition, browser_swp, browser_show, browser_launch, browser_wake };\n');
     if (fs.existsSync('src/chat_drafts.zig')) copyZig(['chat_drafts.zig'], dir);
+    fs.writeFileSync(path.join(dir, 'sidebar.zig'), 'pub fn invalidateDraftMarker(_: u32) void {}\n');
     require('./fixtures/inline-stubs').writeAccountDesktop(dir);
     fs.writeFileSync(path.join(dir, 'test.zig'), code.replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const result = spawnSync(process.env.ZIG || 'zig', ['test', 'test.zig', '-j1', '-fllvm'], {
@@ -86,6 +87,7 @@ fn SetTimer(_: ?usize, _: usize, _: u32, _: ?*anyopaque) usize { return 1; }
 fn KillTimer(_: ?usize, _: usize) bool { return true; }
 fn InvalidateRect(_: ?usize, _: ?*anyopaque, _: i32) bool { return true; }
 fn chatComposerAutoGrow() void {}
+fn chatDraftOwnerShell() ?u32 { return null; }
 fn chatLiveStripFromStore() void {}
 fn chatDictationLiveDiscard() void {}
 fn chatDictationLiveFinish(_: []const u8, _: []const u16) bool { return false; }

@@ -39,7 +39,7 @@ No liveness is claimed when a connection can stay down forever. This does not ve
 
 ## Coverage and sync
 
-MUBO-558 reviewed source at `bdcae14efdf94831fc2ca390fccf045aaa714aae`. The reader's runtime publish step records the app version that published each helper and refuses to move a helper back to an older version. It runs in the bootstrap before any request, outside `message_store_transaction`, `message_poll` and `message_poll_locked`, and every other covered file is unchanged. The model, bounds, decisions, probes and mutations are unchanged; only the reader's whole-file hash and the sync commit move.
+MUBO-558 reviewed merged source at `f6d470f18`. Merging master carries MUBO-525's read-only event push. The reader's runtime publish step records the app version that published each helper and refuses to move a helper back to an older version. It runs in the bootstrap before any request, outside `message_store_transaction`, `message_poll` and `message_poll_locked`, and every other covered file is unchanged. The model, bounds, decisions, probes and mutations are unchanged; only the reader's whole-file hash and the sync commit move.
 
 SOFT-2681 reviewed source at `28135885b5b63344a2b71e2e278d502658fd6ea8`. The reader now publishes Claude's native session and selects its current transcript; its added tests cover that routing. `message_store_transaction`, `message_poll`, `message_poll_locked` and `IGSH_1266_SharedMessageHostTest` are unchanged from the prior sync. Every other covered file is unchanged. Only the reader and reader-test hashes move; the fixed-session model, bounds, decisions, probes and mutations remain unchanged. Hosted CI must rerun the full self-test and native replay.
 
@@ -70,6 +70,8 @@ SOFT-3086 reviewed the pill range at `e11386929a20a51d87f0d91c429a097324c5571b` 
 SOFT-2604 saves one handover reply when a fresh start's agent answers twice. That rule now lives in SOFT-3054's `host_fresh_handover_pick` and `host_fresh_finish`, which are outside the modeled outbox, echo and acceptance path, so `message_store_transaction`, `message_poll`, `message_poll_locked`, the native probes and `decisions.json` are unchanged. Only the reader's whole-file hash moved, on top of the reviews named above.
 
 SOFT-3114 makes `test_IGSH_1907_a_new_message_wakes_the_idle_worker_at_once` assert fifo wake and `message_worker_wake` instead of wall-clock latency. `message_store_transaction`, `message_poll`, `message_poll_locked`, native probes, decisions and every other covered file are unchanged. Only the reader-test hash and sync commit move.
+
+MUBO-525 changes only the reader's event push: a synced live snapshot now reads the store read-only, the minute retention sweep probes read-only before it writes, the folder watch drops `IN_CLOSE_WRITE`, and the push loop wakes only for `store.sqlite3` or its `-wal`. `message_store_transaction`, `message_poll`, `message_poll_locked`, `IGSH_1266_SharedMessageHostTest`, the native probes and `decisions.json` are unchanged, because the echo, outbox and acceptance path never entered the push loop. Only the reader and reader-test hashes, plus the sync commit, move; bounds, decisions, mutations and properties stay the same.
 
 SOFT-3145 publishes the bundled tools from one table, sets their mode before the atomic rename and removes leftover temporary files. `message_store_transaction`, `message_poll`, `message_poll_locked`, the connector acceptance path, native probes and `decisions.json` are unchanged, so only the reader's whole-file hash and the sync commit move.
 
