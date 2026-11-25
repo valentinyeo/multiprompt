@@ -116,3 +116,16 @@ test('production SSH writer releases the host mutex and isolates input overflow'
     fs.rmSync(folder, { recursive: true, force: true });
   }
 });
+
+test('idle probes and usage cards use logical commands rather than opening SSH logins', () => {
+  for (const [file, name] of [['src/chat_send.zig', 'sshProbeThread'], ['src/telemetry_panel.zig', 'ladderFetchRemote']]) {
+    const source = fs.readFileSync(path.join(root, file), 'utf8');
+    const start = source.indexOf(`fn ${name}(`);
+    const body = source.slice(start, source.indexOf('\n}', start));
+    assert.match(body, /captureSharedCommand\(/);
+    assert.doesNotMatch(body, /sshOneShotCapture|appendSshExe|CreateProcessW/);
+  }
+  const transport = fs.readFileSync(path.join(root, 'src/chat_transport.zig'), 'utf8');
+  assert.match(transport, /pub fn openCommandWait[\s\S]*?WaitForSingleObject\(ready, timeout_ms\)/);
+  assert.match(transport, /fn handshakeWorker\(b: Boot\) void \{\s+defer _ = w.SetEvent\(b.host.ready\)/);
+});

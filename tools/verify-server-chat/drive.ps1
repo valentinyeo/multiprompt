@@ -147,7 +147,7 @@ try {
     Shot 'reloaded'
     $result.cases += @{ name = 'reload'; passed = $true; detail = 'Resyncing the transcript from the server shows every server reply once' }
     if ($env:SSH_IDLE_PROOF -eq '1') {
-        Start-Sleep -Seconds 30
+        Start-Sleep -Seconds 210
         Measure-SshIdle 'idle'
         Verify-SshRecovery
     }

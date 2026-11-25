@@ -55,19 +55,6 @@ test('session list poll and autocomplete ride the shared server connection when 
   assert.match(read('src/chat_transport.zig'), /packet\(host, \.\{ \.channel = channel\.id, \.command = channel\.command, \.data = line \}\)/);
 });
 
-test('idle probes and usage cards use logical commands rather than opening SSH logins', () => {
-  for (const [file, name] of [['src/chat_send.zig', 'sshProbeThread'], ['src/telemetry_panel.zig', 'ladderFetchRemote']]) {
-    const source = read(file);
-    const start = source.indexOf(`fn ${name}(`);
-    const body = source.slice(start, source.indexOf('\n}', start));
-    assert.match(body, /captureSharedCommand\(/);
-    assert.doesNotMatch(body, /sshOneShotCapture|appendSshExe|CreateProcessW/);
-  }
-  const transport = read('src/chat_transport.zig');
-  assert.match(transport, /pub fn openCommandWait[\s\S]*?WaitForSingleObject\(ready, timeout_ms\)/);
-  assert.match(transport, /fn handshakeWorker\(b: Boot\) void \{\s+defer _ = w.SetEvent\(b.host.ready\)/);
-});
-
 test('a host whose ssh fails is backed off and its error text is never listed as a session', () => {
   const vps = read('src/vps.zig');
   assert.match(vps, /if \(host >= g_poll_retry_at\.len or GetTickCount64\(\) < g_poll_retry_at\[host\]\) return;/);
