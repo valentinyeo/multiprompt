@@ -13,6 +13,9 @@ function Copy-Rendered([string]$Name) {
     foreach ($letter in $query.ToCharArray()) { [ChatDeliveryDesktop]::Type([uint16][char]::ToUpperInvariant($letter)) }
     [void](Wait-For 'select-all command ready' { (Read-Shared "$settings/debug.log").Substring($offset) -match ('\[palette\] ready chars=' + $query.Length + ' count=[1-9]\d* target=\d+') })
     Press @(0x0D) 'Enter: select the rendered conversation'
+    [void](Wait-For 'the rendered conversation is selected' { (Read-Shared "$settings/debug.log").Substring($offset) -match '\[confirm\] sel=0 count=1 target=\d+' })
+    $settle = [ChatDeliveryDesktop]::GetTickCount64() + 400
+    [void](Wait-For 'the rendered selection settles before the copy' { [ChatDeliveryDesktop]::GetTickCount64() -ge $settle } 5)
     [Windows.Forms.Clipboard]::Clear()
     Press @(0x11, 0x43) 'Ctrl+C: copy the rendered conversation'
     $copied = [Windows.Forms.Clipboard]::GetText()
@@ -96,7 +99,12 @@ if (@(Working-Stage 'deliver' | Where-Object { $_.text -ceq $plan.text }).Count 
 } 30)
 Start-Sleep -Milliseconds 800
 [void](Scroll-Transcript -12000)
-$finalCopy = Copy-Rendered 'fresh-final'
+$finalCopy = $null
+for ($finalTry = 0; $finalTry -lt 4 -and -not $finalCopy; $finalTry++) {
+    $copy = Copy-Rendered 'fresh-final'
+    if ($copy -and $copy.Contains($plan.text)) { $finalCopy = $copy }
+}
+if (-not $finalCopy) { throw 'The message sent during the reload must appear exactly once' }
 if ([regex]::Matches($finalCopy, [regex]::Escape($plan.text)).Count -ne 1) { throw 'The message sent during the reload must appear exactly once' }
 if (-not $finalCopy.Contains('The handover is reloaded')) { throw 'The reloading reply left the conversation' }
 Shot 'fresh-message-arrived'
