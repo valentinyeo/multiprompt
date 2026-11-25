@@ -486,7 +486,7 @@ fn chatFlowText(hdc: HANDLE, text: []const u16, area: RECT, code: bool, paint: b
     var x: i32 = 0;
     var y: i32 = 0;
     var pos: usize = 0;
-    const mentions: []const @import("chat_mention.zig").Chat = if (skill_pills) @import("chat_mention.zig").currentLive(null) else &.{};
+    const mentions: []const @import("chat_mention.zig").Chat = if (skill_pills) @import("chat_mention.zig").currentLive() else &.{};
     var search: usize = 0;
     var link: ?link_detect.Range = null;
     var syntax = chat_code.Iterator{ .text = text };
@@ -1180,7 +1180,7 @@ fn chatMeasureProjectedBlockRect(hdc: HANDLE, buf: []const u16, block: ChatBlock
             _ = DrawTextW(hdc, measure_text.ptr, @intCast(measure_text.len), &calc, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
             var natural_w = calc.right;
             if (std.mem.indexOfScalar(u16, body, '@') != null) {
-                const live = @import("chat_mention.zig").currentLive(null);
+                const live = @import("chat_mention.zig").currentLive();
                 var scan: usize = 0;
                 while (scan < body.len) {
                     const span = @import("chat_mention.zig").spanAt(body, scan, live) orelse {
@@ -6293,6 +6293,20 @@ pub fn chatNavKey(action: chat_keynav.Action) bool {
     }
 }
 
+pub fn chatLogPosition() void {
+    if (!verboseLoggingEnabled() or !app_state.g_chat_active or app_state.g_chat_layout_dirty or app_state.active_shell >= app_state.shell_count) return;
+    const tick = GetTickCount64();
+    const edge = app_state.g_chat_scroll_y + app_state.g_chat_top_pad;
+    const anchor = chat_history.scrollAnchor(app_state.g_chat_layout_rects[0..app_state.g_chat_block_count], edge) orelse return;
+    for (anchor.index..app_state.g_chat_block_count) |first| {
+        const block = app_state.g_chat_blocks[first];
+        if (block.role == .tool or g_reaction_view.hides(first)) continue;
+        var log: [384]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&log, "[chat] position ms={d} shell={d} first={d} message={d} offset={d} y={d} scroll={d} height={d} pad={d} opening={d} paints={d} layouts={d} tick={d}", .{ tick -| app_state.g_chat_switch_started, app_state.g_chat_cache_shell_id, first, block.message_id, block.source_offset, app_state.g_chat_layout_rects[first].top - app_state.g_chat_scroll_y, app_state.g_chat_scroll_y, app_state.g_chat_content_h, app_state.g_chat_top_pad, app_state.g_chat_switch_started, app_state.g_chat_paint_count, app_state.g_chat_layout_count, tick }) catch "");
+        return;
+    }
+}
+
 var transcript_paint_dc: HANDLE = null;
 var transcript_paint_bitmap: HANDLE = null;
 var transcript_paint_old_bitmap: HANDLE = null;
@@ -6370,6 +6384,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
                 if (painted) chatSwitchContentPainted();
                 if (painted) {
                     app_state.g_chat_paint_count +%= 1;
+                    chatLogPosition();
                 }
                 if (painted) chatBenchPaint();
                 if (painted) @import("launch_cache.zig").painted(true);

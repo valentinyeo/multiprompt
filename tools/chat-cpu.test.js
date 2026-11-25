@@ -352,10 +352,14 @@ test('layout oracle rejects actual 706 full-history remeasurement', () => {
 });
 test('UI completion never parses; polling/paint use revisions, cached tables and visible rectangles only', () => {
   assert.doesNotMatch(body(source, 'chatFileOnReady'), /\.apply\(|\.decode\(|\.render\(|Sleep\(/);
-  assert.doesNotMatch(body(source, 'refreshChatBlockCache'), /for \(entry\.\?\.history\.blocks/);
-  assert.match(body(source, 'refreshChatBlockCache'), /history\.revision/);
+  const refresh = body(source, 'refreshChatBlockCache');
+  const unchanged = refresh.match(/if \(!force[^\n]+hash == g_chat_last_hash[^\n]+return false;/);
+  assert.ok(unchanged, 'unchanged revisions keep their fast return');
+  assert.ok(refresh.indexOf(unchanged[0]) < refresh.indexOf('const same_blocks'), 'only a changed revision compares history blocks');
+  assert.match(refresh, /history\.revision/);
   assert.match(body(source, 'chatFileFetchThread'), /history\.suffix\(a\)/);
-  assert.match(body(source, 'chatFileFetchThread'), /CACHE_WRITE_MS/);
+  assert.match(body(source, 'chatFileFetchThread'), /cacheWriteDue\(entry\.cache_written/);
+  assert.match(body(source, 'cacheWriteDue'), /CACHE_WRITE_MS/);
   assert.match(fs.readFileSync(path.join(__dirname, '../src/chat_render.zig'), 'utf8'), /fn chatTableLayout\([^]*chatTableLayoutIn\(/);
   assert.match(body(source, 'chatPaintTranscriptContent'), /scrollAnchor[^]*for \(first\.\.g_chat_block_count\)/);
   assert.match(body(source, 'chatFileRequestForDelivery'), /GetLastInputInfo[^]*< 5000\) return/);
