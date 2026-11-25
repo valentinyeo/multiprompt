@@ -1645,7 +1645,7 @@ fn dropDraft(location: RoomLocation, text: []const u8) void {
         }
         break;
     };
-    if (!created or front != .selected or !sameLocation(front.selected, location)) return;
+    if (!created or !std.mem.eql(u8, view.model.room_id, &location.room_id)) return;
     const buf = a.alloc(u16, 65537) catch return;
     defer a.free(buf);
     const current = view.draft(buf) orelse return;

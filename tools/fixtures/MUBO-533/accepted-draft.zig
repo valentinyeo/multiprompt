@@ -4,6 +4,7 @@ const test_room = "10000000-0000-4000-8000-000000000001";
 const other_room = "20000000-0000-4000-8000-000000000002";
 const test_store = "30000000-0000-4000-8000-000000000003";
 
+const ViewModel = struct { room_id: []const u8 = test_room };
 const Draft = struct { location: RoomLocation, text: [:0]u16 };
 const PendingCommand = struct {
     location: StoreLocation,
@@ -21,14 +22,16 @@ const journal = struct {
     };
 };
 
+var room_model = ViewModel{};
+var other_model = ViewModel{ .room_id = other_room };
 var drafts: std.ArrayList(Draft) = .empty;
 var composer_buf: [256]u16 = @splat(0);
 var composer_len: usize = 0;
 var created = true;
 var front: Front = .hidden;
 var buffered_location: ?RoomLocation = null;
-var saved = 0;
-var dirty = 0;
+var saved: usize = 0;
+var dirty: usize = 0;
 
 const w = struct {
     fn SetTimer(_: usize, _: usize, _: u32, _: ?*anyopaque) usize {
@@ -38,6 +41,7 @@ const w = struct {
 const app_state = struct { const g_main_hwnd: usize = 1; };
 const TIMER_ROOM_UI: usize = 1;
 var view = struct {
+    model: *const ViewModel = &room_model,
     fn draft(_: *@This(), buffer: []u16) ?[]const u16 {
         if (composer_len >= buffer.len) return null;
         @memcpy(buffer[0..composer_len], composer_buf[0..composer_len]);
@@ -83,6 +87,7 @@ fn reset() void {
     composer_len = 0;
     created = true;
     front = .hidden;
+    view.model = &room_model;
     buffered_location = null;
     saved = 0;
     dirty = 0;
@@ -92,7 +97,7 @@ test "an accepted room send is retired and saved so a restart cannot bring it ba
     defer reset();
     seed(test_room.*, std.unicode.utf8ToUtf16LeStringLiteral("RESTART534"));
     composer(std.unicode.utf8ToUtf16LeStringLiteral("RESTART534"));
-    front = .{ .selected = roomLocation(test_room.*) };
+    front = .hidden;
     const item = PendingCommand{ .location = storeLocation(), .room_id = test_room.*, .request = "{\"text\":\"RESTART534\"}" };
     retireSubmittedDraft(&item);
     try std.testing.expectEqual(@as(usize, 0), drafts.items.len);
@@ -104,12 +109,12 @@ test "a different edited draft survives an accepted send and is still saved" {
     defer reset();
     seed(test_room.*, std.unicode.utf8ToUtf16LeStringLiteral("RESTART534 edited by me"));
     composer(std.unicode.utf8ToUtf16LeStringLiteral("RESTART534 edited by me"));
-    front = .{ .selected = roomLocation(test_room.*) };
+    front = .hidden;
     const item = PendingCommand{ .location = storeLocation(), .room_id = test_room.*, .request = "{\"text\":\"RESTART534\"}" };
     retireSubmittedDraft(&item);
     try std.testing.expectEqual(@as(usize, 1), drafts.items.len);
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("RESTART534 edited by me"), drafts.items[0].text);
-    try std.testing.expectEqual(@as(usize, 1), composer_len);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("RESTART534 edited by me"), composer_buf[0..composer_len]);
     try std.testing.expectEqual(@as(usize, 1), saved);
 }
 
@@ -134,4 +139,17 @@ test "an uncertain send keeps its saved draft and its original body" {
     retireAcceptedDraft(&record, storeLocation());
     try std.testing.expectEqual(@as(usize, 1), drafts.items.len);
     try std.testing.expectEqual(@as(usize, 0), saved);
+}
+
+test "an accepted send does not clear another room's composer" {
+    defer reset();
+    seed(test_room.*, std.unicode.utf8ToUtf16LeStringLiteral("RESTART534"));
+    composer(std.unicode.utf8ToUtf16LeStringLiteral("a draft in the other room"));
+    view.model = &other_model;
+    front = .hidden;
+    const item = PendingCommand{ .location = storeLocation(), .room_id = test_room.*, .request = "{\"text\":\"RESTART534\"}" };
+    retireSubmittedDraft(&item);
+    try std.testing.expectEqual(@as(usize, 0), drafts.items.len);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("a draft in the other room"), composer_buf[0..composer_len]);
+    try std.testing.expectEqual(@as(usize, 1), saved);
 }
