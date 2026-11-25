@@ -1,0 +1,1 @@
+Reuse one server connection instead of opening a new login every 15 seconds

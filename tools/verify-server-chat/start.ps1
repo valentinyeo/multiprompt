@@ -38,6 +38,7 @@ Host remote-1
   StrictHostKeyChecking yes
   UserKnownHostsFile "$((Join-Path $Profile 'home/.ssh/known_hosts').Replace('\', '/'))"
 "@
+if ($env:SSH_IDLE_PROOF -eq '1') { $config = $config.Replace('Host remote-1', 'Host remote-1 remote-2 remote-3 vps') }
 [IO.File]::WriteAllText("$keyDir/config", $config)
 $known = Invoke-ServerNative -FilePath "$env:SystemRoot/System32/OpenSSH/ssh-keyscan.exe" -Arguments @('-p', '2222', '-t', 'ed25519', '127.0.0.1') -Evidence $Evidence -Name 'ssh-keyscan'
 if (-not $known.Trim()) { throw 'Runner server host key scan returned no key' }
@@ -48,4 +49,9 @@ $warm = Invoke-ServerNative -FilePath $ssh -Arguments @('-F', "$keyDir/config", 
 if ($warm -notmatch '(?s)Linux.*tmux.*Python') { throw "Real Windows OpenSSH preflight output is invalid: $warm" }
 $warm | Set-Content -Encoding UTF8 "$Evidence/ssh-preflight.txt"
 [IO.File]::WriteAllText("$settings/ssh-path.txt", $ssh)
-[IO.File]::WriteAllText("$keyDir/servers.txt", "v1`nconnected`t1`t2222`t0`t127.0.0.1`tmpverify`tRunner Linux`t`nremoved`t0`t22`t0`t`t`t`t`nremoved`t0`t22`t0`t`t`t`t`n")
+$servers = "v1`nconnected`t1`t2222`t0`t127.0.0.1`tmpverify`tRunner Linux`t`nremoved`t0`t22`t0`t`t`t`t`nremoved`t0`t22`t0`t`t`t`t`n"
+if ($env:SSH_IDLE_PROOF -eq '1') {
+    $servers = "v1`n" + ("connected`t1`t2222`t0`t127.0.0.1`tmpverify`tRunner Linux`t`n" * 3)
+    [void](Invoke-ServerNative -FilePath wsl.exe -Arguments @('-d', 'Ubuntu-24.04', '-u', 'mpverify', '--exec', 'tmux', 'new-session', '-d', '-s', 'idle-ci') -Evidence $Evidence -Name 'idle-session')
+}
+[IO.File]::WriteAllText("$keyDir/servers.txt", $servers)
