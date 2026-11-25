@@ -116,6 +116,7 @@ var paint_log_busy = std.atomic.Value(bool).init(false);
 const PaintLogRule = struct { id: []const u8, line: []const u8, heartbeat_ms: u64 = 0 };
 
 const PAINT_LOG_HEARTBEAT_MS: u64 = 60_000;
+const PAINT_LOG_POSITION_HEARTBEAT_MS: u64 = 1_000;
 const PAINT_LOG_DIVIDER_HEARTBEAT_MS: u64 = 5_000;
 const PAINT_LOG_TRACE_HEARTBEAT_MS: u64 = 10_000;
 const PAINT_LOG_SLOW_MS: u64 = 8;
@@ -136,8 +137,8 @@ fn paintLogRule(msg: []const u8) ?PaintLogRule {
     }
     if (std.mem.startsWith(u8, msg, "[chat] position ")) {
         const state = std.mem.indexOf(u8, msg, " shell=") orelse return null;
-        const end = std.mem.indexOf(u8, msg, " paints=") orelse msg.len;
-        return .{ .id = "[chat] position", .line = msg[state..end], .heartbeat_ms = 1000 };
+        const end = std.mem.indexOf(u8, msg, " y=") orelse msg.len;
+        return .{ .id = "[chat] position", .line = msg[state..end], .heartbeat_ms = PAINT_LOG_POSITION_HEARTBEAT_MS };
     }
     if (std.mem.startsWith(u8, msg, "[chat] unread divider ")) {
         return .{ .id = "[chat] unread divider", .line = msg, .heartbeat_ms = PAINT_LOG_DIVIDER_HEARTBEAT_MS };
@@ -672,6 +673,20 @@ pub fn logPollShellEnter() void {
     buf[pos] = ']';
     pos += 1;
     debugLog(buf[0..pos]);
+}
+
+test "MUBO-17 a streamed reply logs the chat position on the message anchor, not on every paint" {
+    var limiter: PaintLogLimiter = .{};
+    const first = paintLogRule("[chat] position ms=183672 shell=4 first=219 message=15634981883639279346 offset=540790 y=-4620 scroll=111118 height=111728 pad=52 opening=35 paints=41 layouts=40 tick=183672").?;
+    const taller = paintLogRule("[chat] position ms=184187 shell=4 first=219 message=15634981883639279346 offset=540790 y=-4674 scroll=111172 height=111782 pad=52 opening=35 paints=43 layouts=41 tick=184187").?;
+    const sooner = paintLogRule("[chat] position ms=184300 shell=4 first=219 message=15634981883639279346 offset=540790 y=-4700 scroll=111200 height=111810 pad=52 opening=35 paints=44 layouts=41 tick=184300").?;
+    try std.testing.expect(limiter.allow(first.id, first.line, 183672, first.heartbeat_ms));
+    try std.testing.expect(!limiter.allow(taller.id, taller.line, 184187, taller.heartbeat_ms));
+    try std.testing.expect(!limiter.allow(sooner.id, sooner.line, 184300, sooner.heartbeat_ms));
+    const moved = paintLogRule("[chat] position ms=184800 shell=4 first=220 message=15000743400324515262 offset=566460 y=-4 scroll=111658 height=112268 pad=52 opening=35110 paints=45 layouts=42 tick=184800").?;
+    try std.testing.expect(limiter.allow(moved.id, moved.line, 184800, moved.heartbeat_ms));
+    try std.testing.expect(!limiter.allow(moved.id, moved.line, 184900, moved.heartbeat_ms));
+    try std.testing.expect(limiter.allow(moved.id, moved.line, 185800, moved.heartbeat_ms));
 }
 
 test "IGSH-1973 an unchanged divider line logs again only after the heartbeat" {

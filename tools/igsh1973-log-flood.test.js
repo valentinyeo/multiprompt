@@ -72,3 +72,31 @@ test('IGSH-1973 slow call lines need more than one clock tick', () => {
   assert.ok(floor && Number(floor[1]) >= 20, 'the slow call floor must sit above the 16 ms clock tick');
   assert.match(slow, /if \(elapsed < SLOW_CALL_LOG_MS\) return;/);
 });
+
+function workerBody(source, name) {
+  const start = source.indexOf(`fn ${name}(`);
+  assert.ok(start >= 0, `${name} must exist`);
+  const end = source.indexOf('\n}\n', start);
+  return source.slice(start, end);
+}
+
+test('MUBO-17 a streamed reply logs no timing line per transcript fetch', () => {
+  const session = read('src/chat_session.zig');
+  const worker = workerBody(session, 'chatFileFetchThread');
+  assert.doesNotMatch(worker, /chatPerf\("parse"/, 'the per-fetch parse timing line is gone');
+  assert.doesNotMatch(worker, /chatPerf\("cache write"/, 'the per-fetch cache write timing line is gone');
+  assert.match(worker, /\[chat\] push shell=/, 'the paint probe keeps its push sample');
+  assert.match(session, /\[chat\] transcript request shell=/, 'the delivery proofs keep their request sample');
+  assert.match(session, /\[chat\] transcript load shell=/, 'the delivery proofs keep their load sample');
+});
+
+test('MUBO-17 the chat position line is keyed on the message anchor, not the scroll', () => {
+  const diagnostics = read('src/diagnostics.zig');
+  const start = diagnostics.indexOf('if (std.mem.startsWith(u8, msg, "[chat] position "))');
+  assert.ok(start >= 0, 'the position rule must exist');
+  const position = diagnostics.slice(start, diagnostics.indexOf('if (std.mem.startsWith(u8, msg, "[chat] unread divider "))'));
+  assert.match(position, /std\.mem\.indexOf\(u8, msg, " shell="/);
+  assert.match(position, /const end = std\.mem\.indexOf\(u8, msg, " y="\)/, 'the key ends where the painted offset starts');
+  assert.doesNotMatch(position, /" paints="/, 'the painted counters stay out of the key');
+  assert.match(position, /heartbeat_ms = PAINT_LOG_POSITION_HEARTBEAT_MS/);
+});
