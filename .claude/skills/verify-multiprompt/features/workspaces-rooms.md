@@ -16,7 +16,7 @@ Release paths: src/workspace*.zig, src/room*, src/groups*.zig, src/main.zig, bui
 ## Driving it with drive.ps1
 Preconditions: single-window mode, fresh hosted Windows desktop, matching executable/hash/version, isolated app data, and the selected legacy recipe’s prerequisites.
 - The shared wrapper accepts these Journeys; automatic workflow migration remains partial. Run `gh workflow run verify.yml --ref <branch> -f feature=workspaces`. [Workspaces](workspaces.md) drives creation, switching, archive/restore and deletion; [workspace focus](workspace-focus.md) checks typing after returning.
-- Require stable saved workspace IDs and session membership, card screenshots, and restored typing. Rooms require visible member replies in a separately authenticated live pass. Only the selected journey is covered. Download `verify-workspaces` after cleanup. This legacy workflow route does not yet use the video driver; see [inventory](../inventory.md).
+- Require stable saved workspace IDs and session membership, card screenshots, and restored typing. The [rooms journey](rooms.md) supplies a runner-owned authenticated account and two deterministic live member agents. Only the selected journey is covered. Download `verify-workspaces` after cleanup. This legacy workflow route does not yet use the video driver; see [inventory](../inventory.md).
 
 The recipes distinguish existing focused journeys from unreachable complete paths. UNREACHABLE names the missing data, endpoint, build mode or driver action; it never means the product passed.
 
@@ -55,19 +55,17 @@ Journey: workspaces, workspace-focus, sessions. UNREACHABLE for cross-device fol
 
 ### room: Rooms
 
-In a released desktop build, use Ctrl+Shift+N or Ctrl+K New room. Choose members, create and open the room by name, send a message, then Edit room to rename and change members. Reopen and inspect both agents' replies.
+In a release or Rooms-enabled verification build, use Ctrl+Shift+N or Ctrl+K New room. Choose members, create and open the room by name, send a message, then Edit room to rename and change members. Reopen and inspect both agents' replies.
 
 Observable proof: The room keeps one ID and the selected members; replies are attributed once to the right agent. Editing preserves earlier history and prevents private per-chat actions from leaking into a room.
 
-Rooms are reachable in releases. `build.zig` enables Rooms by default for release builds; development builds require `-Drooms-preview=true`. A complete live journey still needs an authenticated disposable account, two real Claude chats and a room-driving desktop recipe. The room-reply-grouping diagnostic and extracted-logic harnesses are not desktop proof.
-
-From a fresh profile, require existing rooms from every configured host and unopened server chats in the member picker with their shown names. Create a two-Claude room; plain send must get exactly two attributed replies. Use the @ picker with a shown name and require one reply. Ask the other member a follow-up that proves it received the shared conversation. Leave while a member is offline, return that agent without any history request, then reopen and require one answer. Restart while an older question is unanswered but a newer one has a reply; refreshing must resume until both are settled. A failed or empty turn must show “No answer”; resending must produce a new attempt. Check an unrelated private chat for leaks. Retain IDs, ordered events, screenshots and the exact executable hash. The paired phone journey is MUBO-536; it has not been verified by the desktop harnesses.
+Run `feature=rooms` for the desktop gate in [Rooms](rooms.md), including fresh creation, closed-chat membership and away/restart recovery. Release builds enable Rooms; non-release verification builds need `-Drooms-preview=true`. The room-reply-grouping diagnostic alone is not desktop proof.
 
 | Palette row or dynamic family | User reaches it |
 | --- | --- |
-| `SEARCH_ROOM_ROW_OFFSET` | In a released desktop build, search Ctrl+K for the room's name. Follow `room` above. |
-| `room.edit_room_target` | In a released desktop build, Ctrl+K, choose **Edit room**. Follow `room` above. |
-| `room.new_room_target` | In a released desktop build, Ctrl+K, choose **New room**. Follow `room` above. |
+| `SEARCH_ROOM_ROW_OFFSET` | In a Rooms preview build, search Ctrl+K for the room's name. Follow `room` above. |
+| `room.edit_room_target` | In the Rooms preview build, Ctrl+K, choose **Edit room**. Follow `room` above. |
+| `room.new_room_target` | In the Rooms preview build, Ctrl+K, choose **New room**. Follow `room` above. |
 
 ## Gotchas
 - Offline CMD workspace proof does not cover Rooms, sync, or remote agents. Room reply checks are [diagnostic](../diagnostics/room-reply-grouping.md), not a completed desktop journey.

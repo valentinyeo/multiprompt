@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       feature:
-        description: Feature map file stem in .claude/skills/verify-multiprompt/features, or all for the full matrix
+        description: Feature map file stem in .claude/skills/verify-multiprompt/features, including rooms, or all for the full matrix
         required: true
         default: appearance
         type: string
@@ -256,9 +256,10 @@ jobs:
           node - <<'NODE' >> "$GITHUB_OUTPUT"
           const { discoverFeatures, journeyMatrix } = require('./tools/verify-features.cjs');
           const { available, pr } = discoverFeatures();
-          const selected = process.env.FEATURES ? JSON.parse(process.env.FEATURES) : process.env.FEATURE && process.env.FEATURE !== 'all' ? [process.env.FEATURE] : process.env.EVENT === 'pull_request' && process.env.FEATURE !== 'all' ? pr : available;
+          const automatic = available.filter(feature => feature !== 'rooms' || process.env.EVENT === 'workflow_dispatch');
+          const selected = process.env.FEATURES ? JSON.parse(process.env.FEATURES) : process.env.FEATURE && process.env.FEATURE !== 'all' ? [process.env.FEATURE] : process.env.EVENT === 'pull_request' && process.env.FEATURE !== 'all' ? pr : automatic;
           if (!Array.isArray(selected) || !selected.length || selected.some(feature => !available.includes(feature)) || new Set(selected).size !== selected.length) throw new Error('Expected unique supported desktop journeys');
-          console.log(`builds=${JSON.stringify([...new Set(selected.map(feature => feature === 'chat-still' ? 'chat-still' : 'normal'))])}`);
+          console.log(`builds=${JSON.stringify([...new Set(selected.map(feature => feature === 'chat-still' ? 'chat-still' : feature === 'rooms' ? 'rooms' : 'normal'))])}`);
           console.log(`selected=${JSON.stringify(selected)}`);
           console.log(`matrix=${JSON.stringify(journeyMatrix(selected, process.env.APP_REVISION))}`);
           NODE
@@ -330,11 +331,11 @@ jobs:
         run: python ${{ inputs.app_revision && 'probe-source/' || '' }}tools/chat-still/instrument.py . zig-out/bin/chat-still-instrumentation.json
       - name: Build the Windows app once for this push
         if: inputs.tag == ''
-        run: zig build -Drelease=false -Dcpu=x86_64_v3 -Dtarget=x86_64-windows-gnu -Dversion="${{ env.VERIFY_VERSION }}" -Drevision="${{ env.VERIFY_REVISION }}"
+        run: zig build -Drelease=false ${{ matrix.profile == 'rooms' && '-Drooms-preview=true' || '' }} -Dcpu=x86_64_v3 -Dtarget=x86_64-windows-gnu -Dversion="${{ env.VERIFY_VERSION }}" -Drevision="${{ env.VERIFY_REVISION }}"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: inputs.tag == ''
         with:
-          name: verify-app${{ matrix.profile == 'chat-still' && '-chat-still' || '' }}${{ inputs.app_revision && '-compare' || '' }}
+          name: verify-app${{ matrix.profile == 'chat-still' && '-chat-still' || matrix.profile == 'rooms' && '-rooms' || '' }}${{ inputs.app_revision && '-compare' || '' }}
           path: zig-out/bin/
           retention-days: 1
           if-no-files-found: error
@@ -514,7 +515,7 @@ jobs:
         continue-on-error: true
         run: node tools/check-workspace-focus.mjs
       - name: Install runner-owned Linux server
-        if: env.FEATURE == 'server-chat'
+        if: env.FEATURE == 'server-chat' || env.FEATURE == 'rooms'
         uses: Vampire/setup-wsl@887f39deb6c0976365e546926fe66f41b77d65ff
         with:
           distribution: Ubuntu-24.04
@@ -524,6 +525,18 @@ jobs:
         uses: ./.github/actions/install-ffmpeg
         with:
           version: '7.1.1'
+      - name: Prepare Rooms screenshot reader and disposable account Worker
+        if: env.FEATURE == 'rooms'
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          choco install tesseract --version=5.4.0.20240606 -y --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'Tesseract installation failed' }
+          Set-Location service
+          npm ci --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw 'Account Worker dependencies failed' }
+          npx wrangler deploy --dry-run --outdir .build
+          if ($LASTEXITCODE -ne 0) { throw 'Account Worker bundle failed' }
       - name: Check browser recovery journey contract
         continue-on-error: true
         run: node tools/check-browser-pane-stuck.mjs
@@ -623,7 +636,7 @@ jobs:
         if: inputs.candidate_artifact == '' && env.RELEASE_TAG == '' && env.FEATURE != 'safe-updates' && env.CHAT_SHAPE_PROOF != '1' && env.CHAT_SWITCH_PROFILE != '1'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: verify-app${{ env.FEATURE == 'chat-still' && '-chat-still' || '' }}${{ inputs.app_revision && '-compare' || '' }}
+          name: verify-app${{ env.FEATURE == 'chat-still' && '-chat-still' || env.FEATURE == 'rooms' && '-rooms' || '' }}${{ inputs.app_revision && '-compare' || '' }}
           path: zig-out/bin
       - name: Build branch executable
         if: inputs.candidate_artifact == '' && env.RELEASE_TAG == '' && (env.FEATURE == 'safe-updates' || env.CHAT_SHAPE_PROOF == '1' || env.CHAT_SWITCH_PROFILE == '1')

@@ -1,0 +1,52 @@
+# Rooms
+
+Source files: src/room*.zig, src/room_service.py, src/room_bridge.py, .claude/skills/verify-multiprompt/control-feature-rooms.ps1, .claude/skills/verify-multiprompt/rooms-*.py, .claude/skills/verify-multiprompt/rooms-desktop.cs
+
+## Sub-features
+
+Create a shared conversation, add two live chats, send to everyone, mention one member, and compare reply order across the room and the members' own chats.
+
+## How to get to it (user POV)
+
+Ctrl+K **New room** (also available as Ctrl+Shift+N), enter a name, Tab into member search, select Alpha with Enter, then Ctrl+Enter to create. The app requires at least one member when creating. Ctrl+K **Edit room**, search each additional member and press Enter to select it, then Ctrl+Enter to save. Open the room by its name in Ctrl+K. Type into its composer and press Enter. Type `@Alpha TARGET534` to address Alpha alone. Open Alpha and Bravo through Ctrl+K to inspect their own Chat Views.
+
+## Driving it with control.ps1
+
+Dispatch `gh workflow run verify.yml --ref <branch> -f feature=rooms`. The workflow discovers this file automatically; there is no global pull-request smoke entry. Source mapping selects it for room files and its own driver only. Automatic `all` matrices omit Rooms; explicit dispatch (including manual `all`) includes it. The Rooms build profile uses `-Drooms-preview=true`, matching the shipped release feature without enabling it in other verification builds.
+
+`drive.ps1 -Feature rooms` records the desktop with the existing FFmpeg recorder and delegates through `control.ps1` to `control-feature-rooms.ps1`. Only GitHub-hosted Windows, an isolated profile, the runner-owned account Worker, WSL2 OpenSSH/tmux, FFmpeg and Tesseract are supported. The production account service runs locally with disposable credentials, a runner-only certificate and two seeded saved chats. Initial saved chats, the user SSH configuration and provider commands are fixture setup, not proof of room creation. The room transport runs plain `ssh remote-1` against the user's own SSH configuration, so the fixture writes `home/.ssh/config` for the user profile and authorizes the profile's `id_ed25519` on the runner host before launch, then proves it with a plain SSH preflight. The driver never seeds a room or sends a room command outside the app.
+
+First try Ctrl+K New room on the fresh profile, before private chat driving can warm Rooms. Then send `PRIVATE534` through each chat's real composer and copy its visible reply. The deterministic stream-json provider replaces only paid Claude; Windows input, SSH, production host, connector, room bridge, persistence and transcript loading remain real. No model calls or shared servers are used. Controlled provider gates hold replies until the driver leaves the room or restarts its owned desktop; a one-time provider error exercises failed-turn recovery.
+
+| Step | Action and observable proof |
+| --- | --- |
+| 1 / a | On the fresh profile, create Rooms534 with Alpha through Ctrl+K, name, member search/Enter, Ctrl+Enter. Require the named native room view, screenshot/OCR, and exactly one room in the read-only server snapshot. A zero-member creation is invalid and must never be reported as a product break. The case also records whether the create attempt reached the room service at all, so an empty picker is not confused with a transport failure. |
+| private | Both private chats must reply through the desktop composer. A failure here is a precondition failure, not proof that room replies broke. If fresh creation failed, a separately reported warm retry opens Bravo's chat and then tries the same UI path, so independent later checks can still run. The fresh-profile result never changes. |
+| 2 / b | Close Bravo's tab, prove its absence in saved tabs, edit the room, select Alpha and Bravo using real search/Enter, save. Require two active persisted members and the reopened room screenshot. |
+| 2-open | Independently reopen Bravo through the palette and try adding both open chats. This lets later checks proceed when the closed-chat picker fails; it never changes step b's result. |
+| 3 | Send BROADCAST534. Require one saved human event and visible message text. A refused send keeps the draft and reports the room's visible error. |
+| 4 | Await both replies. Require exactly two saved agent replies with distinct member IDs, plus both attributed replies visible in the room. |
+| 5 | Send @Alpha TARGET534. Require the message accepted, one provider input for Alpha, one saved reply from Alpha, visible reply text and no Bravo reply. A refused send reports the room's visible error together with the typed text. |
+| 6 | Copy both member Chat Views and capture the room. Require every saved room reply in the same order in all three views; retain the comparison, member screenshots, copied text, provider transcripts and ordered room events. |
+| 7 / e | Send AWAY534, prove both providers are holding the reply, leave for Alpha's chat, release the providers, prove both providers answered while the room was closed, then require both saved replies and both replies on screen after returning to the room. The case records how many replies were already saved while the room stayed closed. |
+| 8 / f | Send RESTART534, prove both unanswered provider receipts, leave the room, stop only the owned desktop, relaunch with its saved profile, release replies without opening the room. Require both saved answers before returning and both on screen afterward. |
+| 9 / g | UNREACHABLE without an Android Rooms client harness. Paired ticket MUBO-536 owns phone reading. |
+| 10 / h | UNREACHABLE without an Android Rooms retry harness. Paired ticket MUBO-536 owns phone retries. |
+| 12 | Fail Alpha's first FAIL534 turn while Bravo succeeds, use the room's Restart control, require the original question to receive both answers. |
+| 13 | UNREACHABLE without a controllable lost-acknowledgement boundary. Ordinary successful sends do not prove retry safety. |
+| 14 | Leave and reload history. Compare saved reply IDs and order and require the replies in screenshots while scrolling the native room. |
+| 11 | Launch a second fresh profile with only the same disposable account credentials and SSH configuration, no room cache or saved sessions. Require discovery of Rooms534 and its saved history through Ctrl+K. |
+
+Each step writes `step-N.png`, `step-N-visible.txt`, `step-N-state.json` and a `result.json` case with PASS / FAIL / UNREACHABLE, symptom and recording-relative seconds. A failure does not stop independent later steps. UNREACHABLE names the missing saved prerequisite; it is not a pass. `driverErrors` distinguishes setup or evidence failures from product assertions. `journey.mp4`, `actions.json`, `doctor.json`, `build.json`, read-only server snapshots and sanitized `data/` survive cleanup in `verify-rooms`. Require every reachable desktop check to pass, no driver errors, readable video, zero owned app/service processes and removed scratch for a green gate. Phone and lost-acknowledgement limitations remain explicit UNREACHABLE cases, not passes. Room screenshots that need more than one viewport use `*-page-N.png` and `*-all-visible.txt`.
+
+Download with `gh run download <id> -n verify-rooms -D <directory>`. Inspect the screenshots as images and the recording, not just OCR. Timestamps in the cases use the child's clock, which starts just after the outer recorder; use the screenshots to locate the exact frame.
+
+## Gotchas
+
+- Room text is custom-painted and has no copy-all action. Tesseract reads actual desktop screenshots; saved room events independently prove what persisted. Member checks also retain `*-list.png`, cropped below the native member-search field, so typed query text or sidebar names cannot masquerade as picker results. OCR failures need visual review before being called product bugs.
+- Display names and the app's generated mention aliases are different. This journey deliberately checks the requested `@<name>` user path; do not replace it with a private generated ID to hide a failed name mention.
+- A failed broadcast reply does not prevent testing a targeted send or opening both member views. No reply order can be proven when no replies exist; report that missing prerequisite explicitly.
+- This checks one desktop plus both member chat views and saved server state, not a second physical desktop or Android. `tools/verify-account-photos/android.sh` is a photo-only companion instrumentation harness; it has no Rooms read/retry actions and cannot run in this Windows job. Cases g/h name that missing prerequisite.
+- Assistant replies must exist in each member's saved transcript as assistant messages in the same order. A reply's text appearing only inside quoted room context in a user message is not shared reply proof.
+- Before each independent send, the driver clears any earlier unsent draft through Ctrl+A and Backspace. A refused display-name mention must not contaminate later away/restart messages.
+- The journey is allowed to fail on master. Do not add it to unrelated PR smoke gates or change product code to make this verification PR green.
