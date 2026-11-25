@@ -144,9 +144,7 @@ function Get-HostTypedText {
 
 function Invoke-HostDiscovery {
     $body = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../../../src/computer/discover.py')) + "`nmain(True,'desk')`n"
-    $length = [Text.Encoding]::UTF8.GetBytes($body).Length
-    $bootstrap = 'python3 -u -c "import sys;exec(compile(sys.stdin.buffer.read(' + $length + '),''<computer>'',''exec''))"'
-    $reply = Invoke-ComputerHost $bootstrap $body
+    $reply = Invoke-ComputerHost 'python3 -u -' $body
     if ($reply.exit -ne 0) { throw ('The app discovery script failed on the host: ' + $reply.err.Trim() + ' ' + $reply.out.Trim()) }
     $line = @($reply.out -split "`r?`n" | Where-Object { $_.StartsWith('{') })
     if (-not $line.Count) { throw ('The app discovery script returned no JSON: ' + $reply.out) }
