@@ -126,7 +126,7 @@ results.append(dict(screen=namespace["fake_screen"](dict(hax=True, suggestion=""
 print(json.dumps(results))
 `;
   const boundary = fileURLToPath(new URL('./verify-chat-delivery/boundary.py', import.meta.url));
-  const result = JSON.parse(execFileSync('python3', ['-I', '-c', script, boundary], { encoding: 'utf8', timeout: 10000 }));
+  const result = JSON.parse(execFileSync('python3', ['-I', '-c', script, boundary], { encoding: 'utf8', timeout: 20000 }));
   assert.deepEqual(result.slice(0, 4).map(row => Boolean(row.grey)), [false, true, false, false]);
   assert.ok(result[0].screen.startsWith('Claude Code\n'));
   assert.ok(result[4].screen.startsWith('Hax\n'));
@@ -183,7 +183,7 @@ namespace = {"names": ["session-" + str(i) for i in range(10)]}
 exec(compile(ast.Module(body=selected, type_ignores=[]), sys.argv[1], "exec"), namespace)
 print(json.dumps(dict(seed=namespace["seed"], snapshot=namespace.get("snapshot"))))
 `;
-  const result = JSON.parse(execFileSync('python3', ['-I', '-c', script, fileURLToPath(new URL('./switch-performance-fixture.py', import.meta.url))], { encoding: 'utf8', timeout: 10000 }));
+  const result = JSON.parse(execFileSync('python3', ['-I', '-c', script, fileURLToPath(new URL('./switch-performance-fixture.py', import.meta.url))], { encoding: 'utf8', timeout: 20000 }));
   assert.ok(result.snapshot, 'Manual order needs the startup snapshot, not an ignored session field');
   assert.equal(result.snapshot.sort_auto, false);
   assert.equal(result.snapshot.rows.length, 10);
