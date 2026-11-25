@@ -63,8 +63,9 @@ jobs:
           git worktree add --detach "$RUNNER_TEMP/base" "$BASE_SHA"
           cp tools/mp-layout-host.test.js tools/mp-sessions-test.py "$RUNNER_TEMP/base/tools/"
           cp tools/check-servers-slots.test.js tools/check-servers-slots.mjs "$RUNNER_TEMP/base/tools/"
-          mkdir -p "$RUNNER_TEMP/base/tools/fixtures/MUBO-294"
+          mkdir -p "$RUNNER_TEMP/base/tools/fixtures/MUBO-294" "$RUNNER_TEMP/base/tools/fixtures/MUBO-558"
           cp tools/fixtures/MUBO-294/servers.json "$RUNNER_TEMP/base/tools/fixtures/MUBO-294/"
+          cp tools/fixtures/MUBO-558/mp-send-without-published-entries.py "$RUNNER_TEMP/base/tools/fixtures/MUBO-558/"
           (cd "$RUNNER_TEMP/base" && node --test --test-reporter=tap tools/mp-layout-host.test.js tools/check-servers-slots.test.js) > "$RUNNER_TEMP/input/layout-base.log" 2>&1
           echo "base_layout=$?" >> "$GITHUB_ENV"
           (cd "$RUNNER_TEMP/base" && python3 tools/mp-sessions-test.py -v) > "$RUNNER_TEMP/input/sessions-base.log" 2>&1

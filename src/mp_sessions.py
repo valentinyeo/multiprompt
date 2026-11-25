@@ -181,6 +181,34 @@ def default_workspace(listing):
     raise ValueError("no workspace is visible; open the desktop app")
 
 
+def published_entries(send):
+    listed = getattr(send, "published_entries", None)
+    if callable(listed):
+        entries = listed()
+        return entries if isinstance(entries, dict) else {}
+    names = getattr(send, "published_names", None)
+    if callable(names):
+        known = names()
+        return {tmux: dict(name=name, workspace=None, group=None, sid=None)
+                for tmux, name in (known if isinstance(known, dict) else {}).items()}
+    read = getattr(send, "read_json", None)
+    root = getattr(send, "state_root", None)
+    known = read(root() / "chat-names.json") if callable(read) and callable(root) else None
+    entries = {}
+    for tmux, entry in (known if isinstance(known, dict) else {}).items():
+        if not isinstance(tmux, str) or not isinstance(entry, dict):
+            continue
+        name = entry.get("name")
+        entries[tmux] = dict(name=name.strip() if isinstance(name, str) and name.strip() else None,
+                             workspace=None, group=None, sid=None)
+    return entries
+
+
+def published_names(send):
+    return {tmux: entry["name"] for tmux, entry in published_entries(send).items()
+            if isinstance(entry, dict) and entry.get("name")}
+
+
 def synced_workspaces(send):
     names = []
     seen = set()
@@ -202,10 +230,8 @@ def synced_workspaces(send):
             add(workspace.get("name") if isinstance(workspace, dict) else None)
         for tab in layout.get("tabs") or []:
             add(tab.get("workspace") if isinstance(tab, dict) else None)
-    published = getattr(send, "published_entries", None)
-    if callable(published):
-        for entry in published().values():
-            add(entry.get("workspace"))
+    for entry in published_entries(send).values():
+        add(entry.get("workspace") if isinstance(entry, dict) else None)
     root = getattr(send, "host_root", None)
     if callable(root):
         for config_path in sorted(root().glob("*.config.json")):
@@ -271,7 +297,8 @@ def enable_args(provider, sid, folder, tmux):
 
 
 def synced_layout_map(send, caller_tmux=None):
-    tabs = send.synced_layout_tabs()
+    synced = getattr(send, "synced_layout_tabs", None)
+    tabs = synced() if callable(synced) else []
     if not tabs:
         return {}, None
     explicit = os.environ.get("MULTIPROMPT_HOST")
@@ -336,7 +363,7 @@ def desktop_state(listing, tab=None, tmux=None, send=None):
 
 
 def session_catalog(send, listing):
-    published = send.published_entries()
+    published = published_entries(send)
     sid_entries = {}
     for entry in published.values():
         entry_sid = entry.get("sid")
@@ -521,7 +548,7 @@ def caller_mark(send, listing, rows):
                 workspace = row.get("workspace")
                 break
     if not workspace:
-        pub = send.published_entries().get(tmux)
+        pub = published_entries(send).get(tmux)
         if pub:
             workspace = pub.get("workspace")
     if not workspace:
@@ -571,7 +598,8 @@ def session_message(send, target, text, sender=None):
         except ValueError:
             label = None
     body = text if label is None else ("From " + label + ": " + text)
-    existing = send.recent_same_agent_message(reader, provider, sid, body)
+    dedupe = getattr(send, "recent_same_agent_message", None)
+    existing = dedupe(reader, provider, sid, body) if callable(dedupe) else None
     if existing is not None:
         return dict(name=target.get("name"), tmux=tmux, sid=sid, id=existing.get("id"), state=existing.get("state"))
     send.check_rate(reader, provider, sid, label)
@@ -637,7 +665,7 @@ def cmd_whoami(args):
     tabs = [tab for workspace, group, tab in send.iter_tabs(listing) if tab.get("tmux") == tmux] if listing.get("ok") is True else []
     if len(tabs) > 1:
         raise ValueError("this chat has no unique named tab on the desktop")
-    name = (tabs[0].get("title") if tabs else None) or send.published_names().get(tmux) or tmux
+    name = (tabs[0].get("title") if tabs else None) or published_names(send).get(tmux) or tmux
     provider = os.environ.get("MULTIBOT_PROVIDER")
     sid = os.environ.get("MULTIBOT_SID")
     root = send.host_root()
