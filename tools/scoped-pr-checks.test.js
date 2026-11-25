@@ -102,6 +102,11 @@ test('formal delivery PR checks stay bounded, source-filtered and Linux-only', (
   assert.match(formal, /check\.py --self-test --inherit-from/);
   assert.doesNotMatch(workflow, /windows-latest|uses: .*verify\.yml/);
   assert.match(workflow.split('\n  comment-review:\n')[1], /if: github.event_name == 'workflow_dispatch'/);
+  const review = workflow.split('\n  comment-review:\n')[1];
+  assert.match(review, /uses: valentinyeo\/token-ladder\/\.github\/actions\/ladder-agent@[0-9a-f]{40}\n/, 'the comment review runs through the token ladder');
+  assert.match(review, /python3 token-ladder\/ci\/model_families\.py/, 'the excluded family is read from the pull request body');
+  assert.match(review, /exclude-families: \$\{\{ steps\.author\.outputs\.families \}\}/, 'the comment review excludes the author model family');
+  assert.doesNotMatch(workflow, /claude-code-action|CLAUDE_CODE_OAUTH_TOKEN/, 'the comment review keeps no direct AI tool');
 });
 
 test('PR performance probes are nightly and do not block the cheap aggregate', () => {
