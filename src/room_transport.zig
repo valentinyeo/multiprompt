@@ -118,9 +118,8 @@ fn run(job: *Job) void {
         !console.appendWideAscii(&cmd, &pos, job.route.hostname[0..job.route.hostname_len]) or
         !console.appendWideAscii(&cmd, &pos, " ") or
         !console.appendWideAscii(&cmd, &pos, switch (job.route.slot) { 0 => app_state.SSH_TARGET_DE, 1 => app_state.SSH_TARGET_UK, else => app_state.SSH_TARGET_INNE }) or
-        !console.appendWideAscii(&cmd, &pos, " python3 -u -c \"") or
-        !console.appendWideAscii(&cmd, &pos, bootstrap) or
-        !console.appendWideAscii(&cmd, &pos, "\"")) return;
+        !console.appendWideAscii(&cmd, &pos, " ") or
+        !console.appendRemotePythonScript(&cmd, &pos, bootstrap)) return;
     cmd[pos] = 0;
     var attributes = w.SECURITY_ATTRIBUTES{ .nLength = @sizeOf(w.SECURITY_ATTRIBUTES), .lpSecurityDescriptor = null, .bInheritHandle = 1 };
     var child_input: w.HANDLE = null;

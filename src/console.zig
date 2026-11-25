@@ -1662,13 +1662,11 @@ pub fn appendWideAscii(buf: []u16, pos: *usize, text: []const u8) bool {
     return true;
 }
 
-fn appendWideRemoteShellSingleQuoted(buf: []u16, pos: *usize, value: []const u8) bool {
-    if (!appendWideAscii(buf, pos, "'")) return false;
-    for (value) |c| {
+pub fn appendRemotePythonScript(buf: []u16, pos: *usize, script: []const u8) bool {
+    if (!appendWideAscii(buf, pos, "python3 -u -c '")) return false;
+    for (script) |c| {
         if (c == '\'') {
             if (!appendWideAscii(buf, pos, "'\\''")) return false;
-        } else if (c == '"') {
-            if (!appendWideAscii(buf, pos, "\\\"")) return false;
         } else {
             if (pos.* >= buf.len - 1) return false;
             buf[pos.*] = @intCast(c);
@@ -1676,6 +1674,20 @@ fn appendWideRemoteShellSingleQuoted(buf: []u16, pos: *usize, value: []const u8)
         }
     }
     return appendWideAscii(buf, pos, "'");
+}
+
+test "room and chat python bootstraps use the same single-quoted command line" {
+    var want: [256]u16 = undefined;
+    var chat: [256]u16 = undefined;
+    var chat_pos: usize = 0;
+    try std.testing.expect(appendRemotePythonScript(&chat, &chat_pos, "import base64,sys;exec(x())"));
+    const chat_len = try std.unicode.utf8ToUtf16Le(&want, "python3 -u -c 'import base64,sys;exec(x())'");
+    try std.testing.expectEqualSlices(u16, want[0..chat_len], chat[0..chat_pos]);
+    var room: [256]u16 = undefined;
+    var room_pos: usize = 0;
+    try std.testing.expect(appendRemotePythonScript(&room, &room_pos, "b=types.ModuleType('room_bridge')"));
+    const room_len = try std.unicode.utf8ToUtf16Le(&want, "python3 -u -c 'b=types.ModuleType('\\''room_bridge'\\'')'");
+    try std.testing.expectEqualSlices(u16, want[0..room_len], room[0..room_pos]);
 }
 
 fn appendWideDecimal(buf: []u16, pos: *usize, value: u32) bool {

@@ -140,3 +140,56 @@ test('room picker inserts the shown name and does not offer a stub restart', () 
   run(`${fixture}\n${declaration(source, 'fn chooseMention(')}\n${declaration(source, 'fn mentionStart(')}`);
   assert.doesNotMatch(source, /text\(dc, L\("Restart"\)/);
 });
+
+test('the room bridge builds its python command line the way the chat path does', () => {
+  const consoleSource = read('console.zig');
+  const room = read('room_transport.zig');
+  const chat = read('chat_transport.zig');
+  assert.doesNotMatch(room, /python3 -u -c \\"/, 'the room bridge must not double-quote its bootstrap');
+  assert.match(room, /appendRemotePythonScript\(&cmd, &pos, bootstrap\)/, 'the room bridge must use the shared single-quoted bootstrap');
+  assert.match(chat, /appendRemotePythonScript\(/, 'the chat path must use the shared single-quoted bootstrap');
+  run(`
+const std = @import("std");
+${declaration(consoleSource, 'pub fn appendWideAscii(')}
+${declaration(consoleSource, 'pub fn appendRemotePythonScript(')}
+test "room and chat bootstraps quote identically" {
+    var want: [256]u16 = undefined;
+    var chat: [256]u16 = undefined;
+    var chat_pos: usize = 0;
+    try std.testing.expect(appendRemotePythonScript(&chat, &chat_pos, "import base64,sys;exec(x())"));
+    const chat_len = try std.unicode.utf8ToUtf16Le(&want, "python3 -u -c 'import base64,sys;exec(x())'");
+    try std.testing.expectEqualSlices(u16, want[0..chat_len], chat[0..chat_pos]);
+    var room: [256]u16 = undefined;
+    var room_pos: usize = 0;
+    try std.testing.expect(appendRemotePythonScript(&room, &room_pos, "b=types.ModuleType('room_bridge')"));
+    const room_len = try std.unicode.utf8ToUtf16Le(&want, "python3 -u -c 'b=types.ModuleType('\\\\''room_bridge'\\\\'')'");
+    try std.testing.expectEqualSlices(u16, want[0..room_len], room[0..room_pos]);
+}
+`);
+});
+
+test('a room host that never answers says it could not start and offers a retry', () => {
+  const rooms = read('rooms.zig');
+  const frontend = read('room_frontend.zig');
+  const view = read('room_view.zig');
+  assert.match(rooms, /host_start/, 'a host that dies before its first reply needs its own reason');
+  assert.match(frontend, /failure\.reason == \.host_start\) "The room host could not start/, 'the room host start failure needs its own sentence');
+  assert.doesNotMatch(frontend, /\.host_start\) "[^"]*check its connection/i, 'a start failure must not blame the connection');
+  assert.match(frontend, /view\.showHostStartError\(message\)/, 'a start failure must reach the retry label');
+  assert.match(view, /Retry · \{d\}/, 'the create dialog offers Retry after a start failure');
+  const markers = rooms.slice(rooms.indexOf('const ssh_transport_errors'), rooms.indexOf('pub fn sshTransportError'));
+  run(`
+const std = @import("std");
+const FailureReason = enum { transport, timeout, cancelled, parse, remote, host_start };
+${markers}
+${declaration(rooms, 'pub fn sshTransportError(')}
+${declaration(rooms, 'pub fn failedReason(')}
+test "a host that dies before its first reply is not reported as a connection problem" {
+    try std.testing.expectEqual(FailureReason.host_start, failedReason(false, false, 0, "bash: -c: line 1: syntax error: unexpected end of file"));
+    try std.testing.expectEqual(FailureReason.transport, failedReason(false, false, 0, "ssh: connect to host example.test port 22: Connection refused"));
+    try std.testing.expectEqual(FailureReason.transport, failedReason(false, false, 9, "partial"));
+    try std.testing.expectEqual(FailureReason.timeout, failedReason(true, false, 0, ""));
+    try std.testing.expectEqual(FailureReason.cancelled, failedReason(false, true, 0, ""));
+}
+`);
+});

@@ -202,7 +202,8 @@ fn bootHost(host: *Host, index: u8) bool {
     if (!console.appendSshExe(&cmd, &pos) or
         !console.appendWideAscii(&cmd, &pos, "-T -o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=5 -o ServerAliveCountMax=2 ") or
         !console.appendWideAscii(&cmd, &pos, console.tmuxSshTarget(index)) or
-        !console.appendWideAscii(&cmd, &pos, " python3 -u -c 'import base64,sys;exec(base64.b64decode(sys.stdin.buffer.readline()))'")) return false;
+        !console.appendWideAscii(&cmd, &pos, " ") or
+        !console.appendRemotePythonScript(&cmd, &pos, "import base64,sys;exec(base64.b64decode(sys.stdin.buffer.readline()))")) return false;
     cmd[pos] = 0;
     var sa = w.SECURITY_ATTRIBUTES{ .nLength = @sizeOf(w.SECURITY_ATTRIBUTES), .lpSecurityDescriptor = null, .bInheritHandle = 1 };
     var child_input: w.HANDLE = null;
