@@ -6,13 +6,41 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
 export const OFFICIAL_BASE = 'https://ziglang.org/download';
+export const MIRRORS_URL = 'https://ziglang.org/download/community-mirrors.txt';
+export const FALLBACK_MIRRORS = ['https://zig.linus.dev/zig', 'https://pkg.machengine.org/zig', 'https://zig.squirl.dev'];
 
 export function archiveName(version, target) {
   return `zig-${target}-${version}.${target.includes('windows') ? 'zip' : 'tar.xz'}`;
 }
 
-export function sourceList({ extra = [] } = {}) {
-  return [...new Set([OFFICIAL_BASE, ...extra])];
+export function parseMirrors(text) {
+  return String(text)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => /^https?:\/\//.test(line));
+}
+
+export function sourceList({ mirrorsText = '', extra = [] } = {}) {
+  const bases = [OFFICIAL_BASE, ...parseMirrors(mirrorsText), ...FALLBACK_MIRRORS, ...extra];
+  const seen = new Set();
+  const list = [];
+  for (const base of bases) {
+    const trimmed = base.trim().replace(/\/+$/, '');
+    if (!/^https?:\/\//.test(trimmed) || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    list.push(trimmed);
+  }
+  return list;
+}
+
+export async function readMirrors({ mirrorsUrl = MIRRORS_URL, limitMs = 15000 } = {}) {
+  try {
+    const response = await fetch(mirrorsUrl, { signal: AbortSignal.timeout(limitMs), redirect: 'follow' });
+    if (!response.ok) return [];
+    return parseMirrors(await response.text());
+  } catch {
+    return [];
+  }
 }
 
 export function digest(file) {
@@ -60,24 +88,32 @@ export async function download({
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   const partial = `${dest}.part`;
   const deadline = Date.now() + budgetMs;
-  const timeMs = Math.min(perSourceMs, deadline - Date.now());
-  const source = sources[0];
-  const url = `${source}/${version}/${file}`;
-  try {
-    const bytes = await transfer(url, partial, { timeMs, stallMs });
-    const got = digest(partial);
-    if (got !== sha256) throw new Error(`checksum ${got} does not match ${sha256}`);
-    fs.renameSync(partial, dest);
-    log(`Downloaded ${file} (${bytes} bytes) from ${source}`);
-    return { source, file, bytes };
-  } catch (error) {
-    fs.rmSync(partial, { force: true });
-    throw new Error(`No source delivered ${file}: ${source}: ${error.message}`);
+  const tried = [];
+  for (const source of sources) {
+    const timeMs = Math.min(perSourceMs, deadline - Date.now());
+    if (timeMs <= 0) {
+      tried.push(`${source}: no time left in the ${budgetMs}ms budget`);
+      break;
+    }
+    const url = `${source}/${version}/${file}`;
+    try {
+      const bytes = await transfer(url, partial, { timeMs, stallMs });
+      const got = digest(partial);
+      if (got !== sha256) throw new Error(`checksum ${got} does not match ${sha256}`);
+      fs.renameSync(partial, dest);
+      log(`Downloaded ${file} (${bytes} bytes) from ${source}`);
+      return { source, file, bytes };
+    } catch (error) {
+      fs.rmSync(partial, { force: true });
+      log(`Source ${source} did not deliver ${file}: ${error.message}`);
+      tried.push(`${source}: ${error.message}`);
+    }
   }
+  throw new Error(`No source delivered ${file}: ${tried.join('; ')}`);
 }
 
 function usage() {
-  return 'usage: node tools/zig-download.mjs --version 0.16.0 --target x86_64-linux --sha256 <hex> --dest <file> [--source <base>]... [--budget-seconds 240] [--per-source-seconds 90]';
+  return 'usage: node tools/zig-download.mjs --version 0.16.0 --target x86_64-linux --sha256 <hex> --dest <file> [--source <base>]... [--budget-seconds 240] [--per-source-seconds 90] [--mirrors-url <url>] [--no-mirrors]';
 }
 
 async function main() {
@@ -90,6 +126,8 @@ async function main() {
       source: { type: 'string', multiple: true },
       'budget-seconds': { type: 'string' },
       'per-source-seconds': { type: 'string' },
+      'mirrors-url': { type: 'string' },
+      'no-mirrors': { type: 'boolean' },
     },
   });
   for (const required of ['version', 'target', 'sha256', 'dest']) {
@@ -99,7 +137,8 @@ async function main() {
       return;
     }
   }
-  const configured = sourceList({ extra: values.source || [] });
+  const published = values['no-mirrors'] ? [] : await readMirrors({ mirrorsUrl: values['mirrors-url'] || MIRRORS_URL });
+  const configured = sourceList({ mirrorsText: published.join('\n'), extra: values.source || [] });
   const budgetMs = Number(values['budget-seconds'] || 240) * 1000;
   const perSourceMs = Number(values['per-source-seconds'] || 90) * 1000;
   try {

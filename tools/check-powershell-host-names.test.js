@@ -107,14 +107,15 @@ test('PR job preserves existing guards and independently runs each new test and 
     'node --test tools/check-routing-ids.test.js', 'node tools/check-routing-ids.mjs',
     'node --test tools/check-regression-inputs.test.js', 'node tools/check-regression-inputs.mjs origin/${{ github.base_ref }}',
     'node --test tools/check-runtime-generation.test.js', 'node tools/check-runtime-generation.mjs "${BASE}" HEAD',
-    'node --test tools/check-powershell-host-names.test.js', './tools/check-powershell-host-names.ps1 -Root .'
+    'node --test tools/check-powershell-host-names.test.js', './tools/check-powershell-host-names.ps1 -Root .',
+    'node --test tools/zig-download.test.js'
   ];
   assert.equal(steps.length, commands.length);
   for (const [i, step] of steps.entries()) {
     assert.ok(step.includes(`run: ${commands[i]}`), step);
     if (i === 3) assert.ok(step.includes("if: (success() || failure()) && github.event_name == 'pull_request'"));
     else assert.ok(step.includes('if: success() || failure()'));
-    if (i >= 6) assert.ok(step.includes('shell: pwsh'));
+    if (i >= 6 && i <= 7) assert.ok(step.includes('shell: pwsh'));
   }
 });
 

@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.error
 import urllib.request
 
 from native import function, tables
@@ -17,20 +18,36 @@ HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 RULES = ("SingleVisibleCopy", "NoFalseNotSent", "NoFalseNotSentResume")
 TLC_SHA = "936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88"
+TLC_SOURCES = (
+    "https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar",
+    "https://api.github.com/repos/tlaplus/tlaplus/releases/assets/184694200",
+)
+
+
+def fetch_jar(url, timeout=45):
+    headers = {"Accept": "application/octet-stream"} if "api.github.com" in url else {}
+    with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=timeout) as response:
+        return response.read()
 
 
 def jar():
     path = pathlib.Path(os.environ.get("TLA2TOOLS", pathlib.Path.home() / ".cache/chat-delivery-formal/tla2tools-1.7.4.jar"))
-    if not path.exists():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with urllib.request.urlopen("https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar", timeout=60) as response:
-            content = response.read()
+    if path.exists() and hashlib.sha256(path.read_bytes()).hexdigest() == TLC_SHA:
+        return path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    failures = []
+    for url in TLC_SOURCES:
+        try:
+            content = fetch_jar(url)
+        except (OSError, urllib.error.URLError) as error:
+            failures.append(url + ": " + str(error))
+            continue
         if hashlib.sha256(content).hexdigest() != TLC_SHA:
-            raise ValueError("TLC download checksum mismatch")
+            failures.append(url + ": checksum mismatch")
+            continue
         path.write_bytes(content)
-    if hashlib.sha256(path.read_bytes()).hexdigest() != TLC_SHA:
-        raise ValueError("TLC checksum mismatch")
-    return path
+        return path
+    raise ValueError("TLC download failed: " + "; ".join(failures))
 
 
 def coverage(root):
