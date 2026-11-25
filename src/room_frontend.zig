@@ -823,13 +823,13 @@ fn savePin(key: *const [64]u8, uuid: []const u8) bool {
 }
 
 fn showFailure(failure: rooms.Failure) void {
-    var log: [256]u8 = undefined;
-    diagnostics.syncLog(std.fmt.bufPrint(&log, "[rooms] request failed kind={s} reason={s} code={s}", .{ @tagName(failure.kind), @tagName(failure.reason), failure.code[0..failure.code_len] }) catch "[rooms] request failed");
+    var log: [300]u8 = undefined;
+    const detail = std.mem.trim(u8, failure.detail[0..failure.detail_len], " \t\r\n");
+    diagnostics.syncLog(std.fmt.bufPrint(&log, "[rooms] request failed kind={s} reason={s} code={s} detail={s}", .{ @tagName(failure.kind), @tagName(failure.reason), failure.code[0..failure.code_len], detail[0..@min(detail.len, 160)] }) catch "[rooms] request failed");
     if (!created or front == .hidden) return;
     const code = failure.code[0..failure.code_len];
-    const reason: []const u8 = if (std.mem.eql(u8, code, "runtime_upgrade_required") or std.mem.eql(u8, code, "unsupported_remote_capability")) "The server's room helper is outdated. Reconnect a chat on this server, then try again." else if (std.mem.eql(u8, code, "room_host_upgrade_required")) "This agent is running an old room helper. Restart the affected agent chat, then try again." else if (std.mem.eql(u8, code, "runtime_unavailable")) "The server's chat helper is unavailable. Reconnect a chat on this server, then try again." else if (std.mem.eql(u8, code, "invalid_mentions") or std.mem.eql(u8, code, "ambiguous_mentions")) "Choose a unique member name from the @ picker, then try again." else if (std.mem.eql(u8, code, "host_disabled")) "This agent chat is disabled. Start it before adding it to a room." else if (failure.reason == .host_start) "The room host could not start, so nothing was sent. Retry, or restart a chat on this server." else if (failure.reason == .timeout) "The room host did not respond. Check its connection and try again." else "Could not reach the room host. Check its connection and try again.";
+    const reason: []const u8 = if (std.mem.eql(u8, code, "runtime_upgrade_required") or std.mem.eql(u8, code, "unsupported_remote_capability")) "The server's room helper is outdated. Restart a chat on this server to update it, then try again." else if (std.mem.eql(u8, code, "room_host_upgrade_required")) "This agent is running an old room helper. Restart the affected agent chat, then try again." else if (std.mem.eql(u8, code, "runtime_unavailable")) "The room helper did not run on this server." else if (std.mem.eql(u8, code, "invalid_mentions") or std.mem.eql(u8, code, "ambiguous_mentions")) "Choose a unique member name from the @ picker, then try again." else if (std.mem.eql(u8, code, "host_disabled")) "This agent chat is disabled. Start it before adding it to a room." else if (failure.reason == .host_start) "The room host could not start, so nothing was sent. Retry, or restart a chat on this server." else if (failure.reason == .timeout) "The room host did not respond. Check its connection and try again." else "Could not reach the room host. Check its connection and try again.";
     var buffer: [2048]u8 = undefined;
-    const detail = std.mem.trim(u8, failure.detail[0..failure.detail_len], " \t\r\n");
     const message = if (detail.len > 0) std.fmt.bufPrint(&buffer, "{s} {s}", .{ reason, detail[0..@min(detail.len, 700)] }) catch reason else reason;
     if (failure.reason == .host_start) view.showHostStartError(message) else view.showError(message);
 }
@@ -960,7 +960,7 @@ fn nextStatus(c: *rooms.Controller) bool {
     if (candidate_scan >= discovered_count) return false;
     if (!c.room_features) {
         diagnostics.syncLog("[rooms] members blocked: room_features unavailable");
-        if (created and front == .create) view.showError("The server's room helper is outdated. Reconnect a chat on this server, then try again.");
+        if (created and front == .create) view.showError("The server's room helper is outdated. Restart a chat on this server to update it, then try again.");
         return false;
     }
     status_generation = candidate_generation;
@@ -1916,7 +1916,7 @@ pub fn pollTimer(id: usize) bool {
                 const features = payload.object.get("room_features") orelse .null;
                 c.room_features = features == .array and features.array.items.len == 1 and features.array.items[0] == .integer and features.array.items[0].integer == 1;
                 c.live_send = live.bool;
-                if (!c.live_send and created and front != .hidden) view.showError("The server's room helper is unavailable or outdated. Reconnect a chat on this server, then try again.");
+                if (!c.live_send and created and front != .hidden) view.showError("The room helper did not run on this server. Retry, and restart a chat on this server if it keeps failing.");
                 clearCatalog();
                 if (c.catalog(0, null)) { diagnostics.syncLog("[rooms] catalog request sent"); return true; }
                 scheduleDiscovery(c); controller = null; _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); return true;
@@ -2178,7 +2178,7 @@ fn beginPost(token: room_view.ActionToken, room_id: []const u8, revision: u64, v
     if (!enabled or !created or front != .selected or room_id.len != 36 or revision == 0) return .failed;
     const c = if (controller) |*active| active else return .failed;
     if (!c.live_send or !c.room_features) {
-        view.showError("The server's room helper is unavailable or outdated. Reconnect a chat on this server, then try again.");
+        view.showError("The room helper did not run on this server. Retry, and restart a chat on this server if it keeps failing.");
         return .failed;
     }
     const current = owned_model orelse return .failed;
