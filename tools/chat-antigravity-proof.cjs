@@ -32,7 +32,8 @@ function verify(root) {
   for (const name of ['antigravity-chat-before', 'antigravity-switch-palette', 'antigravity-switched-chat',
     'antigravity-new-session-palette', 'antigravity-new-session', 'antigravity-tab-menu-switch',
     'antigravity-switch-while-replying', 'antigravity-switch-back-claude',
-    'antigravity-fresh-before-reload', 'antigravity-fresh-after-reload']) shot(name);
+    'antigravity-fresh-before-reload', 'antigravity-fresh-after-reload', 'antigravity-fresh-reload-twice',
+    'antigravity-fresh-tab-away', 'antigravity-fresh-tab-returned']) shot(name);
   const config = json('antigravity-config.json');
   assert.equal(config.provider, 'antigravity');
   assert.equal(config.enabled, true);
@@ -59,19 +60,32 @@ function verify(root) {
   assert.equal(fresh.cv, true, 'the new Antigravity row did not open in Chat View');
   assert.match(fresh.tmux_session, /^live-/);
   const freshReload = json('fresh-reload.json');
-  const freshReply = freshReload.reply;
   assert.equal(freshReload.reload, 'Chat View Resync chat');
-  assert.ok(Number.isSafeInteger(freshReload.blocksBefore) && freshReload.blocksBefore >= 2, 'the fresh Antigravity history painted too few blocks before the reload');
+  assert.equal(freshReload.reloads, 2, 'the journey must reload the whole history more than once');
+  assert.equal(freshReload.messages, 3, 'the journey must send three distinct synthetic messages');
+  assert.equal(new Set(freshReload.texts).size, 3);
+  assert.equal(new Set(freshReload.replies).size, 3);
+  assert.equal(freshReload.tabAwayBack, true);
+  const claim = json('fresh-history-claim.json');
+  assert.equal(claim.display_history, true, 'the fresh Antigravity host start never claimed its canonical history');
+  assert.equal(claim.historyExists, true, 'the fresh Antigravity history file does not exist after the host claimed it');
+  assert.match(claim.claimBoundary, /production host loop start/);
+  assert.ok(Number.isSafeInteger(freshReload.blocksBefore) && freshReload.blocksBefore >= 6, 'the fresh Antigravity history painted too few blocks before the reload');
   assert.equal(freshReload.blocksAfter, freshReload.blocksBefore, 'the full reload changed the painted Antigravity row count');
-  const freshCopiedBefore = read('fresh-copied-before.txt');
-  const freshCopiedAfter = read('fresh-copied-after.txt');
-  for (const text of [freshReload.firstMessage, freshReply]) {
-    assert.ok(freshCopiedBefore.includes(text), `the fresh Antigravity copy before the reload lost ${text}`);
-    assert.ok(freshCopiedAfter.includes(text), `the fresh Antigravity copy after the reload lost ${text}`);
+  const stages = [['before', 'before the reload'], ['after', 'after the reload'], ['reload-twice', 'after the repeated reload'], ['tab-away-back', 'after a tab away and back']];
+  const transcripts = stages.map(([stage]) => read(`fresh-copied-${stage}.txt`));
+  const expected = freshReload.texts.flatMap((text, index) => [text, freshReload.replies[index]]);
+  for (const [index, transcript] of transcripts.entries()) {
+    let cursor = 0;
+    for (const kept of expected) {
+      assert.equal(transcript.split(kept).length, 2, `the ${stages[index][1]} Antigravity copy did not hold exactly one ${kept}`);
+      const found = transcript.indexOf(kept, cursor);
+      assert.ok(found >= 0, `the ${stages[index][1]} Antigravity copy is out of order at ${kept}`);
+      cursor = found + kept.length;
+    }
+    assert.equal(transcript.trim(), transcripts[0].trim(), `the ${stages[index][1]} view changed the visible Antigravity transcript`);
   }
-  assert.equal(freshCopiedAfter.split(freshReload.firstMessage).length, 2, 'the reload duplicated the first Antigravity message');
-  assert.equal(freshCopiedAfter.split(freshReply).length, 2, 'the reload duplicated the Antigravity reply');
-  assert.equal(freshCopiedAfter.trim(), freshCopiedBefore.trim(), 'the full reload changed the visible Antigravity transcript');
+  assert.equal(freshReload.sameTranscript, true);
   const doctor = json('doctor.json');
   assert.ok(Number.isSafeInteger(doctor.pid) && doctor.pid > 0, 'doctor identity missing');
   assert.equal(doctor.hwnd > 0, true);
@@ -161,7 +175,7 @@ function verify(root) {
       {
         name: 'fresh-antigravity-reload',
         passed: true,
-        detail: { blocksBefore: freshReload.blocksBefore, blocksAfter: freshReload.blocksAfter, before: 'fresh-copied-before.txt', after: 'fresh-copied-after.txt', reply: freshReply, screenshot: 'antigravity-fresh-after-reload.png' },
+        detail: { messages: freshReload.messages, reloads: freshReload.reloads, blocksBefore: freshReload.blocksBefore, blocksAfter: freshReload.blocksAfter, claim: 'fresh-history-claim.json', before: 'fresh-copied-before.txt', after: 'fresh-copied-after.txt', twice: 'fresh-copied-reload-twice.txt', tabAway: 'fresh-copied-tab-away-back.txt', screenshot: 'antigravity-fresh-tab-returned.png' },
       },
     ],
   };

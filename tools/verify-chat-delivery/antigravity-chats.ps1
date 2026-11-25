@@ -236,68 +236,99 @@ Remove-Item -LiteralPath "$state/stale-reader" -Force -ErrorAction SilentlyConti
 Save @{provider='antigravity'; sid=$freshSid; enabled=$true; firstMessage=$freshText; reply='Antigravity stand-in reply 1.'; config=(Split-Path $freshConfig -Leaf); pinnedRuntime=$pinned.Groups[1].Value} "$caseDir/fresh-antigravity-reply.json"
 Shot 'antigravity-fresh-reply'
 $freshReply = 'Antigravity stand-in reply 1.'
-[Windows.Forms.Clipboard]::Clear()
-Bind-Transcript
-$freshPaintOffset = (Read-Shared $paletteLog).Length
-Press @(0x11, 0x30) 'Ctrl+0: measure the fresh Antigravity history'
-$freshBlocksBefore = Wait-For 'the fresh Antigravity history paints from the reader' {
-    $frames = [regex]::Matches((Read-Shared $paletteLog).Substring($freshPaintOffset), '\[chatfont\] pt=\d+ blocks=(\d+) content_h=\d+')
-    if ($frames.Count -gt 0) {
-        $painted = [int]$frames[$frames.Count - 1].Groups[1].Value
-        if ($painted -gt 0) { $painted }
-    }
-} 20
-if ($freshBlocksBefore -lt 2) { throw 'The fresh Antigravity history painted too few blocks to reload' }
-Palette-Choose 'chat view select all' 6364 'antigravity-fresh-copy-before'
-Press @(0x11, 0x43) 'Ctrl+C: copy the fresh Antigravity history before the reload'
-$freshCopiedBefore = [Windows.Forms.Clipboard]::GetText()
-[IO.File]::WriteAllText("$caseDir/fresh-copied-before.txt", $freshCopiedBefore)
-Press @(0x1B) 'Esc: clear the fresh copy selection before the reload'
-foreach ($kept in @($freshText, $freshReply)) {
-    if (-not $freshCopiedBefore.Contains($kept)) { throw ('The fresh Antigravity copy lost ' + $kept) }
+$freshReply = 'Antigravity stand-in reply 1.'
+$freshSecondText = 'second message in a fresh antigravity chat'
+$freshThirdText = 'third message in a fresh antigravity chat'
+$freshSecondReply = 'Antigravity stand-in reply 3.'
+$freshThirdReply = 'Antigravity stand-in reply 5.'
+$freshTexts = @($freshText, $freshSecondText, $freshThirdText)
+$freshReplies = @($freshReply, $freshSecondReply, $freshThirdReply)
+$freshState = $freshHistory -replace '\.history\.jsonl$', '.state.json'
+if (-not (Test-Path $freshState)) { throw 'The fresh Antigravity host wrote no state file at its start' }
+$freshKept = Get-Content $freshState -Raw | ConvertFrom-Json
+if ($freshKept.display_history -ne $true) { throw 'The fresh Antigravity host start never claimed its canonical history' }
+if ([bool]($freshKept.PSObject.Properties['display_history']) -ne $true) { throw 'The fresh Antigravity state has no display_history field to read' }
+Save @{state=(Split-Path $freshState -Leaf); display_history=$freshKept.display_history; history=(Split-Path $freshHistory -Leaf); historyExists=(Test-Path $freshHistory); claimBoundary='production host loop start; the fixture never writes this flag'} "$caseDir/fresh-history-claim.json"
+function Fresh-Blocks([string]$Stage) {
+    $offset = (Read-Shared $paletteLog).Length
+    Press @(0x11, 0x30) "Ctrl+0: measure the $Stage Antigravity history"
+    Wait-For "the $Stage Antigravity history paints from the reader" {
+        $frames = [regex]::Matches((Read-Shared $paletteLog).Substring($offset), '\[chatfont\] pt=\d+ blocks=(\d+) content_h=\d+')
+        if ($frames.Count -gt 0) {
+            $painted = [int]$frames[$frames.Count - 1].Groups[1].Value
+            if ($painted -gt 0) { $painted }
+        }
+    } 20
 }
+function Fresh-Copied([string]$Stage) {
+    [Windows.Forms.Clipboard]::Clear()
+    Bind-Transcript
+    Palette-Choose 'chat view select all' 6364 ("antigravity-fresh-copy-" + $Stage)
+    Press @(0x11, 0x43) ("Ctrl+C: copy the $Stage Antigravity transcript")
+    [IO.File]::WriteAllText("$caseDir/fresh-copied-$Stage.txt", [Windows.Forms.Clipboard]::GetText())
+    Press @(0x1B) ("Esc: clear the $Stage Antigravity copy selection")
+}
+function Fresh-Text([string]$Stage) {
+    Read-Shared "$caseDir/fresh-copied-$Stage.txt"
+}
+function Fresh-Transcript([string]$Stage, [string]$Text) {
+    $cursor = 0
+    foreach ($kept in $freshTexts + $freshReplies) {
+        if (([regex]::Matches($Text, [regex]::Escape($kept))).Count -ne 1) { throw ('The ' + $Stage + ' Antigravity transcript does not hold exactly one ' + $kept) }
+        $found = $Text.IndexOf($kept, $cursor, [StringComparison]::Ordinal)
+        if ($found -lt 0) { throw ('The ' + $Stage + ' Antigravity transcript is out of order at ' + $kept) }
+        $cursor = $found + $kept.Length
+    }
+}
+function Fresh-Resync([string]$Stage) {
+    $reloadOffset = (Read-Shared $paletteLog).Length
+    Press @(0x11, 0x4B) "Ctrl+K: open the chat menu for the $Stage full reload"
+    [void](Wait-For "chat menu palette ready for the $Stage full reload" { (Read-Shared $paletteLog).Substring($reloadOffset) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
+    $reloadQuery = 'more menu'
+    foreach ($letter in $reloadQuery.ToCharArray()) { [ChatDeliveryDesktop]::Type([uint16][char]::ToUpperInvariant($letter)) }
+    [void](Wait-For "more menu command selected for the $Stage full reload" { (Read-Shared $paletteLog).Substring($reloadOffset) -match ('\[palette\] ready chars=' + $reloadQuery.Length + ' count=1 target=6466') })
+    Press @(0x0D) "Enter: open More Menu for the $Stage full reload"
+    $reloadRect = Wait-For "painted Resync row for the $Stage full reload" {
+        $rows = [regex]::Matches((Read-Shared $paletteLog).Substring($reloadOffset), '\[chat\] menu resync rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)')
+        if ($rows.Count) { $rows[$rows.Count - 1].Groups }
+    }
+    $reloadRoot = [System.Windows.Automation.AutomationElement]::FromHandle($main)
+    $reloadCondition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'MultiPromptMoreMenu')
+    $reloadMenus = @($reloadRoot.FindAll([System.Windows.Automation.TreeScope]::Descendants, $reloadCondition) | Where-Object { -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id })
+    if ($reloadMenus.Count -ne 1) { throw 'Expected one owned visible chat menu for the full reload' }
+    $reloadX = [int](([int]$reloadRect[1].Value + [int]$reloadRect[3].Value) / 2)
+    $reloadY = [int](([int]$reloadRect[2].Value + [int]$reloadRect[4].Value) / 2)
+    Doctor
+    $actions.Add(@{case=$plan.name; ms=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(); input="real mouse click Resync chat $Stage"; x=$reloadX; y=$reloadY})
+    [ChatDeliveryDesktop]::PressClient([IntPtr]$reloadMenus[0].Current.NativeWindowHandle, $app.Id, $reloadX, $reloadY)
+    [void](Wait-For "the $Stage Antigravity source reload completes" { (Read-Shared $paletteLog).Substring($reloadOffset).Contains('[chat] resync completed') } 30)
+}
+Send-Composer $freshSecondText
+[void](Wait-For 'the fresh Antigravity chat showed its second reply' { (Read-Shared $freshHistory).Contains($freshSecondReply) } 60)
+Send-Composer $freshThirdText
+[void](Wait-For 'the fresh Antigravity chat showed its third reply' { (Read-Shared $freshHistory).Contains($freshThirdReply) } 60)
+$freshBlocksBefore = Fresh-Blocks 'sent'
+Fresh-Copied 'before'
+Fresh-Transcript 'sent' (Fresh-Text 'before')
 Shot 'antigravity-fresh-before-reload'
-$reloadOffset = (Read-Shared $paletteLog).Length
-Press @(0x11, 0x4B) 'Ctrl+K: open the chat menu for the full reload'
-[void](Wait-For 'chat menu palette ready for the full reload' { (Read-Shared $paletteLog).Substring($reloadOffset) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
-$reloadQuery = 'more menu'
-foreach ($letter in $reloadQuery.ToCharArray()) { [ChatDeliveryDesktop]::Type([uint16][char]::ToUpperInvariant($letter)) }
-[void](Wait-For 'more menu command selected for the full reload' { (Read-Shared $paletteLog).Substring($reloadOffset) -match ('\[palette\] ready chars=' + $reloadQuery.Length + ' count=1 target=6466') })
-Press @(0x0D) 'Enter: open More Menu for the full reload'
-$reloadRect = Wait-For 'painted Resync row for the full reload' {
-    $rows = [regex]::Matches((Read-Shared $paletteLog).Substring($reloadOffset), '\[chat\] menu resync rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)')
-    if ($rows.Count) { $rows[$rows.Count - 1].Groups }
-}
-$reloadRoot = [System.Windows.Automation.AutomationElement]::FromHandle($main)
-$reloadCondition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'MultiPromptMoreMenu')
-$reloadMenus = @($reloadRoot.FindAll([System.Windows.Automation.TreeScope]::Descendants, $reloadCondition) | Where-Object { -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id })
-if ($reloadMenus.Count -ne 1) { throw 'Expected one owned visible chat menu for the full reload' }
-$reloadX = [int](([int]$reloadRect[1].Value + [int]$reloadRect[3].Value) / 2)
-$reloadY = [int](([int]$reloadRect[2].Value + [int]$reloadRect[4].Value) / 2)
-Doctor
-$actions.Add(@{case=$plan.name; ms=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(); input='real mouse click Resync chat'; x=$reloadX; y=$reloadY})
-[ChatDeliveryDesktop]::PressClient([IntPtr]$reloadMenus[0].Current.NativeWindowHandle, $app.Id, $reloadX, $reloadY)
-[void](Wait-For 'the fresh Antigravity source reload completes' { (Read-Shared $paletteLog).Substring($reloadOffset).Contains('[chat] resync completed') } 30)
-$freshRepaintOffset = (Read-Shared $paletteLog).Length
-Press @(0x11, 0x30) 'Ctrl+0: measure the reloaded Antigravity history'
-$freshBlocksAfter = Wait-For 'the reloaded Antigravity history paints again' {
-    $frames = [regex]::Matches((Read-Shared $paletteLog).Substring($freshRepaintOffset), '\[chatfont\] pt=\d+ blocks=(\d+) content_h=\d+')
-    if ($frames.Count -gt 0) {
-        $painted = [int]$frames[$frames.Count - 1].Groups[1].Value
-        if ($painted -gt 0) { $painted }
-    }
-} 20
-Palette-Choose 'chat view select all' 6364 'antigravity-fresh-copy-after'
-Press @(0x11, 0x43) 'Ctrl+C: copy the fresh Antigravity history after the reload'
-$freshCopiedAfter = [Windows.Forms.Clipboard]::GetText()
-[IO.File]::WriteAllText("$caseDir/fresh-copied-after.txt", $freshCopiedAfter)
-Press @(0x1B) 'Esc: clear the reloaded copy selection'
+Fresh-Resync 'first'
+$freshBlocksAfter = Fresh-Blocks 'reloaded'
+Fresh-Copied 'after'
+Fresh-Transcript 'reloaded' (Fresh-Text 'after')
 if ($freshBlocksAfter -ne $freshBlocksBefore) { throw ('The full reload changed the painted Antigravity row count: ' + $freshBlocksBefore + ' -> ' + $freshBlocksAfter) }
-foreach ($kept in @($freshText, $freshReply)) {
-    if (-not $freshCopiedAfter.Contains($kept)) { throw ('The reloaded Antigravity copy lost ' + $kept) }
-}
-if (([regex]::Matches($freshCopiedAfter, [regex]::Escape($freshText))).Count -ne 1) { throw 'The reloaded Antigravity copy duplicated the first message' }
-if (([regex]::Matches($freshCopiedAfter, [regex]::Escape($freshReply))).Count -ne 1) { throw 'The reloaded Antigravity copy duplicated the reply' }
-if ($freshCopiedAfter.Trim() -cne $freshCopiedBefore.Trim()) { throw 'The full reload changed the visible Antigravity transcript' }
+if ((Fresh-Text 'after').Trim() -cne (Fresh-Text 'before').Trim()) { throw 'The full reload changed the visible Antigravity transcript' }
 Shot 'antigravity-fresh-after-reload'
-Save @{provider='antigravity'; sid=$freshSid; firstMessage=$freshText; reply=$freshReply; reload='Chat View Resync chat'; blocksBefore=$freshBlocksBefore; blocksAfter=$freshBlocksAfter; copiedBefore='fresh-copied-before.txt'; copiedAfter='fresh-copied-after.txt'} "$caseDir/fresh-reload.json"
+Fresh-Resync 'second'
+Fresh-Copied 'reload-twice'
+Fresh-Transcript 'reloaded twice' (Fresh-Text 'reload-twice')
+if ((Fresh-Text 'reload-twice').Trim() -cne (Fresh-Text 'before').Trim()) { throw 'The repeated full reload changed the visible Antigravity transcript' }
+Shot 'antigravity-fresh-reload-twice'
+Press @(0x11, 0x09) 'Ctrl+Tab: leave the fresh Antigravity chat'
+Start-Sleep -Milliseconds 500
+Shot 'antigravity-fresh-tab-away'
+Press @(0x11, 0x09) 'Ctrl+Tab: return to the fresh Antigravity chat'
+Fresh-Copied 'tab-away-back'
+Fresh-Transcript 'tab away and back' (Fresh-Text 'tab-away-back')
+if ((Fresh-Text 'tab-away-back').Trim() -cne (Fresh-Text 'before').Trim()) { throw 'The tab away and back view changed the visible Antigravity transcript' }
+Shot 'antigravity-fresh-tab-returned'
+Save @{provider='antigravity'; sid=$freshSid; messages=$freshTexts.Count; texts=$freshTexts; replies=$freshReplies; reload='Chat View Resync chat'; reloads=2; tabAwayBack=$true; blocksBefore=$freshBlocksBefore; blocksAfter=$freshBlocksAfter; copiedBefore='fresh-copied-before.txt'; copiedAfter='fresh-copied-after.txt'; copiedTwice='fresh-copied-reload-twice.txt'; copiedTabAway='fresh-copied-tab-away-back.txt'; sameTranscript=$true; claim='fresh-history-claim.json'} "$caseDir/fresh-reload.json"
