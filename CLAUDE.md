@@ -53,11 +53,13 @@ Full procedure and toolchain notes: [openwiki/operations/build-and-install.md](o
 | Every installed chat tool is executable, and an install leaves no temporary files behind. | `tools/chat-shared-runtime.test.py` (`test_every_installed_chat_tool_runs`, `test_install_removes_leftover_temporary_files`) |
 | Outages revert the bad change before a repair; the repair follows the normal process. | `auto-revert-master.yml`, `.claude/skills/verify-multiprompt/SKILL.md` |
 | Repair PRs wait only on the journeys their changed files own. | `tools/pr-verifier.cjs`, `tools/pr-verifier-repro.test.js`, `pr-verifier.yml` |
+| Emergency lane: when Valentin cannot reach or see his chats, or cannot work, the fix jumps the merge order, other merges pause, and it waits only on the journeys its files own. | `tools/check-emergency-lane.mjs`, `tools/check-emergency-lane.test.mjs`, `emergency-lane.yml` |
 | A tab's host is the server its chat runs on: recorded at creation, carried on a reopen, never defaulted. | `tools/mp-layout-host.test.js`, `tools/mp-sessions-test.py` |
 | Every servers file the repo ships names a slot per server. | `tools/check-servers-slots.mjs`, `tools/check-servers-slots.test.js` |
 | Keep code comment-free. | `tools/strip-comments.mjs --check` |
 | Cap Zig source files at 6000 lines; existing over-cap files may only shrink. | `tools/check-file-size.mjs`, `tools/file-size-baseline.json`; `--write` lowers limits after splits |
 | Journey evidence uploads run even when a run fails or is cancelled, and no step deletes them before the upload. | `tools/check-journey-evidence.mjs` runs `tools/check-journey-evidence.test.js` in `test.yml` |
+| Install Zig only through the cached, time-limited setup-zig action. | `tools/check-zig-download.mjs` |
 | Do not add Sleep, std.Thread.sleep or SetTimer quick fixes; use events or messages. | `tools/check-timer-ratchet.mjs`; `--write` lowers per-file limits after removals, never raises them |
 | A chat owned by another OS user starts with its own agent binary, retries a missing agent a few times, and never rotates the nightly restart inside an auto-update window. | `tools/chat-host-owner-binary.test.js` |
 | Bump the extension version when shipped extension files change. | `tools/check-extension-version.mjs` |

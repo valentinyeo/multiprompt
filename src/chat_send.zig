@@ -669,7 +669,7 @@ fn deliverMentions(source_idx: u32, message_id: u64, text: []const u16) void {
     const name_n: usize = if (shell.name_len > 0 and shell.name_len <= shell.name.len) (std.unicode.utf16LeToUtf8(&name_buf, shell.name[0..shell.name_len]) catch 0) else 0;
     const source_name: []const u8 = if (name_n > 0) name_buf[0..name_n] else if (source_len > 0) source_session[0..source_len] else "this chat";
     var targets_buf: [16]mention.Delivery = undefined;
-    const found = mention.mentionDeliveries(text, source_session[0..source_len], mention.currentLive(null), &targets_buf);
+    const found = mention.mentionDeliveries(text, source_session[0..source_len], mention.currentLive(), &targets_buf);
     if (found.len == 0) return;
     var plan: [16]struct { index: u32, session: [64]u8, session_len: u8, kind: mention.DeliveryKind } = undefined;
     const count = @min(found.len, plan.len);
@@ -2875,7 +2875,7 @@ fn sendTextToShellVerifiedAt(shell_index: u32, send_text: []const u16, echo_id: 
     var wire_buf: [CHAT_OUTBOX_MSG_CAP + 768]u16 = undefined;
     const sh = &app_state.shells[shell_index];
     const session = sh.tmux_session[0..@min(@as(usize, sh.tmux_session_len), sh.tmux_session.len)];
-    const wire_text = @import("chat_mention.zig").composeWireText(session, @import("chat_mention.zig").currentLive(null), send_text, &wire_buf);
+    const wire_text = @import("chat_mention.zig").composeWireText(session, @import("chat_mention.zig").currentLive(), send_text, &wire_buf);
     if (launch_cache.pending and !launch_cache.tabs_restored) return .write_failed;
     const shell = &app_state.shells[shell_index];
     const identity = chatFileIdentityForShell(shell_index);
