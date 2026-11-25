@@ -73,10 +73,19 @@ pub fn detail(out: []u8, badge: Mark, settings: ?chat_live.Settings) []const u8 
     return std.fmt.bufPrint(out, "{s} · {s} · {s}", .{ name, model, effort }) catch name;
 }
 
+pub const Avatar = struct {
+    right: i32,
+    top: i32,
+    size: i32,
+    circle: bool,
+};
+
 pub const Geometry = struct {
     right: i32,
     top: i32,
     size: i32,
+    radius: i32,
+    clipped: bool,
 
     pub fn left(self: Geometry) i32 {
         return self.right - self.size;
@@ -87,23 +96,66 @@ pub const Geometry = struct {
     }
 };
 
-pub fn geometry(avatar_right: i32, avatar_top: i32, comptime scale: fn (i32) i32) Geometry {
-    const inset = scale(4);
-    return .{ .right = avatar_right - inset, .top = avatar_top + inset, .size = scale(10) };
+pub fn cornerRadius(avatar: Avatar) i32 {
+    return if (avatar.circle) @divTrunc(avatar.size, 2) else @divTrunc(avatar.size * 22 + 50, 100);
+}
+
+pub fn legs(avatar_side: i32) i32 {
+    return @max(6, @divTrunc(avatar_side * 10 + 18, 36));
+}
+
+pub fn geometry(avatar: Avatar) Geometry {
+    const radius = cornerRadius(avatar);
+    const inset = if (avatar.circle) radius - @divTrunc(radius * 707, 1000) else 0;
+    return .{
+        .right = avatar.right - inset,
+        .top = avatar.top + inset,
+        .size = legs(avatar.size),
+        .radius = radius,
+        .clipped = !avatar.circle,
+    };
 }
 
 fn ink(hex: u32) u32 {
     return ((hex >> 16) & 0xFF) | (hex & 0xFF00) | ((hex & 0xFF) << 16);
 }
 
-pub fn draw(hdc: w.HANDLE, g: Geometry, badge: Mark) void {
+pub fn draw(hdc: w.HANDLE, avatar: Avatar, badge: Mark) void {
+    const g = geometry(avatar);
     if (g.size <= 0) return;
-    const points = [_]w.POINT{
-        .{ .x = g.left(), .y = g.top },
-        .{ .x = g.right, .y = g.top },
-        .{ .x = g.right, .y = g.bottom() },
-    };
-    smooth.fillPolygon(hdc, &points, ink(badge.color));
+    const color = ink(badge.color);
+    if (!g.clipped or g.radius <= 0) {
+        const points = [_]w.POINT{
+            .{ .x = g.left(), .y = g.top },
+            .{ .x = g.right, .y = g.top },
+            .{ .x = g.right, .y = g.bottom() },
+        };
+        smooth.fillPolygon(hdc, &points, color);
+        return;
+    }
+    if (g.radius >= g.size) return;
+    var points: [12]w.POINT = undefined;
+    points[0] = .{ .x = g.left(), .y = g.top };
+    points[1] = .{ .x = g.right - g.radius, .y = g.top };
+    var count: usize = 2;
+    const steps: i32 = 3;
+    const cx: f32 = @floatFromInt(g.right - g.radius);
+    const cy: f32 = @floatFromInt(g.top + g.radius);
+    const r: f32 = @floatFromInt(g.radius);
+    var step: i32 = 1;
+    while (step <= steps) : (step += 1) {
+        const angle = -std.math.pi / 2.0 + std.math.pi / 2.0 * @as(f32, @floatFromInt(step)) / @as(f32, @floatFromInt(steps + 1));
+        points[count] = .{
+            .x = @intFromFloat(@round(cx + r * @cos(angle))),
+            .y = @intFromFloat(@round(cy + r * @sin(angle))),
+        };
+        count += 1;
+    }
+    points[count] = .{ .x = g.right, .y = g.top + g.radius };
+    count += 1;
+    points[count] = .{ .x = g.right, .y = g.bottom() };
+    count += 1;
+    smooth.fillPolygon(hdc, points[0..count], color);
 }
 
 test "MUBO-568 each resolved provider draws its own corner and unknown agents draw none" {
@@ -141,28 +193,25 @@ test "MUBO-568 a misleading chat name never chooses the badge" {
     try std.testing.expectEqual(Kind.pi, forShell(&shell).?.kind);
 }
 
-test "MUBO-568 the corner triangle stays inside the avatar top right at every scale" {
-    const hundred = geometry(50, 20, identity);
-    try std.testing.expectEqual(Geometry{ .right = 46, .top = 24, .size = 10 }, hundred);
-    try std.testing.expectEqual(@as(i32, 36), hundred.left());
-    try std.testing.expectEqual(@as(i32, 34), hundred.bottom());
-    try std.testing.expect(hundred.right <= 50 and hundred.top >= 20 and hundred.bottom() <= 56 and hundred.left() > 10);
-    const scaled = geometry(75, 30, scale150);
-    try std.testing.expectEqual(Geometry{ .right = 69, .top = 36, .size = 15 }, scaled);
-    try std.testing.expectEqual(@as(i32, 54), scaled.left());
-    try std.testing.expectEqual(@as(i32, 51), scaled.bottom());
-    try std.testing.expect(scaled.right <= 75 and scaled.top >= 30 and scaled.bottom() <= 84);
+test "MUBO-568 the corner triangle fills and stays inside the avatar at every size" {
+    const list = geometry(.{ .right = 50, .top = 20, .size = 36, .circle = false });
+    try std.testing.expectEqual(Geometry{ .right = 50, .top = 20, .size = 10, .radius = 8, .clipped = true }, list);
+    try std.testing.expectEqual(@as(i32, 40), list.left());
+    try std.testing.expectEqual(@as(i32, 30), list.bottom());
+    try std.testing.expectEqual(list.right, 50);
+    try std.testing.expectEqual(list.top, 20);
+    try std.testing.expectEqual(@as(i32, 16), geometry(.{ .right = 64, .top = 12, .size = 56, .circle = false }).size);
+    try std.testing.expectEqual(@as(i32, 8), geometry(.{ .right = 34, .top = 9, .size = 28, .circle = false }).size);
+    const round = geometry(.{ .right = 75, .top = 0, .size = 54, .circle = true });
+    try std.testing.expectEqual(@as(i32, 27), round.radius);
+    try std.testing.expectEqual(@as(i32, 67), round.right);
+    try std.testing.expectEqual(@as(i32, 8), round.top);
+    try std.testing.expectEqual(@as(i32, 15), round.size);
+    try std.testing.expectEqual(false, round.clipped);
+    try std.testing.expect(round.right - round.size > 50 and round.bottom() <= 52);
 }
 
-fn identity(px: i32) i32 {
-    return px;
-}
-
-fn scale150(px: i32) i32 {
-    return @divTrunc(px * 150, 100);
-}
-
-fn triangleProof(comptime avatar_side: i32, comptime scale: fn (i32) i32, comptime expected: Geometry) !void {
+fn triangleProof(avatar_side: i32, circle: bool) !void {
     const margin: i32 = 4;
     const width: i32 = avatar_side + margin * 2;
     const dc = w.CreateCompatibleDC(null);
@@ -179,53 +228,57 @@ fn triangleProof(comptime avatar_side: i32, comptime scale: fn (i32) i32, compti
     const stride: usize = @intCast(width);
     const background: u32 = 0x00203040;
     @memset(pixels[0..stride * stride], background);
-    const avatar = w.RECT{ .left = margin, .top = margin, .right = margin + avatar_side, .bottom = margin + avatar_side };
+    const avatar = Avatar{ .right = margin + avatar_side, .top = margin, .size = avatar_side, .circle = circle };
+    const g = geometry(avatar);
     const chosen = mark(1).?;
-    const g = geometry(avatar.right, avatar.top, scale);
-    try std.testing.expectEqual(expected, g);
-    draw(dc, g, chosen);
+    draw(dc, avatar, chosen);
     _ = w.GdiFlush();
     const at = struct {
         fn pixel(buf: [*]u32, pitch: usize, x: i32, y: i32) u32 {
             return buf[@as(usize, @intCast(y)) * pitch + @as(usize, @intCast(x))] & 0xFFFFFF;
         }
     }.pixel;
-    const painted = ink(chosen.color) & 0xFFFFFF;
-    try std.testing.expect(g.right <= avatar.right and g.top >= avatar.top and g.bottom() <= avatar.bottom and g.left() > avatar.left);
+    const painted = chosen.color;
+    try std.testing.expect(g.right <= avatar.right and g.top >= avatar.top and g.bottom() <= avatar.top + avatar.size and g.left() >= avatar.right - avatar.size);
     for (0..@intCast(stride)) |row| {
         for (0..@intCast(stride)) |column| {
             const x: i32 = @intCast(column);
             const y: i32 = @intCast(row);
-            if (x < avatar.left or x >= avatar.right or y < avatar.top or y >= avatar.bottom) {
+            if (x < avatar.right - avatar.size or x >= avatar.right or y < avatar.top or y >= avatar.top + avatar.size) {
                 if (at(pixels, stride, x, y) != background) std.debug.print("spill at {d},{d}\n", .{ x, y });
                 try std.testing.expectEqual(background, at(pixels, stride, x, y));
             }
         }
     }
-    try std.testing.expectEqual(painted, at(pixels, stride, g.right - 1, g.top + 1));
-    try std.testing.expectEqual(painted, at(pixels, stride, g.right - 1, g.bottom() - 1));
-    try std.testing.expectEqual(painted, at(pixels, stride, g.left() + 1, g.top + 1));
+    try std.testing.expectEqual(painted, at(pixels, stride, g.left() + @divTrunc(g.size * 2, 3), g.top + @divTrunc(g.size, 4)));
     try std.testing.expectEqual(background, at(pixels, stride, g.left() + 1, g.bottom() - 1));
+    if (circle) {
+        try std.testing.expectEqual(painted, at(pixels, stride, g.right - 2, g.top));
+    } else {
+        try std.testing.expectEqual(background, at(pixels, stride, g.right - 1, g.top));
+    }
     var glyph: usize = 0;
     var covered: usize = 0;
     for (0..@intCast(g.size)) |row| {
         for (0..@intCast(g.size)) |column| {
             const value = at(pixels, stride, g.left() + @as(i32, @intCast(column)), g.top + @as(i32, @intCast(row)));
             if (value == painted) covered += 1;
-            const red = value & 0xFF;
+            const red = (value >> 16) & 0xFF;
             const green = (value >> 8) & 0xFF;
-            const blue = (value >> 16) & 0xFF;
+            const blue = value & 0xFF;
             if (red >= 225 and green >= 225 and blue >= 225) glyph += 1;
         }
     }
     try std.testing.expectEqual(@as(usize, 0), glyph);
     const box: usize = @intCast(g.size * g.size);
-    try std.testing.expect(covered * 100 >= box * 25 and covered * 100 <= box * 65);
+    try std.testing.expect(covered * 100 >= box * 15 and covered * 100 <= box * 65);
 }
 
-test "MUBO-568 the solid triangle sits inside the avatar corner at 100 and 150 percent" {
-    try triangleProof(40, identity, .{ .right = 40, .top = 8, .size = 10 });
-    try triangleProof(60, scale150, .{ .right = 58, .top = 10, .size = 15 });
+test "MUBO-568 the solid triangle fills the avatar corner at 100, 150 and pinned sizes" {
+    try triangleProof(36, false);
+    try triangleProof(54, false);
+    try triangleProof(56, false);
+    try triangleProof(36, true);
 }
 
 test "MUBO-568 hover names the model and effort only when the chat reports them" {

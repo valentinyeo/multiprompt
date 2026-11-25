@@ -1970,10 +1970,10 @@ pub fn invalidateDraftMarker(shell_idx: u32) void {
     }
 }
 
-fn drawProviderBadge(hdc: HANDLE, avatar_rect: RECT, agent: u8) void {
+fn drawProviderBadge(hdc: HANDLE, avatar_rect: RECT, agent: u8, circle: bool) void {
     const badge = @import("provider_badge.zig");
     const mark = badge.mark(agent) orelse return;
-    badge.draw(hdc, badge.geometry(avatar_rect.right, avatar_rect.top, uiScaled), mark);
+    badge.draw(hdc, .{ .right = avatar_rect.right, .top = avatar_rect.top, .size = avatar_rect.right - avatar_rect.left, .circle = circle }, mark);
 }
 
 fn drawRobotMarker(hdc: HANDLE, rect: RECT, marker: @import("star_badge_geometry.zig").Marker, background: DWORD) void {
@@ -2014,8 +2014,9 @@ fn paintChatSidebarRow(hdc: HANDLE, column: RECT, y: i32, index: u32, avatar_rec
         debugLog(std.fmt.bufPrint(&log, "[photo-proof] expanded target={d} rect={d},{d},{d},{d}", .{ index, avatar_rect.left, avatar_rect.top, avatar_rect.right, avatar_rect.bottom }) catch "[photo-proof] unavailable");
         debugLog(std.fmt.bufPrint(&log, "[sidebar-avatar] target={d} face={d} color={d}", .{ index, appearance.face, appearance.color }) catch "[sidebar-avatar] unavailable");
     }
-    if (!@import("bot_photo.zig").draw(shell, hdc, avatar_rect)) avatar.draw(hdc, avatar_rect, appearance);
-    drawProviderBadge(hdc, avatar_rect, shell.ai_agent);
+    const photo = @import("bot_photo.zig").draw(shell, hdc, avatar_rect);
+    if (!photo) avatar.draw(hdc, avatar_rect, appearance);
+    drawProviderBadge(hdc, avatar_rect, shell.ai_agent, photo);
     if (@import("star_badge_geometry.zig").marker(shell.disconnected, shell.needs_attention, shell.favorite, app_state.g_starred_workspace)) |marker| {
         const background = if (index == app_state.active_shell and !@import("room_frontend.zig").isActive()) selectedSessionBackground() else themeSidebarBg();
         drawRobotMarker(hdc, avatar_rect, marker, background);
@@ -2069,8 +2070,9 @@ fn paintPinnedBot(hdc: HANDLE, row: Row, y: i32) void {
         var log: [120]u8 = undefined;
         debugLog(std.fmt.bufPrint(&log, "[photo-proof] pinned target={d} rect={d},{d},{d},{d}", .{ row.shell_idx, avatar_rect.left, avatar_rect.top, avatar_rect.right, avatar_rect.bottom }) catch "[photo-proof] unavailable");
     }
-    if (!@import("bot_photo.zig").draw(shell, hdc, avatar_rect)) avatar.draw(hdc, avatar_rect, avatar.forShell(shell));
-    drawProviderBadge(hdc, avatar_rect, shell.ai_agent);
+    const photo = @import("bot_photo.zig").draw(shell, hdc, avatar_rect);
+    if (!photo) avatar.draw(hdc, avatar_rect, avatar.forShell(shell));
+    drawProviderBadge(hdc, avatar_rect, shell.ai_agent, photo);
     if (@import("star_badge_geometry.zig").marker(shell.disconnected, shell.needs_attention, shell.favorite, app_state.g_starred_workspace)) |marker| {
         const background = if (row.shell_idx == app_state.active_shell and !@import("room_frontend.zig").isActive()) (if (app_state.g_light_theme) RGB(214, 214, 214) else RGB(58, 58, 58)) else if (shell.selected and !@import("room_frontend.zig").isActive()) RGB(53, 53, 53) else themeSidebarBg();
         drawRobotMarker(hdc, avatar_rect, marker, background);
@@ -2375,7 +2377,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     var draft_rc = RECT{ .left = 0, .top = y + tabRowH() - uiScaled(14), .right = sw, .bottom = y + tabRowH() };
                     _ = DrawTextW(hdc, L("DRAFT"), -1, &draft_rc, DT_SINGLELINE | DT_CENTER | DT_NOPREFIX);
                 }
-                drawProviderBadge(hdc, avatar_rect, app_state.shells[i].ai_agent);
+                drawProviderBadge(hdc, avatar_rect, app_state.shells[i].ai_agent, photo_drawn);
                 if (@import("star_badge_geometry.zig").marker(app_state.shells[i].disconnected, app_state.shells[i].needs_attention, app_state.shells[i].favorite, app_state.g_starred_workspace)) |marker| {
                     const background = if (i == app_state.active_shell and !@import("room_frontend.zig").isActive()) themeConsoleBg() else themeSidebarBg();
                     drawRobotMarker(hdc, avatar_rect, marker, background);

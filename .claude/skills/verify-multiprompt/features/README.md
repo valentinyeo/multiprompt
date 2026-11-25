@@ -26,7 +26,6 @@ Part B (`w-2567b`, SOFT-2567) merged as the runner-hosted real SSH/tmux `server-
 Start with one feature, then pick a named journey. The area files keep the reference's four-section contract. Their operation recipes name user inputs, observable proof and exact missing prerequisites. The shortcut crosswalk includes every source row; the owning area files include palette actions and dynamic row families.
 
 - [Sidebar sessions](sidebar-sessions.md).
-- [Provider badges](provider-badges.md).
 - [Chat view and composer](chat-and-composer.md).
 - [Command palette](palette.md).
 - [Browser pane](browser-pane.md).
@@ -88,6 +87,8 @@ A passing selected journey does not cover all listed entry points or every sub-f
 
 - [Account servers](../diagnostics/account-hosts.md): deterministic Test-workflow Worker and production desktop-sync regression; the offline desktop harness has no account-service stub.
 - [Device approval](../diagnostics/device-approval.md): deterministic production prompt and key-rollout checks; live desktop and phone screenshots remain separate acceptance proof.
+
+- [Provider badges](../diagnostics/provider-badges.md): native Windows corner-triangle pixels at 96 and 144 DPI, both old designs rejected, run nightly and through the manual repeat runner; a live Switch AI screenshot remains separate acceptance proof.
 
 - [Chat sync audit](../diagnostics/chat-sync-audit.md): a dedicated `feature=chat-sync-audit` job runs the real audit renderer and synthetic diagnostic fixtures on GitHub Linux. This is not a desktop journey and makes no UI or live-session claim.
 

@@ -60,9 +60,8 @@ function Shot([string]$Name) {
     try { $graphics.CopyFromScreen($bounds.Location, [Drawing.Point]::Empty, $bounds.Size); $bitmap.Save("$Evidence/$Name.png") } finally { $graphics.Dispose(); $bitmap.Dispose() }
 }
 function Badge($Row) {
-    $inset = [int][Math]::Floor(4 * $Dpi / 96)
-    $side = [int][Math]::Floor(10 * $Dpi / 96)
-    @{ side=$side; inset=$inset; left=($Row.right - $inset - $side); top=($Row.y + $inset) }
+    $side = [int][Math]::Max(6, [int][Math]::Floor(($Row.size * 10 + 18) / 36))
+    @{ side=$side; inset=0; left=($Row.right - $side); top=$Row.y }
 }
 function Capture([int]$x, [int]$y, [int]$w, [int]$h) {
     $origin = [ChatDeliveryDesktop]::ScreenPoint($main, $x, $y)
@@ -89,15 +88,10 @@ function Check-Badge($Row, [string]$Hex, [string]$Name) {
                 if ($p.R -ge 225 -and $p.G -ge 225 -and $p.B -ge 225) { $glyph++ }
             }
         }
-        $topEdge = 0; $rightEdge = 0
-        for ($i = 1; $i -lt $b.side; $i++) {
-            if (Near $bitmap.GetPixel($i, 1) $rgb[0] $rgb[1] $rgb[2] 26) { $topEdge++ }
-            if (Near $bitmap.GetPixel(($b.side - 1), $i) $rgb[0] $rgb[1] $rgb[2] 26) { $rightEdge++ }
-        }
-        if ($match -lt $area * .30) { throw "Provider colour absent: $Name match=$match area=$area" }
+        if ($match -lt $area * .20) { throw "Provider colour absent: $Name match=$match area=$area" }
         if ($match -gt $area * .65) { throw "The badge fills its box instead of a triangle: $Name match=$match area=$area" }
-        if ($topEdge -lt $b.side - 3) { throw "The badge is not a triangle along the top edge: $Name top=$topEdge side=$($b.side)" }
-        if ($rightEdge -lt $b.side - 3) { throw "The badge is not a triangle down the right edge: $Name right=$rightEdge side=$($b.side)" }
+        if (-not (Near $bitmap.GetPixel([int][Math]::Floor($b.side * 2 / 3), [int][Math]::Floor($b.side / 4)) $rgb[0] $rgb[1] $rgb[2] 26)) { throw "The triangle body is missing its provider colour: $Name" }
+        if (Near $bitmap.GetPixel(($b.side - 1), 0) $rgb[0] $rgb[1] $rgb[2] 26) { throw "The badge paints over the rounded avatar corner: $Name" }
         if (Near $bitmap.GetPixel(0, ($b.side - 1)) $rgb[0] $rgb[1] $rgb[2] 26) { throw "The badge is round or square, not a triangle: $Name" }
         if ($glyph -ne 0) { throw "A drawn glyph appeared in the badge: $Name glyph=$glyph" }
         $spill = 0
@@ -123,7 +117,7 @@ function Check-Badge($Row, [string]$Hex, [string]$Name) {
         }
         if ($overlap -ne 0) { throw "The badge covers another avatar corner: $Name overlap=$overlap" }
         $bitmap.Save("$Evidence/badge-$Name.png")
-        $checks.Add(@{name="badge-$Name"; passed=$true; size=$Row.size; match=$match; area=$area; topEdge=$topEdge; rightEdge=$rightEdge})
+        $checks.Add(@{name="badge-$Name"; passed=$true; size=$Row.size; match=$match; area=$area; side=$b.side; inset=$b.inset})
     } finally { $bitmap.Dispose() }
 }
 function Check-NoBadge($Row, [string]$Name) {
@@ -217,7 +211,9 @@ try {
         $row = @($expanded | Where-Object { $_.index -eq $i })[0]
         if ($providers[$i].agent -eq 0) { Check-NoBadge $row "expanded-$i" } else { Check-Badge $row $providers[$i].hex "expanded-$i" }
     }
-    Save @{ requestedDpi=$Dpi; pinSize=[int][Math]::Floor(56 * $Dpi / 96); listSize=[int][Math]::Floor(36 * $Dpi / 96); triangleSide=[int][Math]::Floor(10 * $Dpi / 96); triangleInset=[int][Math]::Floor(4 * $Dpi / 96) } "$Evidence/display.json"
+    $listRow = @($expanded | Where-Object { $_.index -eq 2 })[0]
+    $pinRow = @($expanded | Where-Object { $_.index -eq 0 })[0]
+    Save @{ requestedDpi=$Dpi; pinSize=$pinRow.size; listSize=$listRow.size; triangle=@(@{size='list'; side=(Badge $listRow).side; inset=0}, @{size='pinned'; side=(Badge $pinRow).side; inset=0}); roundedCorner=[int][Math]::Floor($listRow.size * 22 / 100 + 0.5) } "$Evidence/display.json"
     Shot "sidebar-badges-$Dpi"
     $favourite = @($expanded | Where-Object { $_.index -eq 0 })[0]
     $marker = Capture ($favourite.right - [int][Math]::Floor(4 * $Dpi / 96) - 3) ($favourite.bottom - [int][Math]::Floor(4 * $Dpi / 96) - 3) 6 6

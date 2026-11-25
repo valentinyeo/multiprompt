@@ -80,10 +80,19 @@ pub fn detail(out: []u8, badge: Mark, settings: ?chat_live.Settings) []const u8 
     return std.fmt.bufPrint(out, "{s} · {s} · {s}", .{ name, model, effort }) catch name;
 }
 
+pub const Avatar = struct {
+    right: i32,
+    top: i32,
+    size: i32,
+    circle: bool,
+};
+
 pub const Geometry = struct {
     right: i32,
     top: i32,
     size: i32,
+    radius: i32,
+    clipped: bool,
 
     pub fn left(self: Geometry) i32 {
         return self.right - self.size;
@@ -94,16 +103,16 @@ pub const Geometry = struct {
     }
 };
 
-pub fn geometry(avatar_right: i32, avatar_top: i32, comptime scale: fn (i32) i32) Geometry {
-    const inset = scale(4);
-    return .{ .right = avatar_right - inset, .top = avatar_top + inset, .size = scale(10) };
+pub fn geometry(avatar: Avatar) Geometry {
+    return .{ .right = avatar.right - 4, .top = avatar.top + 4, .size = 10, .radius = 0, .clipped = false };
 }
 
 fn ink(hex: u32) u32 {
     return ((hex >> 16) & 0xFF) | (hex & 0xFF00) | ((hex & 0xFF) << 16);
 }
 
-pub fn draw(hdc: w.HANDLE, g: Geometry, badge: Mark) void {
+pub fn draw(hdc: w.HANDLE, avatar: Avatar, badge: Mark) void {
+    const g = geometry(avatar);
     if (g.size <= 0) return;
     const points = [_]w.POINT{
         .{ .x = g.left(), .y = g.top },
