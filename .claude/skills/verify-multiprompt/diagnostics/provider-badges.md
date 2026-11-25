@@ -28,7 +28,7 @@ Each chat avatar in the sidebar carries a small solid triangle inside its top ri
 6. Hover the second row and confirm the row's second line repaints.
 7. Collapse the sidebar with Ctrl+Shift+B and repeat the shape sampling on the rail avatars.
 
-`tools/verify-provider-badges/drive.ps1` runs these checks at 96 and 144 DPI. `.github/workflows/provider-badges.yml` owns the nightly proof. Before merge, `node tools/provider-badges-native.test.js` runs the same unit proof and both DPI drives on a branch through `test-repeat.yml`, because a new workflow cannot be dispatched until it exists on the default branch. The unit proof first swaps in `tools/fixtures/MUBO-568/provider-badge-before.zig`, the chat-name version, and `tools/fixtures/MUBO-568/provider-badge-round.zig`, the round badge with a white glyph, and requires a named test to fail for each.
+`tools/verify-provider-badges/drive.ps1` runs these checks at 96 and 144 DPI. `.github/workflows/provider-badges.yml` owns the nightly proof. Before merge, `node tools/provider-badges-native.test.js` runs the same unit proof and both DPI drives on a branch through `test-repeat.yml`, because a new workflow cannot be dispatched until it exists on the default branch. The unit proof first swaps in `tools/fixtures/MUBO-568/provider-badge-before.zig`, the chat-name version, and `tools/fixtures/MUBO-568/provider-badge-round.zig`, the round badge with a white glyph, and requires the named provider test to fail at runtime, not merely to compile.
 
 ## Gotchas
 
@@ -38,4 +38,5 @@ Each chat avatar in the sidebar carries a small solid triangle inside its top ri
 - The triangle is solid, so any white pixel in its square means a glyph, and any provider colour in the corner cut means the avatar corner is not respected.
 - A flush triangle is clipped by the rounded corner. Painting it over the bounding corner, or insetting it by a fixed 4px, both fail the native proof.
 - Palette colour 4 is the same lilac as the Antigravity triangle and colour 0 is the same green as Pi, so a seeded avatar using either hides the shape proof. Colour 6 is used instead.
+- A test in a file reachable only through an `@import` inside a function body is invisible to `zig build test-provider-badges`: the filtered build never analyzes that function, so the file's tests are not in the binary and the step passes in 23ms with zero tests. `src/main.zig` carries an unnamed `test { _ = @import("provider_badge.zig"); }` bridge, which the test filter never drops, and a named guard that fails unless all five provider proofs are in `builtin.test_functions`. Keep both when adding a proof.
 - Figma frame 313:23 was not readable by the building agent, so the Antigravity and Pi colours are the incumbent `bot_avatar.zig` palette entries, not sampled from Figma.

@@ -29,21 +29,39 @@ function must(name, command, args) {
   return result;
 }
 
-function redProof(fixture, name) {
+const proof_marker = 'const Coverage = enum';
+const proof_titles = [
+  'each resolved provider draws its own corner and unknown agents draw none',
+  'a misleading chat name never chooses the badge',
+  'the solid triangle fills the avatar corner at 100, 150 and pinned sizes',
+  'the corner triangle fills and stays inside the avatar at every size',
+  'hover names the model and effort only when the chat reports them',
+];
+
+function proofSection(source) {
+  const start = source.indexOf(proof_marker);
+  assert.ok(start > 0, `the provider proof section starts at ${proof_marker}`);
+  const section = source.slice(start);
+  for (const title of proof_titles) assert.ok(section.includes(`test "MUBO-568 ${title}"`), `the proof section carries ${title}`);
+  return section;
+}
+
+function redProof(fixture, titles) {
   const source_path = path.join(root, 'src/provider_badge.zig');
   const source = fs.readFileSync(source_path, 'utf8');
-  const start = source.indexOf('test "MUBO-568');
-  assert.ok(start > 0, 'provider badge tests are present');
-  const tests = source.slice(start);
+  const section = proofSection(source);
   const fixture_source = fs.readFileSync(path.join(root, 'tools/fixtures/MUBO-568', fixture), 'utf8');
-  const mutated = `${fixture_source}\n${tests}`;
+  const mutated = `${fixture_source}\n${section}`;
   try {
     fs.writeFileSync(source_path, mutated);
     assert.equal(fs.readFileSync(source_path, 'utf8'), mutated, `${fixture} reached the file the build reads`);
     const result = run('zig', ['build', 'test-provider-badges', '--summary', 'all']);
     record(`red-${fixture}.log`, result);
-    assert.notEqual(result.status, 0, `${fixture} must fail the badge proof\n${output(result)}`);
-    assert.ok(output(result).includes(name), `${fixture} must fail ${name}\n${output(result)}`);
+    const text = output(result);
+    assert.notEqual(result.status, 0, `${fixture} must fail the badge proof\n${text}`);
+    const failed = titles.find((title) => text.includes(`error: 'provider_badge.test.MUBO-568 ${title}' failed:`));
+    assert.ok(failed, `${fixture} must fail a provider badge test at runtime, not only compile\n${text}`);
+    fs.writeFileSync(path.join(evidence, `red-${fixture}.json`), JSON.stringify({ fixture, failed, status: result.status }, null, 2));
   } finally {
     fs.writeFileSync(source_path, source);
   }
@@ -55,8 +73,8 @@ test('MUBO-568 native provider triangle proof', { skip: windows ? false : 'GitHu
   fs.mkdirSync(evidence, { recursive: true });
   const revision = must('git-revision.log', 'git', ['rev-parse', 'HEAD']).stdout.trim();
   fs.writeFileSync(path.join(evidence, 'native-start.json'), JSON.stringify({ revision, started: new Date().toISOString() }, null, 2));
-  redProof('provider-badge-before.zig', 'MUBO-568 a misleading chat name');
-  redProof('provider-badge-round.zig', 'MUBO-568 the solid triangle');
+  redProof('provider-badge-before.zig', ['a misleading chat name never chooses the badge']);
+  redProof('provider-badge-round.zig', ['the solid triangle fills the avatar corner at 100, 150 and pinned sizes', 'the corner triangle fills and stays inside the avatar at every size']);
   must('unit-proof.log', 'zig', ['build', 'test-provider-badges', '--summary', 'all']);
   const tag = must('tag.log', 'git', ['describe', '--tags', '--match', 'v[0-9]*', '--abbrev=0', 'HEAD']).stdout.trim();
   const version = tag.replace(/^v/, '');

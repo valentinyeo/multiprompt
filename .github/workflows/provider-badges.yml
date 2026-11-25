@@ -33,16 +33,17 @@ jobs:
         run: |
           $file = 'src/provider_badge.zig'
           $source = [IO.File]::ReadAllText($file)
-          $tests = $source.Substring($source.IndexOf('test "MUBO-568'))
+          $proof = $source.Substring($source.IndexOf('const Coverage = enum'))
           $cases = @(
-            @{ fixture = 'provider-badge-before.zig'; test = 'MUBO-568 a misleading chat name'; label = 'CHAT_NAME_BADGE_REJECTED' },
-            @{ fixture = 'provider-badge-round.zig'; test = 'MUBO-568 the solid triangle'; label = 'ROUND_BADGE_REJECTED' }
+            @{ fixture = 'provider-badge-before.zig'; test = 'MUBO-568 a misleading chat name never chooses the badge'; label = 'CHAT_NAME_BADGE_REJECTED' },
+            @{ fixture = 'provider-badge-round.zig'; test = 'MUBO-568 the solid triangle fills the avatar corner at 100, 150 and pinned sizes'; label = 'ROUND_BADGE_REJECTED' }
           )
           try {
             foreach ($case in $cases) {
-              [IO.File]::WriteAllText($file, [IO.File]::ReadAllText("tools/fixtures/MUBO-568/$($case.fixture)") + "`n" + $tests)
+              [IO.File]::WriteAllText($file, [IO.File]::ReadAllText("tools/fixtures/MUBO-568/$($case.fixture)") + "`n" + $proof)
               zig build test-provider-badges 2>&1 | Tee-Object badge-red.log
-              if ($LASTEXITCODE -eq 0 -or -not (Select-String -Quiet -Path badge-red.log -Pattern $case.test)) { throw "The old badge design still passed: $($case.fixture)" }
+              $failed = "error: 'provider_badge.test.$($case.test)' failed:"
+              if ($LASTEXITCODE -eq 0 -or -not (Select-String -Quiet -SimpleMatch -Path badge-red.log -Pattern $failed)) { throw "The old badge design still passed: $($case.fixture)" }
               $global:LASTEXITCODE = 0
               Write-Host $case.label
             }
