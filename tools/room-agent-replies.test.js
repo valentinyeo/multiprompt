@@ -65,7 +65,7 @@ with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as roo
         a, b = bridge.execute(first), bridge.execute(second)
         assert bridge.execute(first) == a
         deadline = time.monotonic() + 20
-        for delivery, text in [(a['deliveries'][0], first['text']), (b['deliveries'][0], second['text'])]:
+        for delivery, text in [(a['deliveries'][0], first['text'])]:
             while True:
                 bridge.execute(dict(op='events', host_uuid=host, room_id=room, after=0, limit=200))
                 saved = r['message_store_request'](dict(message_protocol=1, op='message_status', provider='claude', sid=sid, tmux=tmux, message_id=delivery['id']))
@@ -74,6 +74,8 @@ with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as roo
                 assert time.monotonic() < deadline, 'stored room message timeout: ' + delivery['id']
                 time.sleep(0.05)
             assert saved['message']['text'] == text
+        pending = r['message_store_request'](dict(message_protocol=1, op='message_status', provider='claude', sid=sid, tmux=tmux, message_id=b['deliveries'][0]['id']))
+        assert pending['message'] is None, 'next room turn was admitted before shared context was available'
         logs = []
         state = {}
         session = dict(state=state)
@@ -94,6 +96,9 @@ with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as roo
             r['host_agent_event']('claude', sid, tmux, session, json.dumps(dict(type='assistant', message=dict(id=uid(), content=[dict(type='text', text=text)]))))
             r['host_agent_event']('claude', sid, tmux, session, json.dumps(dict(type='result', subtype='success')))
         reply('Answer one')
+        bridge.execute(dict(op='events', host_uuid=host, room_id=room, after=0, limit=200))
+        saved = r['message_store_request'](dict(message_protocol=1, op='message_status', provider='claude', sid=sid, tmux=tmux, message_id=b['deliveries'][0]['id']))
+        assert saved['message']['text'] == second['text']
         assert r['host_handle_request']('claude', sid, tmux, session, private)['status'] == 'sent'
         blocked = dict(req, id=b['deliveries'][0]['id'])
         assert r['host_handle_request']('claude', sid, tmux, session, blocked)['status'] == 'busy'

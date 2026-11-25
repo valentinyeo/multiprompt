@@ -7158,7 +7158,11 @@ def host_cli(argv):
         return host_stop(provider, sid)
     if command == "handover":
         return host_handover(provider, sid)
-    return host_status(provider, sid)
+    status = host_status(provider, sid)
+    if '--rooms' in rest and status.get('alive') and status.get('owner') == 'host':
+        ping = host_request(provider, sid, dict(op='ping'), timeout=1)
+        status['room_message_protocol'] = ping.get('room_message_protocol') if ping.get('status') == 'ok' else None
+    return status
 
 
 HOST_ADOPT_PANE_TIMEOUT = 20

@@ -90,6 +90,7 @@ class RoomStore:
             CREATE TABLE IF NOT EXISTS members (id TEXT PRIMARY KEY, room_id TEXT NOT NULL REFERENCES rooms(id), alias TEXT NOT NULL, display_name TEXT NOT NULL, host_uuid TEXT NOT NULL, provider TEXT NOT NULL, provider_sid TEXT NOT NULL, session_identity TEXT NOT NULL, active INTEGER NOT NULL);
             CREATE UNIQUE INDEX IF NOT EXISTS active_alias ON members(room_id, alias) WHERE active=1;
             CREATE TABLE IF NOT EXISTS events (id TEXT PRIMARY KEY, room_id TEXT NOT NULL REFERENCES rooms(id), seq INTEGER NOT NULL, body TEXT NOT NULL, UNIQUE(room_id, seq));
+            CREATE TABLE IF NOT EXISTS event_features (event_id TEXT PRIMARY KEY REFERENCES events(id), features INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS deliveries (delivery_seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, room_id TEXT NOT NULL, event_id TEXT NOT NULL REFERENCES events(id), event_seq INTEGER NOT NULL, member_id TEXT NOT NULL REFERENCES members(id), status TEXT NOT NULL, UNIQUE(event_id, member_id));
             CREATE INDEX IF NOT EXISTS delivery_pages ON deliveries(room_id, delivery_seq);
             CREATE TABLE IF NOT EXISTS commands (id TEXT PRIMARY KEY, body TEXT NOT NULL, receipt TEXT NOT NULL);
@@ -251,9 +252,12 @@ class RoomStore:
                     matches = []
                     for member in active.values():
                         for name in (member['alias'], member['display_name']):
-                            candidate = remaining[:len(name)]
-                            if candidate.casefold() == name.casefold() and (len(remaining) == len(name) or not (remaining[len(name)].isalnum() or remaining[len(name)] in '_-')):
-                                matches.append((len(name), member['alias']))
+                            folded = name.casefold()
+                            length = 0
+                            while length < len(remaining) and len(remaining[:length].casefold()) < len(folded):
+                                length += 1
+                            if remaining[:length].casefold() == folded and (len(remaining) == length or not (remaining[length].isalnum() or remaining[length] in '_-')):
+                                matches.append((length, member['alias']))
                     if not matches:
                         fail('invalid_mentions')
                     length = max(size for size, alias in matches)
@@ -267,13 +271,12 @@ class RoomStore:
                     if not alias:
                         fail('invalid_mentions')
                     mentions.append(alias.group())
-            if any(a not in active for a in mentions) or set(mentions) != set(recipients):
+            if any(a not in active for a in mentions) or ((not upgraded or recipients) and set(mentions) != set(recipients)):
                 fail('invalid_mentions')
             targets = [active[a] for a in sorted(set(mentions))] if mentions else list(active.values())
-            payload = {'text': message, 'revision': room['revision'], 'recipients': [m['id'] for m in targets]}
+            event = self.event(room_id, 'human', {'text': message, 'revision': room['revision'], 'recipients': [m['id'] for m in targets]})
             if upgraded:
-                payload['room_features'] = 1
-            event = self.event(room_id, 'human', payload)
+                self.db.execute('INSERT INTO event_features VALUES (?,1)', (event['id'],))
             deliveries = []
             for member in targets:
                 delivery = {'id': new_id(), 'room_id': room_id, 'event_id': event['id'], 'event_seq': event['seq'], 'member_id': member['id'], 'status': 'pending'}
@@ -373,7 +376,8 @@ class RoomStore:
             if row is None:
                 fail('invalid_scope')
             event = json.loads(row['body'])
-            return {'message_id': row['id'], 'room_id': r['room_id'], 'parent_event_id': row['event_id'], 'event_seq': row['event_seq'], 'member_id': row['member_id'], 'host_uuid': row['host_uuid'], 'provider': row['provider'], 'provider_sid': row['provider_sid'], 'session_identity': row['session_identity'], 'text': self.conversation(r['room_id'], row['member_id'], row['event_seq'], event['text'], shared=event.get('room_features') == 1)}
+            features = self.db.execute('SELECT features FROM event_features WHERE event_id=?', (event['id'],)).fetchone()
+            return {'message_id': row['id'], 'room_id': r['room_id'], 'parent_event_id': row['event_id'], 'event_seq': row['event_seq'], 'member_id': row['member_id'], 'host_uuid': row['host_uuid'], 'provider': row['provider'], 'provider_sid': row['provider_sid'], 'session_identity': row['session_identity'], 'text': self.conversation(r['room_id'], row['member_id'], row['event_seq'], event['text'], shared=features is not None and features['features'] == 1)}
         if op == 'deliveries':
             fields(r, ('op', 'room_id', 'after', 'through', 'limit'))
             room = self.room(r['room_id'])

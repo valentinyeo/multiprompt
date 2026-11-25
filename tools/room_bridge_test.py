@@ -71,6 +71,23 @@ class BridgeTest(unittest.TestCase):
         self.assertEqual('runtime_upgrade_required', result['reason'])
         self.assertIn('room_features', result)
 
+    def test_real_runtime_install_with_reader_symlink_supports_live_rooms(self):
+        import json
+        import os
+        import subprocess
+        with tempfile.TemporaryDirectory() as home, mock.patch.dict(os.environ, {'HOME': home}):
+            installed = subprocess.run([sys.executable, '-u', str(root / 'src/chat_history_reader.py'), '--serve'], input=json.dumps(dict(id=1, op='engine_info')) + '\n', text=True, capture_output=True, timeout=15, check=False)
+            self.assertEqual(0, installed.returncode, installed.stderr)
+            runtime = Path(home) / '.multiprompt-runtime'
+            self.assertTrue((runtime / 'reader.py').is_symlink())
+            active = json.loads((runtime / 'active.json').read_text())
+            reader = bridge_module.selected_reader()
+            self.assertEqual(active['sha256'] + '.py', reader.name)
+            self.assertFalse(reader.is_symlink())
+            result = self.bridge.execute({'op': 'capabilities', 'room_messages': 1})
+            self.assertTrue(result['live_send'])
+            self.assertEqual(1, result['room_reply_protocol'])
+
     def test_host_stderr_is_retained_for_the_room_error(self):
         reader = Path(self.temp.name) / 'reader.py'
         reader.write_text('import sys\nsys.stderr.write("host unreachable: connection refused")\nsys.exit(1)\n')
@@ -79,6 +96,26 @@ class BridgeTest(unittest.TestCase):
                 bridge_module.host_status(self.sid)
         self.assertEqual('runtime_unavailable', caught.exception.code)
         self.assertEqual('host unreachable: connection refused', caught.exception.detail)
+
+    @mock.patch.object(bridge_module, 'scoped_runtime', return_value=True)
+    @mock.patch.object(bridge_module, 'host_status')
+    def test_old_running_host_is_named_before_a_new_post_is_recorded(self, status, runtime):
+        status.return_value = dict(enabled=True, alive=True, owner='host')
+        room = self.bridge.execute(self.create)['event']['room_id']
+        request = dict(op='post_human', host_uuid=self.host, command_id=uid(), room_id=room, expected_revision=1, text='hello', recipients=[], room_features=1)
+        self.error('room_host_upgrade_required', request)
+        self.assertEqual(1, self.bridge.store.room(room)['seq'])
+
+    @mock.patch.object(bridge_module, 'scoped_runtime', return_value=True)
+    @mock.patch.object(bridge_module, 'host_status', return_value=dict(enabled=True, alive=False))
+    def test_lost_post_ack_can_be_recovered_when_runtime_is_unavailable(self, status, runtime):
+        room = self.bridge.execute(self.create)['event']['room_id']
+        request = dict(op='post_human', host_uuid=self.host, command_id=uid(), room_id=room, expected_revision=1, text='hello', recipients=[], room_features=1)
+        with mock.patch.object(self.bridge, 'sweep_pending'):
+            receipt = self.bridge.execute(request)
+            runtime.return_value = False
+            self.assertEqual(receipt, self.bridge.execute(request))
+        self.assertEqual(2, self.bridge.store.room(room)['seq'])
 
     @mock.patch.object(bridge_module, 'host_status')
     def test_disabled_and_unsupported_paths_fail_closed(self, status):

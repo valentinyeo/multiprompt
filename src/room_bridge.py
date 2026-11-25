@@ -48,10 +48,7 @@ def selected_reader():
         source = private_file(directory, active['sha256'] + '.py', 4 * 1024 * 1024)
         if hashlib.sha256(source).hexdigest() != active['sha256']:
             fail('runtime_unavailable')
-        reader = private_file(directory, 'reader.py', 4 * 1024 * 1024)
-        if reader != source:
-            fail('runtime_unavailable')
-        return directory / 'reader.py'
+        return directory / (active['sha256'] + '.py')
     except (OSError, ValueError, UnicodeError):
         fail('runtime_unavailable')
 
@@ -62,7 +59,7 @@ def host_status(sid):
     reader = selected_reader()
     try:
         with tempfile.TemporaryFile() as output, tempfile.TemporaryFile() as errors:
-            completed = subprocess.run([sys.executable, str(reader), 'host', 'status', 'claude', sid], stdin=subprocess.DEVNULL, stdout=output, stderr=errors, timeout=5, check=False)
+            completed = subprocess.run([sys.executable, str(reader), 'host', 'status', 'claude', sid, '--rooms'], stdin=subprocess.DEVNULL, stdout=output, stderr=errors, timeout=5, check=False)
             if completed.returncode != 0 or output.tell() > 32768:
                 errors.seek(0)
                 fail('runtime_unavailable', errors.read(2048).decode('utf-8', errors='replace').strip())
@@ -78,7 +75,7 @@ def host_status(sid):
 def runtime_request(query):
     reader = selected_reader()
     try:
-        source = private_file(reader.parent, 'reader.py', 4 * 1024 * 1024)
+        source = private_file(reader.parent, reader.name, 4 * 1024 * 1024)
         info = json.loads(private_file(reader.parent, 'active.json', 4096))
         if not isinstance(info, dict) or hashlib.sha256(source).hexdigest() != info.get('sha256'):
             fail('runtime_unavailable')
@@ -135,11 +132,16 @@ def member_catalog(slot):
         name = (published.get('name') if isinstance(published, dict) else None) or shown.get(tmux) or config.get('spawn_display') or tmux or sid
         if not isinstance(name, str) or not name.strip() or len(name.encode('utf-8')) > 256 or '\x00' in name:
             continue
-        try:
-            status = host_status(sid)
-        except RoomError:
-            status = dict(enabled=config.get('enabled') is True, alive=False, owner=None)
-        members[sid] = dict(provider='claude', sid=sid, display_name=name, enabled=status['enabled'], alive=status.get('alive') is True, owner=status.get('owner'))
+        owner = read_catalog_json(path.with_name(path.name.replace('.config.json', '.owner.json')))
+        owner = owner if isinstance(owner, dict) else {}
+        alive = False
+        if type(owner.get('pid')) is int and owner['pid'] > 0 and owner.get('owner') == 'host':
+            try:
+                os.kill(owner['pid'], 0)
+                alive = True
+            except OSError:
+                pass
+        members[sid] = dict(provider='claude', sid=sid, display_name=name, enabled=config.get('enabled') is True, alive=alive, owner=owner.get('owner'))
     return sorted(members.values(), key=lambda member: (member['display_name'].casefold(), member['sid']))[:768]
 
 
@@ -156,7 +158,7 @@ class RoomBridge:
             return
         for row in pending:
             try:
-                self.sync_replies(row['room_id'])
+                self.sync_replies(row['room_id'], sid)
             except (RoomError, OSError, TimeoutError):
                 continue
 
@@ -171,9 +173,12 @@ class RoomBridge:
             if opted_in and (type(request['room_messages']) is not int or request['room_messages'] != 1):
                 fail('unsupported_remote_capability')
             live = opted_in and scoped_runtime()
-            result = {'room_protocol': 1, 'room_features': [1], 'host_uuid': self.store.host_uuid, 'store_only': not live, 'live_send': live, 'reason': None if live else 'runtime_upgrade_required'}
+            result = {'room_protocol': 1, 'host_uuid': self.store.host_uuid, 'store_only': not live, 'live_send': live, 'reason': None if live else 'unsupported_remote_capability'}
             if opted_in:
                 result['room_reply_protocol'] = 1 if live else None
+                result['room_features'] = [1]
+                if not live:
+                    result['reason'] = 'runtime_upgrade_required'
             return result
         if op == 'status':
             fields(request, ('op', 'host_uuid', 'sid'))
@@ -192,7 +197,8 @@ class RoomBridge:
             fail('unsupported_remote_capability')
         if op not in ('list', 'snapshot', 'events', 'deliveries', 'create', 'edit_members', 'edit', 'post_human'):
             fail('unknown_op')
-        if op == 'post_human' and not scoped_runtime():
+        recorded_post = op == 'post_human' and isinstance(request.get('command_id'), str) and self.store.db.execute('SELECT 1 FROM commands WHERE id=?', (request['command_id'],)).fetchone() is not None
+        if op == 'post_human' and not recorded_post and not scoped_runtime():
             fail('unsupported_remote_capability')
         if 'host_uuid' not in request or identifier(request['host_uuid']) != self.store.host_uuid:
             fail('different_host')
@@ -218,6 +224,14 @@ class RoomBridge:
                         fail('host_disabled')
                     if member['session_identity'] != 'claude:' + member['provider_sid']:
                         fail('invalid_session')
+        if op == 'post_human' and not recorded_post and command.get('room_features') == 1:
+            room_id = identifier(command.get('room_id'))
+            for member in self.store.members(room_id):
+                if command.get('recipients') and member['alias'] not in command['recipients']:
+                    continue
+                status = host_status(member['provider_sid'])
+                if status.get('enabled') and status.get('alive') and status.get('owner') == 'host' and status.get('room_message_protocol') != 1:
+                    fail('room_host_upgrade_required')
         result = self.store.execute(command)
         if op == 'post_human':
             self.sweep_pending()
@@ -225,8 +239,8 @@ class RoomBridge:
             result = self.store.execute(command)
         return result
 
-    def sync_replies(self, room_id):
-        deliveries = self.store.db.execute("SELECT d.id, d.member_id FROM deliveries d JOIN members m ON m.id=d.member_id LEFT JOIN reply_progress p ON p.delivery_id=d.id WHERE d.room_id=? AND d.status='pending' AND m.active=1 AND COALESCE(p.done,0)=0 ORDER BY (SELECT MAX(COALESCE(q.checked,0)) FROM deliveries e LEFT JOIN reply_progress q ON q.delivery_id=e.id WHERE e.member_id=d.member_id AND e.status='pending' AND COALESCE(q.done,0)=0),d.member_id,d.delivery_seq LIMIT 64", (room_id,)).fetchall()
+    def sync_replies(self, room_id, sid=None):
+        deliveries = self.store.db.execute("SELECT d.id, d.member_id FROM deliveries d JOIN members m ON m.id=d.member_id LEFT JOIN reply_progress p ON p.delivery_id=d.id WHERE d.room_id=? AND d.status='pending' AND m.active=1 AND COALESCE(p.done,0)=0 AND (? IS NULL OR m.provider_sid=?) ORDER BY (SELECT MAX(COALESCE(q.checked,0)) FROM deliveries e LEFT JOIN reply_progress q ON q.delivery_id=e.id WHERE e.member_id=d.member_id AND e.status='pending' AND COALESCE(q.done,0)=0),d.member_id,d.delivery_seq LIMIT 64", (room_id, sid, sid)).fetchall()
         deadline = time.monotonic() + 2
         waiting = set()
         for delivery in deliveries:
