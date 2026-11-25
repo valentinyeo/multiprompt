@@ -168,6 +168,66 @@ finally:
         status.return_value = {'enabled': True}
         self.error('invalid_session', {**self.create, 'members': [{**self.member, 'session_identity': 'other'}]})
 
+    @mock.patch.object(bridge_module, 'host_status', return_value={'enabled': True})
+    def test_room_create_publishes_the_shared_helper_without_a_connected_chat(self, status):
+        import json
+        import os
+        with tempfile.TemporaryDirectory() as home:
+            runtime = Path(home, '.multiprompt-runtime')
+            with mock.patch.dict(os.environ, {'HOME': home}):
+                bridge_module.RUNTIME_SOURCE = (root / 'src/chat_history_reader.py').read_bytes()
+                bridge_module.STORE_DIRECTORY = self.temp.name
+                try:
+                    self.assertFalse(Path(runtime, 'active.json').exists())
+                    with self.assertRaises(bridge_module.RoomError):
+                        bridge_module.selected_reader()
+                    published = bridge_module.publish_runtime()
+                    receipt = self.bridge.execute(self.create)
+                    active = json.loads(Path(runtime, 'active.json').read_text())
+                    reader = bridge_module.selected_reader()
+                    repeated = bridge_module.publish_runtime()
+                finally:
+                    bridge_module.RUNTIME_SOURCE = b''
+                    bridge_module.STORE_DIRECTORY = None
+            mode = Path(runtime, 'active.json').stat().st_mode & 0o777
+            installed = Path(runtime, reader.name).is_file()
+        self.assertTrue(published)
+        self.assertFalse(repeated)
+        self.assertEqual(0o600, mode)
+        self.assertEqual(active['sha256'] + '.py', reader.name)
+        self.assertTrue(installed)
+        self.assertEqual('created', receipt['event']['type'])
+        self.assertEqual('Room', receipt['event']['name'])
+
+    def test_room_send_starts_from_the_published_helper_without_a_connected_chat(self):
+        import os
+        with tempfile.TemporaryDirectory() as home:
+            runtime = Path(home, '.multiprompt-runtime')
+            with mock.patch.dict(os.environ, {'HOME': home}):
+                bridge_module.RUNTIME_SOURCE = (root / 'src/chat_history_reader.py').read_bytes()
+                bridge_module.STORE_DIRECTORY = self.temp.name
+                try:
+                    before = self.bridge.execute({'op': 'capabilities', 'room_messages': 1})
+                    bridge_module.publish_runtime()
+                    live = self.bridge.execute({'op': 'capabilities', 'room_messages': 1})
+                finally:
+                    bridge_module.RUNTIME_SOURCE = b''
+                    bridge_module.STORE_DIRECTORY = None
+            published = Path(runtime, 'active.json').is_file()
+        self.assertTrue(published)
+        self.assertFalse(before['live_send'])
+        self.assertTrue(live['live_send'])
+        self.assertEqual(1, live['room_reply_protocol'])
+
+    def test_host_refusal_reports_what_the_helper_printed(self):
+        reader = Path(self.temp.name) / 'reader.py'
+        reader.write_text('import sys\nsys.stdout.write("unsafe runtime permissions")\nsys.exit(1)\n')
+        with mock.patch.object(bridge_module, 'selected_reader', return_value=reader):
+            with self.assertRaises(bridge_module.RoomError) as caught:
+                bridge_module.host_status(self.sid)
+        self.assertEqual('runtime_unavailable', caught.exception.code)
+        self.assertEqual('unsafe runtime permissions', caught.exception.detail)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -183,6 +183,23 @@ test "room and chat bootstraps quote identically" {
 `);
 });
 
+test('room actions publish the shared chat helper on an account that never sent a chat', () => {
+  const transport = read('room_transport.zig');
+  const bridge = read('room_bridge.py');
+  const start = transport.indexOf('const bootstrap = "');
+  assert.notEqual(start, -1, 'the room transport keeps a bootstrap');
+  const end = transport.indexOf('";', start);
+  assert.notEqual(end, -1, 'the room transport bootstrap is a complete string');
+  const bootstrap = transport.slice(start, end);
+  assert.equal(3, bootstrap.split('sys.stdin.buffer.readline()').length - 1, 'room_service, room_bridge and the reader each arrive on stdin');
+  assert.match(bootstrap, /r=base64\.b64decode\(sys\.stdin\.buffer\.readline\(\)\);/, 'the third stdin line is the reader');
+  assert.match(bootstrap, /b\.serve\(os\.path\.expanduser\([^)]*\),r\)/, 'the reader is handed to the bridge');
+  assert.match(transport, /writeSource\(input, @embedFile\("chat_history_reader\.py"\), &watch\.expired\)/, 'the room transport uploads the reader');
+  assert.match(bridge, /def serve\(directory, source=b''\):\n    global RUNTIME_SOURCE, STORE_DIRECTORY\n    RUNTIME_SOURCE = source if isinstance\(source, bytes\) else b''\n    STORE_DIRECTORY = directory\n    publish_runtime\(\)/, 'the bridge publishes the helper before it answers anything');
+  assert.match(bridge, /subprocess\.run\(\[sys\.executable, '-u', '-c', bootstrap, 'host', 'list'\], input=base64\.b64encode\(RUNTIME_SOURCE\)/, 'the carried reader installs the shared helper itself');
+  assert.doesNotMatch(bridge, /def install_runtime/, 'the bridge reuses the reader install path instead of copying it');
+});
+
 test('room bridge failures log full stderr and the exit code even after the dialog error fills', () => {
   const source = read('room_transport.zig');
   const fixture = fs.readFileSync(path.join(__dirname, 'fixtures/MUBO-533/bridge-errors.zig'), 'utf8');

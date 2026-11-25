@@ -6,7 +6,7 @@ const diagnostics = @import("diagnostics.zig");
 extern "kernel32" fn OpenThread(w.DWORD, w.BOOL, w.DWORD) callconv(w.WINAPI) w.HANDLE;
 extern "kernel32" fn CancelSynchronousIo(w.HANDLE) callconv(w.WINAPI) w.BOOL;
 
-const bootstrap = "import base64,sys,types,os,re;m=types.ModuleType('room_service');sys.modules[m.__name__]=m;exec(compile(base64.b64decode(sys.stdin.buffer.readline()),'room_service.py','exec'),m.__dict__);b=types.ModuleType('room_bridge');exec(compile(base64.b64decode(sys.stdin.buffer.readline()),'room_bridge.py','exec'),b.__dict__);k=sys.stdin.buffer.readline().decode('ascii').strip();assert re.fullmatch('[0-9a-f]{64}',k);b.serve(os.path.expanduser('~/.local/state/multiprompt/rooms-accounts/'+k))";
+const bootstrap = "import base64,sys,types,os,re;m=types.ModuleType('room_service');sys.modules[m.__name__]=m;exec(compile(base64.b64decode(sys.stdin.buffer.readline()),'room_service.py','exec'),m.__dict__);b=types.ModuleType('room_bridge');exec(compile(base64.b64decode(sys.stdin.buffer.readline()),'room_bridge.py','exec'),b.__dict__);r=base64.b64decode(sys.stdin.buffer.readline());k=sys.stdin.buffer.readline().decode('ascii').strip();assert re.fullmatch('[0-9a-f]{64}',k);b.serve(os.path.expanduser('~/.local/state/multiprompt/rooms-accounts/'+k),r)";
 
 pub const Route = struct {
     hostname: [253]u8 = undefined,
@@ -192,7 +192,7 @@ fn run(job: *Job) void {
     child_output = null;
     _ = w.CloseHandle(child_errors);
     child_errors = null;
-    if (!writeSource(input, @embedFile("room_service.py"), &watch.expired) or !writeSource(input, @embedFile("room_bridge.py"), &watch.expired) or !writeAll(input, &job.account_digest, &watch.expired) or !writeAll(input, "\n", &watch.expired) or !writeAll(input, job.request, &watch.expired) or !writeAll(input, "\n", &watch.expired)) return;
+    if (!writeSource(input, @embedFile("room_service.py"), &watch.expired) or !writeSource(input, @embedFile("room_bridge.py"), &watch.expired) or !writeSource(input, @embedFile("chat_history_reader.py"), &watch.expired) or !writeAll(input, &job.account_digest, &watch.expired) or !writeAll(input, "\n", &watch.expired) or !writeAll(input, job.request, &watch.expired) or !writeAll(input, "\n", &watch.expired)) return;
     _ = w.CloseHandle(input);
     input = null;
     var saw_line = false;

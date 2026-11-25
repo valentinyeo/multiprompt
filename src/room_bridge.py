@@ -39,6 +39,63 @@ def private_file(directory, name, limit):
         os.close(directory_fd)
 
 
+RUNTIME_SOURCE = b''
+STORE_DIRECTORY = None
+PUBLISHED_MARKER = 'runtime-published'
+
+
+def active_runtime():
+    try:
+        active = json.loads(private_file(Path.home() / '.multiprompt-runtime', 'active.json', 4096))
+    except (OSError, ValueError, UnicodeError, RoomError):
+        return None
+    return active if isinstance(active, dict) else None
+
+
+def published_marker():
+    try:
+        return Path(STORE_DIRECTORY, PUBLISHED_MARKER).read_text(encoding='utf-8', errors='replace').strip()
+    except (OSError, ValueError):
+        return ''
+
+
+def remember_published():
+    active = active_runtime()
+    sha256 = active.get('sha256') if active else None
+    if not isinstance(sha256, str):
+        return
+    try:
+        path = Path(STORE_DIRECTORY, PUBLISHED_MARKER)
+        fd, temporary = tempfile.mkstemp(prefix='.published-', dir=str(path.parent))
+        try:
+            with os.fdopen(fd, 'w', encoding='utf-8') as stream:
+                os.fchmod(stream.fileno(), 0o600)
+                stream.write(sha256)
+            os.replace(temporary, path)
+        finally:
+            try:
+                os.unlink(temporary)
+            except OSError:
+                pass
+    except (OSError, ValueError):
+        pass
+
+
+def publish_runtime():
+    if not RUNTIME_SOURCE or not STORE_DIRECTORY:
+        return False
+    active = active_runtime()
+    if active is not None and isinstance(active.get('sha256'), str) and active['sha256'] == published_marker():
+        return False
+    bootstrap = "import base64,sys;s=base64.b64decode(sys.stdin.buffer.readline()).decode();exec(compile(s,'<room-runtime>','exec'),dict(__name__='__main__',READER_SOURCE=s))"
+    try:
+        subprocess.run([sys.executable, '-u', '-c', bootstrap, 'host', 'list'], input=base64.b64encode(RUNTIME_SOURCE) + b'\n', stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    remember_published()
+    return True
+
+
 def selected_reader():
     directory = Path.home() / '.multiprompt-runtime'
     try:
@@ -62,7 +119,8 @@ def host_status(sid):
             completed = subprocess.run([sys.executable, str(reader), 'host', 'status', 'claude', sid, '--rooms'], stdin=subprocess.DEVNULL, stdout=output, stderr=errors, timeout=5, check=False)
             if completed.returncode != 0 or output.tell() > 32768:
                 errors.seek(0)
-                fail('runtime_unavailable', errors.read(2048).decode('utf-8', errors='replace').strip())
+                output.seek(0)
+                fail('runtime_unavailable', (errors.read(2048) + output.read(2048)).decode('utf-8', errors='replace').strip())
             output.seek(0)
             status = json.loads(output.read(32769))
     except (OSError, ValueError, UnicodeError, subprocess.TimeoutExpired):
@@ -72,13 +130,21 @@ def host_status(sid):
     return status
 
 
-def runtime_request(query):
+def runtime_source():
     reader = selected_reader()
     try:
         source = private_file(reader.parent, reader.name, 4 * 1024 * 1024)
         info = json.loads(private_file(reader.parent, 'active.json', 4096))
         if not isinstance(info, dict) or hashlib.sha256(source).hexdigest() != info.get('sha256'):
             fail('runtime_unavailable')
+        return source, info
+    except (OSError, ValueError, UnicodeError):
+        fail('runtime_unavailable')
+
+
+def runtime_request(query):
+    source, info = runtime_source()
+    try:
         source = ('ENGINE_INFO = ' + repr(info) + '\n').encode('utf-8') + source
         bootstrap = "import base64,sys;s=base64.b64decode(sys.stdin.buffer.readline()).decode();exec(compile(s,'<room-runtime>','exec'),dict(__name__='__main__',READER_SOURCE=s))"
         input = base64.b64encode(source) + b'\n' + (encoded(dict(query, id=1)) + '\n').encode('utf-8')
@@ -86,7 +152,8 @@ def runtime_request(query):
             completed = subprocess.run([sys.executable, '-u', '-c', bootstrap, '--serve'], input=input, stdout=output, stderr=errors, timeout=2, check=False)
             if completed.returncode != 0 or output.tell() > 524288:
                 errors.seek(0)
-                fail('runtime_unavailable', errors.read(2048).decode('utf-8', errors='replace').strip())
+                output.seek(0)
+                fail('runtime_unavailable', (errors.read(2048) + output.read(2048)).decode('utf-8', errors='replace').strip())
             output.seek(0)
             response = json.loads(output.read(524289))
     except (OSError, ValueError, UnicodeError, subprocess.TimeoutExpired):
@@ -357,7 +424,11 @@ class RoomBridge:
             raise
 
 
-def serve(directory):
+def serve(directory, source=b''):
+    global RUNTIME_SOURCE, STORE_DIRECTORY
+    RUNTIME_SOURCE = source if isinstance(source, bytes) else b''
+    STORE_DIRECTORY = directory
+    publish_runtime()
     bridge = RoomBridge(directory)
     try:
         while True:
