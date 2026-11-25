@@ -206,6 +206,18 @@ function Picker-Shot([string]$Name) {
     [IO.File]::WriteAllText("$Evidence/$Name-list-visible.txt", $text)
     return $text
 }
+function Clear-Member-Search {
+    $room = Room-Window
+    if (-not $room) { throw 'No room dialog to clear the member search in' }
+    $fields = @(Visible-Children 'Edit' $room)
+    $edit = [IntPtr]([ChatDeliveryDesktop]::Focus($main)[1])
+    if ($fields.Count -lt 2 -or [ChatDeliveryDesktop]::Class($edit) -ne 'Edit') { throw 'Member search is not focused' }
+    $tops = @($fields | ForEach-Object { [Windows.Automation.AutomationElement]::FromHandle($_).Current.BoundingRectangle.Top })
+    if ([Windows.Automation.AutomationElement]::FromHandle($edit).Current.BoundingRectangle.Top -le ($tops | Measure-Object -Minimum).Minimum) { throw 'Member search is not the field below the room name' }
+    $text = [ChatDeliveryDesktop]::Text($edit)
+    for ($i = 0; $i -lt $text.Length; $i++) { Press @(0x08) 'Backspace: clear the earlier member query' }
+    [void](Wait-For 'member search cleared before the next name' { [ChatDeliveryDesktop]::Text($edit) -ceq '' } 10)
+}
 function Dialog-Shot([string]$Name) {
     [void](Shot $Name)
     $roomBounds = [Windows.Automation.AutomationElement]::FromHandle((Room-Window)).Current.BoundingRectangle
@@ -396,6 +408,14 @@ Host remote-1
     $main = Wait-For 'owned desktop window' { $h = [ChatDeliveryDesktop]::Window($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
     [void][ChatDeliveryDesktop]::MoveWindow($main, 0, 0, [ChatDeliveryDesktop]::GetSystemMetrics(0), [ChatDeliveryDesktop]::GetSystemMetrics(1), $true)
     [void](Wait-For 'two account-owned chats imported' { $saved = Read-Shared "$settings/session.json"; $saved.Contains('rooms-alpha') -and $saved.Contains('rooms-bravo') } 90)
+    try {
+        Open-Member 'Alpha'
+        Send-Text 'HELPER534'
+        [void](Wait-For 'Alpha private reply before the first room action' { (Copy-Chat 'Alpha-helper').Contains('Alpha says HELPER534') })
+    } catch { $result.driverErrors += "Driver setup: the chat helper warm-up before the first room action failed: $($_.Exception.Message)" }
+    $helper = (Invoke-ServerNative -FilePath $ssh -Arguments @('-F', "$settings/ssh-key/config", 'remote-1', 'test -f .multiprompt-runtime/active.json && echo helper-published') -Evidence $Evidence -Name 'chat-helper-published') -join ' '
+    $result.observations += @{ fact = 'desktop published its shared chat helper on this host before the first room action'; published = [bool]($helper -match 'helper-published') }
+    if ($helper -notmatch 'helper-published') { $result.driverErrors += 'Driver setup: the desktop did not publish its shared chat helper on this host before the first room action' }
     $createRoom = {
         Invoke-JourneyCommand 'New room'
         $room = Wait-For 'new room view' { Room-Window }
@@ -438,6 +458,13 @@ Host remote-1
     }
     Case 2 'Add two member chats' $(if (-not $hasRoom) { 'No saved Rooms534 room was created' } else { '' }) {
         Open-Member 'Bravo'
+        [void](Wait-For 'Bravo is the visible chat before closing it' {
+            $saved = Session-Saved
+            $tabs = Saved-Tabs $saved
+            if ($null -eq $saved -or -not $saved.PSObject.Properties['active_tab']) { return $false }
+            $index = [int]$saved.active_tab
+            $index -ge 0 -and $index -lt $tabs.Count -and $tabs[$index].name -ceq 'Bravo' -and -not (Room-Window)
+        })
         Press @(0x11, 0x57) 'Ctrl+W: close Bravo before the room picker'
         [void](Wait-For 'Bravo no longer an open tab' { @(Saved-Tabs (Session-Saved) | Where-Object { $_.PSObject.Properties['tmux_session'] -and $_.tmux_session -eq 'rooms-bravo' }).Count -eq 0 })
         [void](Shot 'bravo-closed')
@@ -447,11 +474,12 @@ Host remote-1
         Invoke-JourneyCommand 'Edit room'
         $room = Wait-For 'room editor' { Room-Window }
         Press @(0x09) 'Tab: search member chats'
+        Clear-Member-Search
         Type-Text 'Alpha'
         [void](Wait-For 'Alpha visible in member results' { (Picker-Shot 'members-alpha') -match '\bAlpha\b' })
         $alpha = @((Snapshot 'members-before').rooms | ForEach-Object { $_.tables.members } | Where-Object { $_.active -eq 1 -and $_.display_name -ceq 'Alpha' })
         if ($alpha.Count -eq 0) { Press @(0x0D) 'Enter: select Alpha' }
-        Press @(0x11, 0x41) 'Ctrl+A: replace member search'
+        Clear-Member-Search
         Type-Text 'Bravo'
         [void](Wait-For 'Bravo visible in member list' { (Picker-Shot 'members-bravo') -match '\bBravo\b' })
         Press @(0x0D) 'Enter: select Bravo'
@@ -468,9 +496,10 @@ Host remote-1
         [void](Wait-For 'reopened Bravo real private reply' { (Copy-Chat 'Bravo-reopened').Contains('Bravo says PRIVATE534') })
         Invoke-JourneyCommand -Text 'Rooms534'
         Invoke-JourneyCommand 'Edit room'
+        [void](Wait-For 'room editor' { Room-Window })
         Press @(0x09) 'Tab: member search'
         foreach ($name in @('Alpha', 'Bravo')) {
-            Press @(0x11, 0x41) 'Ctrl+A: replace member search'
+            Clear-Member-Search
             Type-Text $name
             [void](Wait-For "$name listed" { (Picker-Shot "reopened-picker-$name") -match ([regex]::Escape($name)) })
             $members = @((Snapshot 'reopened-members').rooms | ForEach-Object { $_.tables.members } | Where-Object { $_.active -eq 1 -and $_.display_name -ceq $name })
