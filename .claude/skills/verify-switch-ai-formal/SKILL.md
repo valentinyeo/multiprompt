@@ -35,11 +35,13 @@ One logical chat address, at most two pending switch requests, five successful s
 
 ## Coverage and sync
 
+MUBO-221 integrates fresh-start master `8474aabb7a55a11595ab33e008c32c00624ce1b5` at `257df205bcc2804ea897b65a0259163eebe52afc`. The covered reader functions are unchanged from the previous reviewed branch head. The incoming `message_expire` and `message_worker` changes retain sends while a fresh-start phase is pending; that phase is outside the fixed-session model. Both fresh-start and Antigravity desktop journeys remain selected independently. The reader and reader-test hashes move, with no model, bound, decision probe, replay or mutation-control changes. Require fresh hosted self-tests and current-base desktop proof.
+
 MUBO-221 merges master `91d6d9e9cb27aa29ecc58a2e8473013e0de18cc0` at `8e6e1237fb84ed858122b8c1e457349810a1a681`. All twelve covered reader functions match that master. The Antigravity adapter and provider registry sit outside those functions. The merged switch tests retain the Antigravity round trip and every master case. Whole-file hashes move; the model, bounds, decision probes, replays and mutation controls do not change. The existing formal model excludes Antigravity from its provider set, so its result is not Antigravity-provider proof. Fresh hosted desktop and real-provider continuity proof remain required.
 
 MUBO-221 reviews `1a59f4ad97899f924ca18a24a5568caf5519d134`. The reader's only change since the preceding PR head selects Neon 4 in `host_antigravity_argv`; none of the covered switch, history, usage-limit, or auto-switch functions changed. The reader hash and sync commit move, while the model, bounds, decisions, probes, and mutation controls stay unchanged. Hosted self-tests must rerun; model selection and rendered-history continuity remain separate desktop proof.
 
-Last reviewed source/model sync commit is `8e6e1237fb84ed858122b8c1e457349810a1a681`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
+Last reviewed source/model sync commit is `257df205bcc2804ea897b65a0259163eebe52afc`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
 
 SOFT-2681 publishes Claude's current native session and changes transcript selection. All twelve covered reader functions are unchanged from the prior sync, as are every other covered file, the model, bounds, decisions, probes and mutations. Only the reader hash and sync commit move. Hosted CI must rerun the full self-test and native replay; this review does not extend the model to transcript rotation.
 
