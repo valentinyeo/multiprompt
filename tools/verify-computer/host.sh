@@ -15,7 +15,7 @@ mkdir -p "$work"
 chmod 755 "$work"
 sudo rm -f "$done_file"
 
-password="$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 8)"
+password="$(head -c 64 /dev/urandom | base64 | LC_ALL=C tr -dc 'A-Za-z0-9' | cut -c1-8)"
 echo "::add-mask::$password"
 [ "${#password}" -eq 8 ] || { echo 'password generation failed'; exit 1; }
 
