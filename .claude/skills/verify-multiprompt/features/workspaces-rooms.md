@@ -68,4 +68,5 @@ Run `feature=rooms` for the desktop gate in [Rooms](rooms.md), including fresh c
 | `room.new_room_target` | In the Rooms preview build, Ctrl+K, choose **New room**. Follow `room` above. |
 
 ## Gotchas
+- The member catalog comes from the host, including unopened chats. Account names override server session names by host and tmux identity; closing a tab keeps its known name for the current account. The create path logs dialog opening, deferred discovery, each request kind, bridge spawn, reply counts and failures to `debug.log`. A missing failure line alone does not prove that the bridge never ran.
 - Offline CMD workspace proof does not cover Rooms, sync, or remote agents. Room reply checks are [diagnostic](../diagnostics/room-reply-grouping.md), not a completed desktop journey.

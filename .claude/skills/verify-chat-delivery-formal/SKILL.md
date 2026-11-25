@@ -39,6 +39,8 @@ No liveness is claimed when a connection can stay down forever. This does not ve
 
 ## Coverage and sync
 
+Last reviewed merged source/model sync commit is `f499f639f0bc66fd412de0ae66adced7335b58f3`.
+
 MUBO-533 round 5 merges master `8474aabb7a55a11595ab33e008c32c00624ce1b5`. The reader contains both master’s fresh-start work and the existing room sweep. Every covered reader function is unchanged from that master; all other covered files match master. The model, decisions, bounds and probes remain unchanged. The room creation/name fix changes only files outside these coverage maps. Hashes describe the merged source; hosted CI must supply the execution proof.
 
 MUBO-533 makes desktop rooms reliable. In `src/chat_history_reader.py` it adds `host_room_sweep` and `host_room_tick`, calls the tick once at the top of `host_loop`'s poll loop, adds a `room_features` list to the handshake reply in `host_handle_request` and adds the `--rooms` flag to `host_cli` status. `message_store_transaction`, `message_poll`, `message_poll_locked`, `IGSH_1266_SharedMessageHostTest`, the connector acceptance path and every other covered file, native probe and decision are unchanged, because room admission and reply collection read and write their own room store and never the shared message store. After merging master `94f30f841fdff94eaf7ac8d6009d7a4ebc278b36` (`MUBO-457` skill text in a quoted reply, `MUBO-135` reply identity), the three covered reader functions are still byte-identical to that master tip, so the model, probes and decision table continue to describe them. Only the reader's whole-file hash and the sync commit move, and the sync commit names the merge that carries the room source. Hosted CI must rerun the full self-test and native replay.

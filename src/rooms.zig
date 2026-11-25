@@ -159,6 +159,8 @@ pub const Controller = struct {
         }
         self.kind = kind;
         self.job = job;
+        var log: [128]u8 = undefined;
+        @import("diagnostics.zig").syncLog(std.fmt.bufPrint(&log, "[rooms] request sent kind={s} slot={d}", .{ @tagName(kind), self.host }) catch unreachable);
         return true;
     }
 

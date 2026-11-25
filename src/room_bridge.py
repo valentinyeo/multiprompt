@@ -141,7 +141,7 @@ def member_catalog(slot):
                 alive = True
             except OSError:
                 pass
-        members[sid] = dict(provider='claude', sid=sid, display_name=name, enabled=config.get('enabled') is True, alive=alive, owner=owner.get('owner'))
+        members[sid] = dict(provider='claude', sid=sid, tmux=tmux, display_name=name, enabled=config.get('enabled') is True, alive=alive, owner=owner.get('owner'))
     return sorted(members.values(), key=lambda member: (member['display_name'].casefold(), member['sid']))[:768]
 
 

@@ -87,6 +87,7 @@ fn deadline(watchdog: *Watchdog) void {
 }
 
 pub fn start(job: *Job) bool {
+    diagnostics.syncLog("[rooms] bridge request queued");
     if (job.request.len == 0 or job.request.len > 131071 or job.output.len < 262145 or std.mem.indexOfScalar(u8, job.request, '\n') != null) return false;
     job.thread = std.Thread.spawn(.{}, run, .{job}) catch return false;
     return true;
@@ -107,6 +108,7 @@ fn readErrors(job: *Job, handle: w.HANDLE) void {
 }
 
 fn run(job: *Job) void {
+    diagnostics.syncLog("[rooms] bridge starting");
     defer job.finished.store(true, .release);
     var cmd: [4096]u16 = undefined;
     var port_buf: [8]u8 = undefined;
@@ -155,6 +157,7 @@ fn run(job: *Job) void {
         diagnostics.syncLog(std.fmt.bufPrint(&message, "[rooms] bridge start failed win32_error={d}", .{last_error}) catch unreachable);
         return;
     }
+    diagnostics.syncLog("[rooms] bridge spawned");
     _ = w.CloseHandle(process.hThread);
     defer _ = w.CloseHandle(process.hProcess);
     defer {
@@ -163,6 +166,7 @@ fn run(job: *Job) void {
             _ = w.WaitForSingleObject(process.hProcess, 15000);
         }
         readErrors(job, errors);
+        if (job.success) diagnostics.syncLog("[rooms] bridge reply received");
         if (!job.success) {
             var exit_code: w.DWORD = 0;
             const exit_code_known = w.GetExitCodeProcess(process.hProcess, &exit_code) != 0;

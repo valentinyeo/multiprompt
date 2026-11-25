@@ -1,4 +1,5 @@
 const std = @import("std");
+const diagnostics = struct { fn syncLog(_: []const u8) void {} };
 var draft_saved = true;
 var ready = false;
 var error_text: [2048]u8 = undefined;

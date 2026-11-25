@@ -41,6 +41,8 @@ var account_len: usize = 0;
 var account_generation: u64 = 0;
 var applied_routes: [3]?@import("room_transport.zig").Route = @splat(null);
 var applied_keys: [3][32]u8 = @splat(@splat(0));
+var member_names: std.StringHashMapUnmanaged([]u8) = .empty;
+const diagnostics = @import("diagnostics.zig");
 const rooms = @import("rooms.zig");
 const journal = @import("room_journal.zig");
 const room_post = @import("room_post.zig");
@@ -498,6 +500,13 @@ pub fn setAccount(id: ?[]const u8) void {
     discovery_attempts = 0;
     discovery_waiting = false;
     _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM_DISCOVERY);
+    var names = member_names.iterator();
+    while (names.next()) |entry| {
+        std.heap.page_allocator.free(entry.key_ptr.*);
+        std.heap.page_allocator.free(entry.value_ptr.*);
+    }
+    member_names.deinit(std.heap.page_allocator);
+    member_names = .empty;
     account_len = next.len;
     @memcpy(account[0..account_len], next);
     account_generation +%= 1;
@@ -585,6 +594,7 @@ pub fn setAppliedLayout(bytes: []const u8) bool {
     const was_bound = catalog_complete or controller != null or owned_model != null;
     applied_routes = routes;
     applied_keys = keys;
+    if (!cacheMemberNames(parsed.value.tabs)) return false;
     if (was_bound) {
         const route = configuredRoute(route_slot);
         const key = if (route) |value| routeKey(value) else @as([64]u8, @splat(0));
@@ -604,6 +614,33 @@ pub fn setAppliedLayout(bytes: []const u8) bool {
         }
     }
     return true;
+}
+
+fn cacheMemberNames(tabs: []const @import("session_layout.zig").Tab) bool {
+    const a = std.heap.page_allocator;
+    for (tabs) |tab| {
+        const route = configuredRoute(tab.tmux_host) orelse continue;
+        const key = routeKeyFor(tab.tmux_host, route);
+        var buffer: [128]u8 = undefined;
+        const identity = std.fmt.bufPrint(&buffer, "{s}:{s}", .{ key, tab.tmux_session }) catch return false;
+        const name = a.dupe(u8, tab.name) catch return false;
+        if (member_names.getPtr(identity)) |old| {
+            a.free(old.*);
+            old.* = name;
+        } else {
+            const owned_key = a.dupe(u8, identity) catch { a.free(name); return false; };
+            member_names.put(a, owned_key, name) catch { a.free(owned_key); a.free(name); return false; };
+        }
+    }
+    return true;
+}
+
+fn memberDisplayName(member: std.json.Value, fallback: []const u8) []const u8 {
+    const tmux = textField(member, "tmux") orelse return fallback;
+    var buffer: [128]u8 = undefined;
+    const identity = std.fmt.bufPrint(&buffer, "{s}:{s}", .{ route_key, tmux }) catch return fallback;
+    if (member_names.get(identity)) |name| return name;
+    return fallback;
 }
 
 fn armPoll() void {
@@ -786,6 +823,8 @@ fn savePin(key: *const [64]u8, uuid: []const u8) bool {
 }
 
 fn showFailure(failure: rooms.Failure) void {
+    var log: [256]u8 = undefined;
+    diagnostics.syncLog(std.fmt.bufPrint(&log, "[rooms] request failed kind={s} reason={s} code={s}", .{ @tagName(failure.kind), @tagName(failure.reason), failure.code[0..failure.code_len] }) catch "[rooms] request failed");
     if (!created or front == .hidden) return;
     const code = failure.code[0..failure.code_len];
     const reason: []const u8 = if (std.mem.eql(u8, code, "runtime_upgrade_required") or std.mem.eql(u8, code, "unsupported_remote_capability")) "The server's room helper is outdated. Reconnect a chat on this server, then try again." else if (std.mem.eql(u8, code, "room_host_upgrade_required")) "This agent is running an old room helper. Restart the affected agent chat, then try again." else if (std.mem.eql(u8, code, "runtime_unavailable")) "The server's chat helper is unavailable. Reconnect a chat on this server, then try again." else if (std.mem.eql(u8, code, "invalid_mentions") or std.mem.eql(u8, code, "ambiguous_mentions")) "Choose a unique member name from the @ picker, then try again." else if (std.mem.eql(u8, code, "host_disabled")) "This agent chat is disabled. Start it before adding it to a room." else if (failure.reason == .host_start) "The room host could not start, so nothing was sent. Retry, or restart a chat on this server." else if (failure.reason == .timeout) "The room host did not respond. Check its connection and try again." else "Could not reach the room host. Check its connection and try again.";
@@ -808,7 +847,13 @@ fn scheduleDiscovery(c: *const rooms.Controller) void {
 }
 
 fn beginDiscovery(retry: bool) void {
-    if (!enabled or !startup_settled or scope_blocked or !ui_ready or app_state.g_account_locked or app_state.g_account_bootstrapping or app_state.g_restoring or app_state.g_account_applying or desired_layout != null or account_len == 0 or controller != null) return;
+    if (!enabled or !startup_settled or scope_blocked or !ui_ready or app_state.g_account_locked or app_state.g_account_bootstrapping or app_state.g_restoring or app_state.g_account_applying or desired_layout != null or account_len == 0 or controller != null) {
+        if (front == .create) {
+            var log: [384]u8 = undefined;
+            diagnostics.syncLog(std.fmt.bufPrint(&log, "[rooms] discovery deferred enabled={} startup={} blocked={} ui={} locked={} bootstrap={} restoring={} applying={} layout_pending={} account={} controller={}", .{ enabled, startup_settled, scope_blocked, ui_ready, app_state.g_account_locked, app_state.g_account_bootstrapping, app_state.g_restoring, app_state.g_account_applying, desired_layout != null, account_len != 0, controller != null }) catch unreachable);
+        }
+        return;
+    }
     var chosen: ?u8 = null;
     var pin_required = false;
     var expected_pin: [36]u8 = undefined;
@@ -912,10 +957,16 @@ fn eligibleShell(sid: []const u8) ?*const app_state.Shell {
 }
 
 fn nextStatus(c: *rooms.Controller) bool {
-    if (candidate_scan >= discovered_count or !c.room_features) return false;
+    if (candidate_scan >= discovered_count) return false;
+    if (!c.room_features) {
+        diagnostics.syncLog("[rooms] members blocked: room_features unavailable");
+        if (created and front == .create) view.showError("The server's room helper is outdated. Reconnect a chat on this server, then try again.");
+        return false;
+    }
     status_generation = candidate_generation;
     if (!c.fetchMembers()) return false;
     candidate_scan = discovered_count;
+    diagnostics.syncLog("[rooms] members request sent");
     return true;
 }
 
@@ -926,7 +977,8 @@ fn acceptMembers(c: *const rooms.Controller, payload: std.json.Value) bool {
     candidate_count = 0;
     for (members.array.items) |member| {
         const sid = textField(member, "sid") orelse return false;
-        const name = textField(member, "display_name") orelse return false;
+        const host_name = textField(member, "display_name") orelse return false;
+        const name = memberDisplayName(member, host_name);
         const provider = textField(member, "provider") orelse return false;
         const alive = member.object.get("alive") orelse return false;
         if (!std.mem.eql(u8, provider, "claude") or sid.len == 0 or sid.len > 80 or name.len == 0 or name.len > 256 or !std.unicode.utf8ValidateSlice(name) or std.mem.indexOfScalar(u8, name, 0) != null or alive != .bool) return false;
@@ -1866,7 +1918,7 @@ pub fn pollTimer(id: usize) bool {
                 c.live_send = live.bool;
                 if (!c.live_send and created and front != .hidden) view.showError("The server's room helper is unavailable or outdated. Reconnect a chat on this server, then try again.");
                 clearCatalog();
-                if (c.catalog(0, null)) return true;
+                if (c.catalog(0, null)) { diagnostics.syncLog("[rooms] catalog request sent"); return true; }
                 scheduleDiscovery(c); controller = null; _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); return true;
             } else if (result.kind == .catalog) {
                 if (!applyCatalogPage(payload)) {
@@ -1885,6 +1937,8 @@ pub fn pollTimer(id: usize) bool {
                 discovery_waiting = false;
                 _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM_DISCOVERY);
                 catalog_complete = true;
+                var log: [128]u8 = undefined;
+                diagnostics.syncLog(std.fmt.bufPrint(&log, "[rooms] catalog reply count={d}", .{catalog_rows.items.len}) catch unreachable);
                 cacheCatalog(c);
                 finishRefresh(c, true);
                 if (created_selection != null and (!isVisible() or !view.ownsFocus())) created_selection = null;
@@ -1904,8 +1958,13 @@ pub fn pollTimer(id: usize) bool {
                 }
             } else if (result.kind == .members) {
                 if (!acceptMembers(c, payload)) {
+                    diagnostics.syncLog("[rooms] members reply rejected: invalid member catalog");
                     view.showError("Could not load the server's chat list. Reconnect and try again.");
-                } else if (front == .create) _ = publishCreateCandidates();
+                } else {
+                    var log: [128]u8 = undefined;
+                    diagnostics.syncLog(std.fmt.bufPrint(&log, "[rooms] members reply count={d}", .{candidate_count}) catch unreachable);
+                    if (front == .create) _ = publishCreateCandidates();
+                }
                 if (front == .selected and owned_model != null and c.has_host_uuid and std.mem.eql(u8, &front.selected.store.store_uuid, &c.host_uuid) and std.mem.eql(u8, owned_model.?.value.room_id, &front.selected.room_id)) selection_waiting = true;
             }
             if (!startSnapshot(c) and !nextStatus(c) and !scheduleMetadata(c)) _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM);
@@ -2230,12 +2289,15 @@ pub fn openNewRoom(hwnd: w.HANDLE) void {
 }
 
 pub fn openCreate() void {
+    diagnostics.syncLog("[rooms] create dialog requested");
     const L = std.unicode.utf8ToUtf16LeStringLiteral;
     if (!saveDraft()) {
+        diagnostics.syncLog("[rooms] create blocked: draft could not be saved");
         _ = w.MessageBoxW(app_state.g_main_hwnd, L("Could not save your room draft. Try again before creating another room."), L("Rooms"), 0x10);
         return;
     }
     if (!enter()) {
+        diagnostics.syncLog("[rooms] create blocked: account or room state unavailable");
         const reason: w.LPCWSTR = if (app_state.g_account_locked) L("Unlock your account before creating a room.") else if (account_len == 0) L("Sign in before creating a room.") else L("Room state is not ready. Wait for account sync, then try again.");
         _ = w.MessageBoxW(app_state.g_main_hwnd, reason, L("Rooms"), 0x10);
         return;
@@ -2251,6 +2313,7 @@ pub fn openCreate() void {
     resize(app_state.g_main_hwnd);
     syncVisibility();
     view.openCreate();
+    diagnostics.syncLog("[rooms] create dialog opened");
     if (account_len == 0) {
         view.showError("Sign in before creating a room.");
         return;
@@ -2258,6 +2321,7 @@ pub fn openCreate() void {
     var has_route = false;
     for (applied_routes) |route| if (route != null) { has_route = true; break; };
     if (!has_route) {
+        diagnostics.syncLog("[rooms] create blocked: no configured account hosts");
         view.showError("Add a server to your account before creating a room.");
         return;
     }
@@ -2441,6 +2505,13 @@ pub fn deinit() void {
     clearModels();
     clearCatalog();
     clearStoreDiscovery();
+    var names = member_names.iterator();
+    while (names.next()) |entry| {
+        std.heap.page_allocator.free(entry.key_ptr.*);
+        std.heap.page_allocator.free(entry.value_ptr.*);
+    }
+    member_names.deinit(std.heap.page_allocator);
+    member_names = .empty;
     refresh_intents.deinit(std.heap.page_allocator);
     refresh_intents = .empty;
     candidate_count = 0;

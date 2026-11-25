@@ -63,7 +63,7 @@ class BridgeTest(unittest.TestCase):
         (root / 'chat-names.json').write_text(json.dumps({'chat-' + self.sid: {'sid': self.sid, 'name': 'Research Notes'}}))
         with mock.patch.object(bridge_module, 'host_status', return_value=dict(enabled=True, alive=False, owner=None)):
             result = self.bridge.execute({'op': 'members', 'host_uuid': self.host, 'slot': 1})
-        self.assertEqual([dict(provider='claude', sid=self.sid, display_name='Research Notes', enabled=True, alive=False, owner=None)], result['members'])
+        self.assertEqual([dict(provider='claude', sid=self.sid, tmux='chat-' + self.sid, display_name='Research Notes', enabled=True, alive=False, owner=None)], result['members'])
 
     @mock.patch.object(bridge_module, 'scoped_runtime', return_value=False)
     def test_old_runtime_explains_how_to_recover(self, runtime):

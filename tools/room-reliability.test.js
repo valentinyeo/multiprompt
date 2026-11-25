@@ -14,14 +14,15 @@ function declaration(source, marker) {
   assert.notEqual(end, -1, marker);
   return source.slice(start, end + 2) + (source[end + 2] === ';' ? ';' : '');
 }
-function run(source, files = {}) {
+function run(source, files = {}, expectedStatus = 0) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'room-reliability-'));
   try {
     fs.writeFileSync(path.join(dir, 'test.zig'), source);
     for (const [name, contents] of Object.entries(files)) fs.writeFileSync(path.join(dir, name), contents);
     const result = spawnSync(process.env.ZIG || 'zig', ['test', 'test.zig'], { cwd: dir, encoding: 'utf8', timeout: 120000 });
     assert.equal(result.error, undefined, result.error?.message);
-    assert.equal(result.status, 0, `${result.stdout || ''}${result.stderr || ''}`);
+    assert.equal(result.status, expectedStatus, `${result.stdout || ''}${result.stderr || ''}`);
+    return result.stderr;
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -102,7 +103,10 @@ var candidates: [768]Candidate = undefined;
 var candidate_count: usize = 0;
 var status_generation: u64 = 1;
 var candidate_generation: u64 = 1;
+var member_names: std.StringHashMapUnmanaged([]u8) = .empty;
+var route_key: [64]u8 = @splat('0');
 ${declaration(source, 'fn textField(')}
+${declaration(source, 'fn memberDisplayName(')}
 ${declaration(source, 'fn acceptMembers(')}
 test "unopened chats retain their shown names and stable bindings" {
     const data = "{\\"members\\":[{\\"provider\\":\\"claude\\",\\"sid\\":\\"unopened-server-chat\\",\\"display_name\\":\\"Research Notes\\",\\"alive\\":false}]}";
@@ -120,6 +124,17 @@ test "unopened chats retain their shown names and stable bindings" {
     try std.testing.expect(!candidates[0].online);
 }
 `);
+});
+
+test('creation uses account display names for unopened server chats and retains them after closing a tab', () => {
+  const source = read('room_frontend.zig');
+  const fixture = fs.readFileSync(path.join(__dirname, 'fixtures/MUBO-533/member-names.zig'), 'utf8');
+  const harness = `${fixture}\n${declaration(source, 'const Candidate = struct {')}\n${declaration(source, 'fn cacheMemberNames(')}\n${declaration(source, 'fn memberDisplayName(')}\n${declaration(source, 'fn textField(')}\n${declaration(source, 'fn acceptMembers(')}`;
+  const files = { 'session_layout.zig': 'pub const Tab = struct { tmux_host: u8, tmux_session: []const u8, name: []const u8 };\n' };
+  run(harness, files);
+  const before = harness.replace('const name = memberDisplayName(member, host_name);', 'const name = host_name;');
+  assert.notEqual(before, harness);
+  assert.match(run(before, files, 1), /creation lists an unopened server chat by the account name instead of its tmux name\.\.\.FAIL \(TestExpectedEqual\)/);
 });
 
 test('fresh-profile room discovery probes configured hosts without local pins or tabs', () => {

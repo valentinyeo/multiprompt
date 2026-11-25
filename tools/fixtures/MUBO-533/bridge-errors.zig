@@ -86,5 +86,6 @@ test "successful bridge has no failure log" {
     process_terminated = false;
     var job = Job{ .success = true };
     finish(&job, .{}, 2);
-    try std.testing.expectEqual(@as(usize, 0), logged.items.len);
+    try std.testing.expect(std.mem.indexOf(u8, logged.items, "bridge reply received") != null);
+    try std.testing.expect(std.mem.indexOf(u8, logged.items, "bridge failed") == null);
 }
