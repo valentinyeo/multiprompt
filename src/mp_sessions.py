@@ -539,6 +539,20 @@ def start_host(send, provider, sid, folder, tmux):
     return started
 
 
+def verify_host_running(send, provider, sid, tmux):
+    status = send.reader_cli("status", provider, sid)
+    if status.get("status") != "ok" or status.get("alive") is not True or not send.pid_alive(status.get("pid")):
+        raise ValueError("chat host did not stay running for " + tmux + ": host_exited")
+    if status.get("tmux") != tmux:
+        raise ValueError("chat host is bound to another chat for " + tmux + ": host_binding_mismatch")
+    path = send.host_root() / (send.host_config_key(provider, sid) + ".state.json")
+    state = send.read_json(path) or {}
+    if state.get("provider") != provider or state.get("sid") != sid or state.get("pid") != status.get("pid"):
+        raise ValueError("chat host state does not match " + tmux + ": host_binding_mismatch")
+    if not send.pid_alive(state.get("agent_pid")):
+        raise ValueError("chat agent did not stay running for " + tmux + ": agent_exited")
+
+
 def row_state(row):
     if row.get("busy"):
         return "busy"
@@ -815,6 +829,7 @@ def cmd_start(args):
         send.dispatch(reader, provider, sid, tmux)
         final = send.handoff(reader, provider, sid, tmux, message.get("id"), 15.0)
         first = dict(id=message.get("id"), state=(final or {}).get("state"))
+    verify_host_running(send, provider, sid, tmux)
     result = dict(ok=True, status=status, name=display, tmux=tmux, sid=sid, provider=provider, folder=folder,
                   workspace=workspace, group=group, host=host, visible=shown.get("ok") is True, tab=shown.get("tab"), task=first)
     if shown.get("ok") is not True:
@@ -836,6 +851,7 @@ def cmd_restart(args):
     tmux = target["tmux"]
     folder = target.get("folder") or os.getcwd()
     if target.get("running") and target.get("tab_open"):
+        verify_host_running(send, provider, sid, tmux)
         print(json.dumps(dict(ok=True, status="already", name=target.get("name"), tmux=tmux, sid=sid), separators=(",", ":")))
         return 0
     if target.get("busy"):
@@ -843,6 +859,7 @@ def cmd_restart(args):
     start_host(send, provider, sid, folder, tmux)
     display = target.get("name") or tmux
     shown = ensure_visible(send, listing, target, display)
+    verify_host_running(send, provider, sid, tmux)
     print(json.dumps(dict(ok=True, status="restarted", name=display, tmux=tmux, sid=sid,
                           visible=shown.get("ok") is True, tab=shown.get("tab")), separators=(",", ":")))
     return 0

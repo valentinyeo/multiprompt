@@ -13,6 +13,8 @@ Creating a tab resolves its server slot in one order: `--host`, the chat's recor
 
 When reopening a saved chat, resolve its recorded numeric host slot through the current desktop host list before using its old recorded host name. The caller's slot must not move that chat to a different server. The notification relay is a supported browser bridge on port 19548; an empty response behind that bridge is not a foreign port conflict.
 
+`start` and `restart` verify the current host status, routing name, matching session state and live host/agent process IDs before reporting success, including an already-running chat. An exited host or agent returns exit 2 with `host_exited` or `agent_exited` and the routing name, with no success JSON. Hosted chats deliberately have no physical tmux session; its absence alone is not a failure. The fixture reader models live process IDs and failed starts without using installed runtime data.
+
 Every `servers.json` the repository ships names a slot for each server, and an installed file whose entries carry only `id` and `hostname` still lets an existing chat be messaged.
 
 ## How to get to it (user POV)

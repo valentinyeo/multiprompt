@@ -811,6 +811,22 @@ class MpSessionsTest(unittest.TestCase):
         self.assertEqual(again["status"], "already")
         self.assertEqual(again["tmux"], started["tmux"])
 
+    def test_MUBO_566_already_running_does_not_hide_a_dead_agent(self):
+        started = self.parsed(self.run_sessions("start", "--name", "Stale agent", "--provider", "codex"))
+        key = hashlib.sha256(("codex:" + started["sid"]).encode()).hexdigest()[:32]
+        path = self.host / (key + ".state.json")
+        state = json.loads(path.read_text())
+        state["agent_pid"] = 0
+        path.write_text(json.dumps(state))
+        for command in (("start", "--name", "Stale agent"), ("restart", "Stale agent")):
+            with self.subTest(command=command):
+                failed = self.run_sessions(*command)
+                self.assertEqual(failed.returncode, 2, failed.stdout + failed.stderr)
+                self.assertEqual(failed.stdout, "")
+                self.assertIn("agent_exited", failed.stderr)
+                self.assertIn(started["tmux"], failed.stderr)
+        self.assertEqual(len([call for call in self.events("host") if call[0] == "start"]), 1)
+
     def test_MUBO_566_fresh_chat_uses_the_live_desktop_host_list(self):
         desktop = json.loads((ROOT / "tools/fixtures/MUBO-566/listing-current-desktop.json").read_text())
         started = self.parsed(self.run_sessions("start", "--name", "Fresh Codex", "--workspace", "Multiprompt",
