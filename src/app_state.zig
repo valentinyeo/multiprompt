@@ -3141,6 +3141,7 @@ pub const HostLaunch = struct {
     host: u8 = 0,
     provider: u8 = 0,
     group: u32 = 0,
+    user_action: u64 = 0,
     sid: [36]u8 = @splat(0),
     sid_len: u8 = 0,
     session: [64]u8 = @splat(0),

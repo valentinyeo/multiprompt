@@ -3297,7 +3297,7 @@ fn launchRefused() bool {
 fn hostLaunchArm(kind: app_state.HostLaunchKind, host: u8, provider: u8, sid: []const u8, session: []const u8, cwd: []const u8, program: []const u8) bool {
     for (&app_state.g_host_launches, 0..) |*launch, slot| {
         if (launch.session_len != 0 or launch.ready.load(.acquire)) continue;
-        launch.* = .{ .kind = kind, .host = host, .provider = provider, .group = app_state.g_pending_new_tab_group };
+        launch.* = .{ .kind = kind, .host = host, .provider = provider, .group = app_state.g_pending_new_tab_group, .user_action = app_state.g_focus_user_action_tick };
         app_state.g_pending_new_tab_group = 0;
         @memcpy(launch.sid[0..sid.len], sid);
         launch.sid_len = @intCast(sid.len);
@@ -3315,10 +3315,17 @@ fn hostLaunchArm(kind: app_state.HostLaunchKind, host: u8, provider: u8, sid: []
     return false;
 }
 
+fn focusAuthorizingTick(armed_action: u64, now: u64) u64 {
+    return if (armed_action != 0) now else 0;
+}
+
 pub fn finishHostLaunch(slot: usize) void {
     if (slot >= app_state.g_host_launches.len) return;
     const launch = app_state.g_host_launches[slot];
     if (!launch.ready.load(.acquire)) return;
+    const prior_action = app_state.g_focus_user_action_tick;
+    app_state.g_focus_user_action_tick = focusAuthorizingTick(launch.user_action, GetTickCount64());
+    defer app_state.g_focus_user_action_tick = prior_action;
     const spawnable = launch.session_len != 0 and launch.runtime_len != 0;
     if (spawnable) {
         app_state.g_pending_new_tab_group = launch.group;
@@ -3388,6 +3395,11 @@ fn spawnHostedChatNow(provider: @import("agent_host.zig").Provider, host: u8, se
     }
 
     return ok;
+}
+
+test "MUBO-221 a deferred launch the user asked for still focuses the chat it opens" {
+    try std.testing.expectEqual(@as(u64, 41_000), focusAuthorizingTick(40_000, 41_000));
+    try std.testing.expectEqual(@as(u64, 0), focusAuthorizingTick(0, 41_000));
 }
 
 pub fn spawnCodexTmuxSession() bool {
