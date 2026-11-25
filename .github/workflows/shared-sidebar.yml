@@ -77,7 +77,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Install Zig 0.16.0
         uses: ./.github/actions/setup-zig
-      - run: node --test tools/session-lock.test.js tools/chat-view-everywhere.test.js tools/palette-rows.test.js tools/palette-verbs.test.js tools/shortcuts-doc.test.js tools/group-palette.test.js
+      - run: node --test tools/session-lock.test.js tools/chat-view-everywhere.test.js tools/palette-rows.test.js tools/palette-verbs.test.js tools/shortcuts-doc.test.js tools/group-palette.test.js tools/antigravity-new-session-palette.test.js
         env:
           ZIG: zig
   sidebar:

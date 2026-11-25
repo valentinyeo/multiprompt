@@ -692,7 +692,7 @@ fn killRemoteTmuxSession(identity: SessionIdentity, pending: ?session_kills.Toke
     const session = std.mem.sliceTo(&identity.tmux, 0);
     const sid = std.mem.sliceTo(&identity.sid, 0);
     const host = identity.host.index();
-    const agent: u8 = switch (identity.agent) { .codex => 2, .pi => 3, else => 1 };
+    const agent: u8 = switch (identity.agent) { .codex => 2, .pi => 3, .antigravity => 8, else => 1 };
     if (!remoteTmuxTargetIsSafe(session)) {
         debugLog("killRemoteTmuxSession: unsafe session skipped");
         return .unsafe;
@@ -913,7 +913,7 @@ pub fn shellLooksLikeCodingAgent(idx: u32) bool {
     if (sh.ai_agent != 0 or sh.claude_session) return true;
     if (sh.name_len > 0) {
         const name = sh.name[0..sh.name_len];
-        if (u16ContainsU8Insensitive(name, "claude") or u16ContainsU8Insensitive(name, "codex") or u16ContainsU8Insensitive(name, "hax") or u16ContainsU8Insensitive(name, "grok") or u16ContainsU8Insensitive(name, "cursor")) return true;
+        if (u16ContainsU8Insensitive(name, "claude") or u16ContainsU8Insensitive(name, "codex") or u16ContainsU8Insensitive(name, "hax") or u16ContainsU8Insensitive(name, "grok") or u16ContainsU8Insensitive(name, "cursor") or u16ContainsU8Insensitive(name, "antigravity")) return true;
     }
     if (sh.last_title_len > 0) {
         const last_len: usize = @intCast(sh.last_title_len);
@@ -1133,7 +1133,7 @@ fn rememberArchivedTab(i: usize) ?ArchivedEntry {
     entry.tmux_identity = app_state.shells[i].tmux_identity;
     entry.tmux_identity_len = app_state.shells[i].tmux_identity_len;
     entry.tmux_host = app_state.shells[i].tmux_host;
-    entry.ai_agent = if (app_state.shells[i].ai_agent >= 1 and app_state.shells[i].ai_agent <= 3) app_state.shells[i].ai_agent else 1;
+    entry.ai_agent = if ((app_state.shells[i].ai_agent >= 1 and app_state.shells[i].ai_agent <= 3) or app_state.shells[i].ai_agent == 8) app_state.shells[i].ai_agent else 1;
     const cs_len: u32 = @intCast(@min(app_state.shells[i].claude_sid_len, @as(u32, 39)));
     if (cs_len > 0) {
         @memcpy(entry.claude_sid[0..cs_len], app_state.shells[i].claude_sid[0..cs_len]);

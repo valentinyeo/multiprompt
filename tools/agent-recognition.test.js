@@ -139,3 +139,37 @@ test("Cursor gets a native nested-diamond sidebar icon", () => {
   assert.match(draw, /cursor_core/);
   assert.match(draw, /drawNativeLine[\s\S]*drawNativeLine/);
 });
+
+test("Antigravity has a stable identity across tmux, text, diagnostics, and capacity admission", () => {
+  assert.match(source, /const AgentName = enum \{[^}]*antigravity[^}]*\}/);
+  assert.match(functionBody("agentLabel", "agentId"), /\.antigravity => "Antigravity"/);
+  assert.match(functionBody("agentId", "agentFromId"), /\.antigravity => 8/);
+  assert.match(functionBody("agentFromId", "setDetectedShellAgent"), /8 => \.antigravity/);
+  assert.match(functionBody("aiAgentLabelValue", "diagAppend"), /8 => "antigravity"/);
+
+  const textDetection = functionBody("detectAgentFromText", "detectAgentForShell");
+  assert.match(textDetection, /"antigravity"[\s\S]*return \.antigravity/);
+  assert.match(textDetection, /"agy"[\s\S]*return \.antigravity/);
+  const shellDetection = functionBody("detectAgentForShell", "hostLabelForShell");
+  assert.match(shellDetection, /"agy\.exe", "agy\.cmd"/);
+
+  const tmuxDetection = functionBody("tmuxAgentFromPaneCommand", "fetchHostIntoCache");
+  assert.match(tmuxDetection, /"agy"[\s\S]*return 8/);
+  assert.match(source, /fn commandCreatesAgentWorkload\([^}]*"antigravity"/);
+  assert.match(source, /eql\(u8, kind_part, "antigravity"\)\) 8/);
+  assert.match(functionBody("shellLooksLikeCodingAgent", "syncShellDisplayNameSurfaces"), /"antigravity"/);
+  assert.match(source, /ai_agent == 7 or .*ai_agent == 8/);
+});
+
+test('a bound Antigravity chat ignores stale console provider text', () => {
+  const preview = functionBody('captureShellPreview', 'pollShellNames');
+  const condition = preview.match(/if \((detect_agent != 0[^\n]+)\) \{/)?.[1];
+  assert.ok(condition, 'console provider adoption condition is missing');
+  const replaceAgent = new Function('detect_agent', 'kept_agent', 'sid_len', `return ${condition
+    .replaceAll('shells[i].claude_sid_len', 'sid_len')
+    .replaceAll(' and ', ' && ').replaceAll(' or ', ' || ')};`);
+  for (const detected of [1, 2, 4, 6]) {
+    for (const bound of [1, 2, 3, 8]) assert.equal(replaceAgent(detected, bound, 36), false);
+    assert.equal(replaceAgent(detected, 8, 0), true);
+  }
+});

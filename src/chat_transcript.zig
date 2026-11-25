@@ -21,6 +21,7 @@ pub const Identity = struct {
             5 => "hax",
             6 => "grok",
             7 => "cursor",
+            8 => "antigravity",
             else => "claude",
         };
     }

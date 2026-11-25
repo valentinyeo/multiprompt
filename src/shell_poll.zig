@@ -269,6 +269,8 @@ fn parseAiRenameTitle(title: []const u16) ?AiRenameTitle {
         .{ .prefix = "Grok: ", .label = "Grok", .agent = .grok },
         .{ .prefix = "Cursor - ", .label = "Cursor", .agent = .cursor },
         .{ .prefix = "Cursor: ", .label = "Cursor", .agent = .cursor },
+        .{ .prefix = "Antigravity - ", .label = "Antigravity", .agent = .antigravity },
+        .{ .prefix = "Antigravity: ", .label = "Antigravity", .agent = .antigravity },
     };
     for (exact_prefixes) |p| {
         if (title.len > p.prefix.len and u16StartsWithU8(title, p.prefix)) {
@@ -1137,6 +1139,7 @@ fn agentLabel(agent: AgentName) ?[]const u8 {
         .hax => "Hax",
         .grok => "Grok",
         .cursor => "Cursor",
+        .antigravity => "Antigravity",
     };
 }
 
@@ -1150,6 +1153,7 @@ fn agentId(agent: AgentName) u8 {
         .hax => 5,
         .grok => 6,
         .cursor => 7,
+        .antigravity => 8,
     };
 }
 
@@ -1162,6 +1166,7 @@ fn agentFromId(id: u8) AgentName {
         5 => .hax,
         6 => .grok,
         7 => .cursor,
+        8 => .antigravity,
         else => .none,
     };
 }
@@ -1189,6 +1194,8 @@ fn detectAgentFromText(title: []const u16, subtitle: []const u16) AgentName {
     if (u16ContainsU8WordInsensitive(title, "kimi") or u16ContainsU8WordInsensitive(subtitle, "kimi")) return .kimi;
     if (u16ContainsU8WordInsensitive(title, "hax") or u16ContainsU8WordInsensitive(subtitle, "hax")) return .hax;
     if (u16ContainsU8WordInsensitive(title, "grok") or u16ContainsU8WordInsensitive(subtitle, "grok")) return .grok;
+    if (u16ContainsU8WordInsensitive(title, "antigravity") or u16ContainsU8WordInsensitive(subtitle, "antigravity")) return .antigravity;
+    if (u16ContainsU8WordInsensitive(title, "agy") or u16ContainsU8WordInsensitive(subtitle, "agy")) return .antigravity;
     return .none;
 }
 
@@ -1210,6 +1217,8 @@ fn detectAgentForShell(shell: *const Shell, title: []const u16, subtitle: []cons
         if (proc_cache.findProcessTreeExe(shell.pid, grok_names[0..]) != null) return .grok;
         const cursor_names = [_][]const u8{ "cursor-agent.exe", "cursor-agent.cmd", "cursor.exe", "cursor.cmd" };
         if (proc_cache.findProcessTreeExe(shell.pid, cursor_names[0..]) != null) return .cursor;
+        const agy_names = [_][]const u8{ "agy.exe", "agy.cmd", "antigravity.exe", "antigravity.cmd" };
+        if (proc_cache.findProcessTreeExe(shell.pid, agy_names[0..]) != null) return .antigravity;
     }
 
     const text_agent = detectAgentFromText(title, subtitle);
@@ -1733,7 +1742,7 @@ fn captureShellPreview(i: usize, pid: DWORD, missed_done_recovered: *bool) bool 
 
     const detect_agent: u8 = if (saw_grok_agent) 6 else if (saw_kimi_agent) 4 else if (saw_codex_agent) 2 else if (saw_claude_agent) 1 else 0;
     const kept_agent = app_state.shells[i].ai_agent;
-    if (detect_agent != 0 and kept_agent != detect_agent and !(kept_agent >= 1 and kept_agent <= 3 and app_state.shells[i].claude_sid_len > 0)) {
+    if (detect_agent != 0 and kept_agent != detect_agent and !(((kept_agent >= 1 and kept_agent <= 3) or kept_agent == 8) and app_state.shells[i].claude_sid_len > 0)) {
         app_state.shells[i].ai_agent = detect_agent;
         changed = true;
     }

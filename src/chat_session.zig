@@ -1385,7 +1385,6 @@ fn chatFileFetchThread(entry: *ChatHistoryEntry, key: chat_transcript.Identity, 
             } else if (!delta) entry.backfill.deinit(a);
         }
     }
-    chatPerf("parse", parse_start, wire.items.len);
     if (ok) {
         if (!entry.staged and !entry.incremental and !entry.prepended and !entry.unchanged and entry.history.text.items.len > 0 and
             std.mem.eql(u16, entry.history.text.items, history.text.items) and std.meta.eql(entry.history.status, history.status))
@@ -1397,7 +1396,6 @@ fn chatFileFetchThread(entry: *ChatHistoryEntry, key: chat_transcript.Identity, 
         entry.cache_dirty = entry.cache_dirty or changed;
         var path_buf: [560]u8 = undefined;
         if (if (!entry.staged and entry.cache_dirty and (pushed != null or entry.cache_written == 0 or GetTickCount64() -| entry.cache_written >= chat_history.CACHE_WRITE_MS)) chatHistoryPath(key, &path_buf) else null) |path| {
-            const write_start = GetTickCount64();
             var snapshot = history.cursor();
             defer snapshot.deinit(a);
             var snapshot_ok = true;
@@ -1434,7 +1432,6 @@ fn chatFileFetchThread(entry: *ChatHistoryEntry, key: chat_transcript.Identity, 
                         }
                     } else debugLog("[chat] transcript cache write failed");
                 }
-                chatPerf("cache write", write_start, bytes.len);
             } else |_| debugLog("[chat] transcript cache encode failed");
         }
         history.received_ms = if (!entry.staged and !entry.unchanged) parse_start else 0;

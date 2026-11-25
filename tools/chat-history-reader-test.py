@@ -7811,6 +7811,12 @@ class HostControlTest(HostControlFixture, unittest.TestCase):
         open_cursor('cursor', self.sid, self.tmux, self.session)
         self.assertEqual(self.writes(), [])
 
+    def test_antigravity_start_does_not_request_remote_control(self):
+        open_agy = getattr(reader, 'host_antigravity_open', None)
+        self.assertIs(reader.HOST_ADAPTERS['antigravity']['open'], open_agy)
+        open_agy('antigravity', self.sid, self.tmux, self.session)
+        self.assertEqual(self.writes(), [])
+
     def test_remote_control_rejection_does_not_stop_normal_chat(self):
         reader.host_claude_open(self.provider, self.sid, self.tmux, self.session)
         writes = self.writes()
@@ -8257,12 +8263,44 @@ class IGSH_1828_HostRecallTest(HostControlFixture, unittest.TestCase):
     def test_an_unsupported_provider_never_substitutes_an_interrupt(self):
         target = self.deliver('host_fixture_message_01')
         previous = self.writes()
-        for provider in ('codex', 'pi', 'hax', 'cursor'):
+        for provider in ('codex', 'pi', 'hax', 'cursor', 'antigravity'):
             result = reader.host_handle_request(provider, self.sid, self.tmux, self.session,
                                                 dict(op='recall', id=target['id'], attempt='attempt-1'))
             self.assertEqual(result['reason'], 'recall_unavailable')
         self.assertEqual(self.writes(), previous)
         self.assertEqual(self.session['sends'], [target])
+
+
+class HostAntigravityTurnTest(HostEventStreamFixture, unittest.TestCase):
+    provider = 'antigravity'
+
+    def antigravity_events(self, kind=None):
+        db = reader.message_store_db(self.tmux)
+        rows = [json.loads(body) for (body,) in db.execute(
+            "SELECT body FROM message_events WHERE provider='antigravity' AND sid=? ORDER BY seq", (self.sid,))]
+        db.close()
+        return [row for row in rows if kind is None or row.get('kind') == kind]
+
+    def test_an_antigravity_turn_reports_the_user_message_uuid_it_took(self):
+        self.session['sends'] = [dict(id='mp-antigravity-1', attempt='a', epoch=0, accepted=False, turn='t-1',
+                                      sha256='x', uuid=None, text='hello')]
+        self.feed(dict(event='step_update',
+                       step_update=dict(conversation_id='conversation-1', step_index=0, state='DONE',
+                                        step_type='user_input', user_message_uuid='um-antigravity-1')))
+        started = self.antigravity_events('turn.started')
+        self.assertEqual(len(started), 1, 'the Antigravity turn must name the send it took')
+        self.assertEqual(started[0]['payload']['message_id'], 'mp-antigravity-1')
+        self.assertEqual(started[0]['payload']['uuids'], ['mp-antigravity-1', 'um-antigravity-1'])
+
+    def test_an_antigravity_turn_without_a_reported_uuid_still_names_its_row(self):
+        self.session['sends'] = [dict(id='mp-antigravity-2', attempt='a', epoch=0, accepted=False, turn='t-1',
+                                      sha256='x', uuid=None, text='hello')]
+        self.feed(dict(event='step_update',
+                       step_update=dict(conversation_id='conversation-1', step_index=0, state='DONE',
+                                        step_type='user_input')))
+        started = self.antigravity_events('turn.started')
+        self.assertEqual(len(started), 1)
+        self.assertEqual(started[0]['payload']['uuids'], ['mp-antigravity-2'])
 
 
 class HostInterruptTest(HostControlFixture, unittest.TestCase):
@@ -9048,6 +9086,87 @@ class SOFT2272HostedClearTest(unittest.TestCase):
         self.assertIn('PINEAPPLE', wire)
 
 
+class MUBO_243_ClearedChatKeepsItsIdentityTest(unittest.TestCase):
+    host_sid = '11111111-2222-4333-8444-555555555555'
+    old_native = '66666666-7777-4888-8999-aaaaaaaaaaaa'
+    new_native = '77777777-8888-4999-8aaa-bbbbbbbbbbbb'
+    tmux = 'live-poteto'
+    stale_tmux = 'live-8ee27e8ccae046f287ff9459eb8a5a72'
+    slot = 0
+
+    class Reply:
+        def __init__(self, body):
+            self.status = 200
+            self.body = body
+
+        def read(self):
+            return self.body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.addCleanup(patch.stopall)
+        self.home = Path(self.temp.name)
+        patch.object(reader, 'HOME', self.home).start()
+        self.paths = reader.host_paths('claude', self.host_sid)
+        reader.host_write(self.paths['config'], dict(enabled=True, provider='claude', sid=self.host_sid, tmux=self.tmux,
+                                                    cwd=str(self.home), native_session=self.old_native))
+        reader.host_write(self.paths['state'], dict(provider='claude', sid=self.host_sid, native_session=self.old_native))
+        names = reader.chat_names_path()
+        names.parent.mkdir(parents=True, exist_ok=True)
+        names.write_text(json.dumps({self.tmux: dict(name='Poteto', at=2, sid=self.host_sid),
+                                     self.stale_tmux: dict(name='Poteto', at=1, sid=self.host_sid)}), encoding='utf-8')
+        self.layout = dict(workspaces=[dict(name='Home')],
+                           tabs=[dict(name='Poteto', tmux_host=self.slot, tmux_session=self.tmux,
+                                      workspace='Home', csid=self.old_native)])
+        self.puts = []
+
+    def serve_layout(self, request, timeout=None):
+        if (getattr(request, 'method', None) or 'GET') == 'PUT':
+            payload = json.loads(request.data.decode('utf-8'))
+            self.puts.append(payload)
+            self.layout = payload['layout']
+            return self.Reply(b'{}')
+        return self.Reply(json.dumps(dict(layout=self.layout, revision=len(self.puts) + 1)).encode('utf-8'))
+
+    def stored_names(self):
+        return json.loads(reader.chat_names_path().read_text(encoding='utf-8'))
+
+    def clear(self):
+        session = dict(state=reader.host_session_state('claude', self.host_sid))
+        reader.host_session_reset(session, types.SimpleNamespace(stdin=io.BytesIO()))
+        with patch.dict(os.environ, dict(MULTIPROMPT_KEY='fixture-key', MULTIPROMPT_HOST=str(self.slot))), \
+                patch('urllib.request.urlopen', self.serve_layout):
+            reader.host_claude_event('claude', self.host_sid, self.tmux, session,
+                                     dict(type='system', subtype='init', session_id=self.new_native))
+        if session.get('db') is not None:
+            session['db'].close()
+
+    def test_publishing_an_old_tab_keeps_one_name_entry_under_the_live_chat(self):
+        result = reader.chat_names_publish([dict(tmux=self.stale_tmux, name='Poteto', sid=self.host_sid)])
+        self.assertEqual(result, dict(status='ok', count=1))
+        stored = self.stored_names()
+        self.assertEqual(list(stored), [self.tmux])
+        self.assertEqual(stored[self.tmux]['sid'], self.host_sid)
+        self.assertEqual(stored[self.tmux]['conversation'], self.old_native)
+
+    def test_a_clear_moves_the_tab_and_the_name_to_the_new_conversation(self):
+        reader.chat_names_publish([dict(tmux=self.tmux, name='Poteto', sid=self.host_sid)])
+        self.clear()
+        self.assertEqual(len(self.puts), 1)
+        self.assertEqual(self.puts[0]['layout']['tabs'][0]['csid'], self.new_native)
+        stored = self.stored_names()
+        self.assertEqual(list(stored), [self.tmux])
+        self.assertEqual(stored[self.tmux]['sid'], self.host_sid)
+        self.assertEqual(stored[self.tmux]['conversation'], self.new_native)
+
+
 class SOFT_3054_FreshHandoverTest(unittest.TestCase):
     fixture = json.loads((ROOT / 'tools/fixtures/SOFT-3054/scenario.json').read_text(encoding='utf-8'))
     provider = 'claude'
@@ -9119,6 +9238,7 @@ class SOFT_3054_FreshHandoverTest(unittest.TestCase):
         self.assertIn('did not contain usable text', prompt)
         self.assertIn('MCP adapter audit', prompt)
         self.assertNotIn('Reloaded skills', prompt)
+
 
 class MUBO_239_DisplayHistoryReplyIdTest(unittest.TestCase):
     provider = 'claude'

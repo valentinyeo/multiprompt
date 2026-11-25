@@ -16,7 +16,7 @@ MP_SESSIONS = ROOT / "tools" / "mp-sessions"
 MUBO_194_FIXTURES = ROOT / "tools" / "fixtures" / "MUBO-194"
 
 FAKE_READER = r'''
-import json, os, sys
+import hashlib, json, os, sys
 from pathlib import Path
 LOG = Path(os.environ["MP_SESSIONS_TEST_LOG"])
 
@@ -26,8 +26,33 @@ def note(kind, value):
 
 if __name__ == "__main__" and sys.argv[1:2] == ["host"]:
     note("host", sys.argv[2:])
-    status = dict(enable="enabled", start="started", stop="stopped").get(sys.argv[2], "error")
-    print(json.dumps(dict(status=status, sid=sys.argv[3] if len(sys.argv) > 3 else None)))
+    command, provider, sid = sys.argv[2:5]
+    root = Path.home() / ".local/state/multiprompt/agent-host"
+    key = hashlib.sha256((provider + ":" + sid).encode()).hexdigest()[:32]
+    config_path = root / (key + ".config.json")
+    state_path = root / (key + ".state.json")
+    config = json.loads(config_path.read_text()) if config_path.exists() else {}
+    failure = os.environ.get("MP_SESSIONS_TEST_START_FAILURE")
+    pid = int(os.environ["MP_SESSIONS_TEST_PID"])
+    if command == "enable":
+        config["enabled"] = True
+        config_path.write_text(json.dumps(config))
+    if command == "start":
+        state = dict(pid=pid, agent_pid=pid, provider=provider, sid=sid)
+        if failure == "host_exited":
+            state["pid"] = 0
+        if failure == "agent_exited":
+            state["agent_pid"] = 0
+        state_path.write_text(json.dumps(state))
+    if command == "stop":
+        state_path.unlink(missing_ok=True)
+    if command == "status":
+        state = json.loads(state_path.read_text()) if state_path.exists() else {}
+        print(json.dumps(dict(status="ok", alive=state.get("pid", 0) > 0,
+                              pid=state.get("pid"), owner="host", tmux=config.get("tmux"))))
+    else:
+        status = dict(enable="enabled", start="started", stop="stopped").get(command, "error")
+        print(json.dumps(dict(status=status, sid=sid)))
 '''
 
 FAKE_ZSB = r'''#!/usr/bin/env python3
@@ -45,9 +70,14 @@ if sys.argv[1] == "workspace-list":
         listing["workspaces"][0]["tabs"] = state["tabs"]
     print(json.dumps(listing))
 elif sys.argv[1] == "session-open":
+    host = sys.argv[sys.argv.index("--host") + 1]
+    hosts = json.loads(os.environ.get("MP_SESSIONS_TEST_LIST", "{}")).get("hosts", [])
+    if host not in hosts:
+        print(json.dumps(dict(ok=False, error="unknown_host", valid_names=hosts)))
+        sys.exit(1)
     tmux = sys.argv[sys.argv.index("--tmux") + 1]
     state.setdefault("tabs", [])
-    state["tabs"].append(dict(id=55, title=sys.argv[sys.argv.index("--name") + 1], host="remote-1", tmux=tmux))
+    state["tabs"].append(dict(id=55, title=sys.argv[sys.argv.index("--name") + 1], host=host, tmux=tmux))
     Path(os.environ["MP_SESSIONS_TEST_STATE_FILE"]).write_text(json.dumps(state), encoding="utf-8")
     print(json.dumps(dict(ok=True, created=True, tab=55)))
 elif sys.argv[1] == "session-rename":
@@ -100,13 +130,16 @@ class MpSessionsTest(unittest.TestCase):
         zsb = self.bin / "zsb"
         zsb.write_text(FAKE_ZSB.replace("/usr/bin/env python3", sys.executable), encoding="utf-8")
         zsb.chmod(0o755)
+        tmux = self.bin / "tmux"
+        tmux.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+        tmux.chmod(0o755)
         self.host = self.home / ".local/state/multiprompt/agent-host"
         (self.home / ".local/state/multiprompt").mkdir(parents=True, exist_ok=True)
 
     def env(self, **extra):
         base = dict(os.environ, HOME=str(self.home), MULTIPROMPT_READER_SOURCE=str(self.reader),
                     MP_SESSIONS_TEST_LOG=str(self.log), MP_SESSIONS_TEST_LIST=json.dumps(LISTING),
-                    MP_SESSIONS_TEST_STATE_FILE=str(self.state_file),
+                    MP_SESSIONS_TEST_STATE_FILE=str(self.state_file), MP_SESSIONS_TEST_PID=str(os.getpid()),
                     PATH=str(self.bin) + os.pathsep + os.environ.get("PATH", ""))
         for name in ("MULTIPROMPT_RUNTIME_DIR", "TMUX_PANE", "MULTIPROMPT_TAB", "MULTIBOT_PROVIDER",
                      "MULTIBOT_SID", "MULTIBOT_SESSION", "ZSB_SESSION", "MULTIPROMPT_LAYOUT_PATH",
@@ -298,6 +331,29 @@ class MpSessionsTest(unittest.TestCase):
             (runtime / name).symlink_to(target)
         return runtime / "mp-sessions"
 
+    def older_send_runtime(self):
+        runtime = self.home / ".multiprompt-runtime"
+        runtime.mkdir(parents=True, exist_ok=True)
+        for name, source in (("mp-sessions", ROOT / "src/mp_sessions.py"),
+                             ("mp-send", ROOT / "tools/fixtures/MUBO-558/mp-send-without-published-entries.py")):
+            body = source.read_text(encoding="utf-8")
+            target = hashlib.sha256(body.encode()).hexdigest() + "-" + name
+            (runtime / target).write_text(body, encoding="utf-8")
+            (runtime / name).symlink_to(target)
+        return runtime / "mp-sessions"
+
+    def test_MUBO_558_send_reaches_a_chat_with_an_older_mp_send_helper(self):
+        peer = self.parsed(self.run_sessions("start", "--name", "Peer", "--workspace", "Home"))
+        self.mark_running(peer)
+        sessions = self.older_send_runtime()
+        done = subprocess.run([sys.executable, str(sessions), "send", "Peer", "hello there"], capture_output=True,
+                              text=True, env=self.env(MULTIPROMPT_READER_SOURCE=str(READER)), timeout=60)
+        self.assertIn(done.returncode, (0, 3), done.stderr)
+        self.assertNotIn("AttributeError", done.stderr)
+        sent = json.loads(done.stdout)
+        self.assertEqual(sent["sid"], peer["sid"])
+        self.assertRegex(sent.get("id") or "", r"\Amp-[0-9a-f]{32}\Z")
+
     def test_SOFT_3055_mixed_runtime_lists_without_desktop_helpers(self):
         sessions = self.legacy_runtime()
         for args in ([], ["list"], ["--json"], ["list", "--json"]):
@@ -485,7 +541,7 @@ class MpSessionsTest(unittest.TestCase):
         self.assertEqual(rows[0], dict(name="Hosted Lead", provider="claude", sid="hosted-session", tmux="live-hosted",
                                        cwd=str(self.work), state="idle", link="@Hosted Lead{live-hosted}",
                                        workspace=None, group=None, busy=False, running=True, self=False,
-                                       in_layout=False, visible=False, hidden_reason="not in layout", waiting=None,
+                                       in_layout=False, visible=False, hidden_reason="not in layout", offline_detail=None, waiting=None,
                                        pinned=None, archived=None, user_hidden=None, active_workspace="Home", sidebar_view=None))
 
     def seed_hosted_fixture(self, entries):
@@ -703,6 +759,111 @@ class MpSessionsTest(unittest.TestCase):
         self.assertEqual(stored["live-1111aaaa"]["group"], "Core")
         self.assertEqual(stored["live-3333cccc"]["workspace"], "Studio")
         self.assertNotIn("group", stored["live-3333cccc"])
+
+    def test_MUBO_566_saved_chat_uses_its_slots_current_desktop_name(self):
+        fixture = ROOT / "tools/fixtures/MUBO-566"
+        desktop = json.loads((fixture / "listing-current-desktop.json").read_text())
+        config = json.loads((fixture / "saved-chat.json").read_text())
+        config["cwd"] = str(self.work)
+        self.host.mkdir(parents=True, exist_ok=True)
+        key = hashlib.sha256((config["provider"] + ":" + config["sid"]).encode()).hexdigest()[:32]
+        (self.host / (key + ".config.json")).write_text(json.dumps(config))
+        for command in (("start", "--name", config["spawn_display"], "--workspace", "Multiprompt", "--provider", "codex"),
+                        ("restart", config["spawn_display"])):
+            with self.subTest(command=command):
+                self.state_file.write_text("{}")
+                started = self.parsed(self.run_sessions(*command, MP_SESSIONS_TEST_LIST=json.dumps(desktop)))
+                self.assertTrue(started["visible"], started)
+                self.assertEqual(started["sid"], config["sid"])
+                opened = [call for call in self.events("zsb") if call[0] == "session-open"][-1]
+                self.assertEqual(opened[opened.index("--host") + 1], desktop["hosts"][config["spawn_host"]])
+                self.assertNotEqual(opened[opened.index("--host") + 1], desktop["hosts"][0])
+
+    def test_MUBO_566_start_and_restart_refuse_a_host_or_agent_that_exited(self):
+        fixture = ROOT / "tools/fixtures/MUBO-566"
+        desktop = json.loads((fixture / "listing-current-desktop.json").read_text())
+        config = json.loads((fixture / "saved-chat.json").read_text())
+        config["cwd"] = str(self.work)
+        self.host.mkdir(parents=True, exist_ok=True)
+        key = hashlib.sha256((config["provider"] + ":" + config["sid"]).encode()).hexdigest()[:32]
+        for command in (("restart", config["spawn_display"]),
+                        ("start", "--name", config["spawn_display"], "--workspace", "Multiprompt", "--provider", "codex")):
+            for failure in ("host_exited", "agent_exited"):
+                with self.subTest(command=command, failure=failure):
+                    self.state_file.write_text("{}")
+                    (self.host / (key + ".config.json")).write_text(json.dumps(config))
+                    (self.host / (key + ".state.json")).unlink(missing_ok=True)
+                    failed = self.run_sessions(*command, MP_SESSIONS_TEST_LIST=json.dumps(desktop),
+                                               MP_SESSIONS_TEST_START_FAILURE=failure)
+                    self.assertEqual(failed.returncode, 2, failed.stdout + failed.stderr)
+                    self.assertEqual(failed.stdout, "")
+                    self.assertIn(failure, failed.stderr)
+                    self.assertIn(config["tmux"], failed.stderr)
+                    self.assertNotIn("Traceback", failed.stderr)
+                    self.assertIn(["start", "codex", config["sid"]], self.events("host"))
+
+    def test_MUBO_566_live_hosted_chat_succeeds_without_a_physical_tmux_session(self):
+        started = self.parsed(self.run_sessions("start", "--name", "Headless", "--provider", "codex"))
+        self.assertTrue(started["ok"])
+        self.assertEqual(started["status"], "started")
+        again = self.parsed(self.run_sessions("restart", "Headless"))
+        self.assertTrue(again["ok"])
+        self.assertEqual(again["status"], "already")
+        self.assertEqual(again["tmux"], started["tmux"])
+
+    def test_MUBO_566_already_running_does_not_hide_a_dead_agent(self):
+        started = self.parsed(self.run_sessions("start", "--name", "Stale agent", "--provider", "codex"))
+        key = hashlib.sha256(("codex:" + started["sid"]).encode()).hexdigest()[:32]
+        path = self.host / (key + ".state.json")
+        state = json.loads(path.read_text())
+        state["agent_pid"] = 0
+        path.write_text(json.dumps(state))
+        for command in (("start", "--name", "Stale agent"), ("restart", "Stale agent")):
+            with self.subTest(command=command):
+                failed = self.run_sessions(*command)
+                self.assertEqual(failed.returncode, 2, failed.stdout + failed.stderr)
+                self.assertEqual(failed.stdout, "")
+                self.assertIn("agent_exited", failed.stderr)
+                self.assertIn(started["tmux"], failed.stderr)
+        self.assertEqual(len([call for call in self.events("host") if call[0] == "start"]), 1)
+
+    def test_MUBO_566_fresh_chat_uses_the_live_desktop_host_list(self):
+        desktop = json.loads((ROOT / "tools/fixtures/MUBO-566/listing-current-desktop.json").read_text())
+        started = self.parsed(self.run_sessions("start", "--name", "Fresh Codex", "--workspace", "Multiprompt",
+                                               "--provider", "codex", MULTIPROMPT_HOST="1",
+                                               MP_SESSIONS_TEST_LIST=json.dumps(desktop)))
+        self.assertTrue(started["visible"], started)
+        self.assertEqual(started["host"], desktop["hosts"][1])
+        opened = [call for call in self.events("zsb") if call[0] == "session-open"][-1]
+        self.assertEqual(opened[opened.index("--host") + 1], desktop["hosts"][1])
+
+    def test_MUBO_566_start_names_the_hop_that_could_not_reach_the_desktop(self):
+        fixture = ROOT / "tools" / "fixtures" / "MUBO-566"
+        conflict = json.loads((fixture / "port-conflict.json").read_text(encoding="utf-8"))
+        desktop = json.loads((fixture / "listing-current-desktop.json").read_text(encoding="utf-8"))
+        self.assertEqual(desktop["hosts"], ["vps-de", "vps-uk", "vps-inne"])
+        self.assertTrue(desktop["workspaces"][0]["groups"][0]["tabs"][0]["visible"])
+        started = self.parsed(self.run_sessions("start", "--name", "Valentin Test Codex", "--folder", str(self.work),
+                                               "--workspace", "Multiprompt", "--provider", "codex",
+                                               MP_SESSIONS_TEST_LIST=json.dumps(conflict)))
+        self.assertEqual(started["status"], "started")
+        self.assertFalse(started["visible"])
+        self.assertEqual(started["visible_error"], "desktop_offline")
+        detail = started.get("visible_error_detail")
+        self.assertIsInstance(detail, str)
+        self.assertIn("port_conflict", detail)
+        self.assertIn("19548", detail)
+        self.assertIn("stale_listener.py", detail)
+        self.assertIn("4211", detail)
+        self.assertNotIn("session-open", [call[0] for call in self.events("zsb")])
+
+    def test_MUBO_566_start_names_a_dead_tunnel_rather_than_only_offline(self):
+        down = json.loads((ROOT / "tools" / "fixtures" / "MUBO-566" / "tunnel-down.json").read_text(encoding="utf-8"))
+        started = self.parsed(self.run_sessions("start", "--name", "Valentin Test Codex", "--folder", str(self.work),
+                                               "--workspace", "Multiprompt", "--provider", "codex",
+                                               MP_SESSIONS_TEST_LIST=json.dumps(down)))
+        self.assertFalse(started["visible"])
+        self.assertIn("tunnel_down", started.get("visible_error_detail") or "")
 
 
 if __name__ == "__main__":

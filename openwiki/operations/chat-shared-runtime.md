@@ -27,6 +27,12 @@
 - Legacy integer-only launchers select the installed fingerprinted reader instead of downgrading it.
 - Fingerprinted launchers replace a different selection with their own bundle.
 - Hashes carry no release ordering; two different fingerprinted clients select the last bundle presented.
+- Published tools carry the app version that published them, in `tools.json`.
+- A bundle never moves a published tool to a copy from an older app version.
+- The bundle's tools move together, so `mp-send` and `mp-sessions` stay a matched pair.
+- A bundle without an app version cannot replace tools a versioned bundle published.
+- A newer bundle replaces drifted tool links, so a newer client repairs an older client's copy.
+- This ordering covers tools only; reader selection still takes the last bundle presented.
 - Identical bundles keep the existing selection without rewriting its metadata.
 - Unsafe, corrupt or malformed selections still fail closed.
 - Unsafe files and corrupt readers fail closed.
@@ -184,7 +190,7 @@ Desktop and Android compatibility still requires a live check on both clients be
 
 ## Switch AI
 
-Ctrl+K "Chat View: Switch AI to Claude", "Switch AI to Codex" and "Switch AI to Pi" and the right-click tab palette use the live-host channel. The row for the chat's current AI is hidden. There is no dedicated shortcut. The command-line equivalent is `python3 <reader> host switch-ai <provider> <sid> --to <claude|codex|pi>`.
+Ctrl+K "Chat View: Switch AI to Claude", "Switch AI to Codex", "Switch AI to Pi" and "Switch AI to Antigravity" and the right-click tab palette use the live-host channel. The row for the chat's current AI is hidden. There is no dedicated shortcut. The command-line equivalent is `python3 <reader> host switch-ai <provider> <sid> --to <claude|codex|pi|antigravity>`.
 
 Switch AI refuses a chat that is still replying. An idle live agent is stopped first. The host writes a handover from the saved readable history: the last messages, plus a pointer to the full history file. It starts the target AI under a new session id behind the same chat name. The new AI reads the handover before any queued message is delivered, using the Fresh start gate.
 
