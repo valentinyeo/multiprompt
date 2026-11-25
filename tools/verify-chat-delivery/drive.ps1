@@ -592,6 +592,7 @@ foreach ($plan in $plans) {
         if ($isSending) { $seed.sendingProof = $true }
         $standIn = $seed
         if ($isLiveDelivery) { $standIn.sessions = @('verify-agent', 'verify-background') }
+        if ($isWorkspaceSwitch) { $standIn.sessions = @('ws-chat-one', 'ws-chat-two') }
         if ($env:CHAT_LONG_PROOF -eq '1') { $standIn.longChatProof = $true }
         if ($hasTranscript) {
             $sid = 'a1b2c3d4-0682-4000-8000-000000000682'
