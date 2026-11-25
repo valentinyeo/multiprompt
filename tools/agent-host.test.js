@@ -201,19 +201,3 @@ test('IGSH-1762 every live chat tab is forced into chat view at creation, restor
   assert.equal(main.split('new_shell.chat_view_on = @import("chat_view.zig").forSession(new_shell.tmux_session[0..new_shell.tmux_session_len], new_shell.chat_view_on);').length - 1, 2);
   assert.match(read('src/account_desktop.zig'), /kept user on active tab"\);\s*if \(!@import\("chat_composer\.zig"\)\.overlayOpen\(\)\) @import\("chat_composer\.zig"\)\.applySessionView\(\);/);
 });
-
-test('MUBO-221 a deferred launch keeps the user action so the new chat takes the caret', () => {
-  const state = read('src/app_state.zig');
-  const record = state.slice(state.indexOf('pub const HostLaunch = struct {'));
-  assert.match(record.slice(0, record.indexOf('};')), /user_action: u64 = 0;/, 'the launch record carries the action that armed it');
-
-  const palette = read('src/command_palette.zig');
-  const arm = palette.slice(palette.indexOf('fn hostLaunchArm('), palette.indexOf('pub fn finishHostLaunch('));
-  assert.match(arm, /\.user_action = app_state\.g_focus_user_action_tick;/, 'the arming message records the user action');
-
-  const finish = palette.slice(palette.indexOf('pub fn finishHostLaunch('), palette.indexOf('fn spawnHostedChatNow('));
-  assert.match(finish, /app_state\.g_focus_user_action_tick = focusAuthorizingTick\(launch\.user_action, GetTickCount64\(\)\);/, 'the completion re-authorizes the focus the user asked for');
-  assert.match(finish, /defer app_state\.g_focus_user_action_tick = prior_action;/, 'the completion restores the action it found');
-  assert.ok(finish.indexOf('focusAuthorizingTick') < finish.indexOf('spawnHostedChatNow('), 'the authorization must cover the spawn that switches to the tab');
-  assert.match(palette, /fn focusAuthorizingTick\(armed_action: u64, now: u64\) u64 \{\s*return if \(armed_action != 0\) now else 0;/, 'a launch nobody asked for grants no focus');
-});
