@@ -1266,21 +1266,14 @@ fn hostLaunchPrepareThread(slot: usize) void {
         if (app_state.g_main_hwnd) |main| _ = PostMessageW(main, app_state.WM_APP_CHAT_HOST_READY, slot, 0);
     }
     const target = @import("session_identity.zig").Host.fromIndex(launch.host) orelse return;
-    const a = std.heap.page_allocator;
-    const bundle = chatReaderBundle(a) orelse return;
-    defer a.free(bundle);
-    var path_buf: [96]u8 = undefined;
-    const own = @import("agent_host.zig").publishedRuntime(&path_buf, bundle) orelse return;
     const published = hostPublishedSha(target) orelse {
         @import("diagnostics.zig").debugLog("[chat] launch refused: chat runtime not confirmed");
         return;
     };
-    if (!@import("agent_host.zig").publishedRuntimeMatches(own.sha, &published)) {
-        @import("diagnostics.zig").debugLog2("[chat] launch refused: runtime sha ", &published);
-        return;
-    }
-    @memcpy(launch.runtime[0..own.path.len], own.path);
-    launch.runtime_len = @intCast(own.path.len);
+    var path_buf: [96]u8 = undefined;
+    const path = @import("agent_host.zig").runtimePath(&path_buf, &published) orelse return;
+    @memcpy(launch.runtime[0..path.len], path);
+    launch.runtime_len = @intCast(path.len);
 }
 
 pub fn chatHostLaunchPrepare(slot: usize) bool {

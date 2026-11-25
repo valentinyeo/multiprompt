@@ -180,6 +180,14 @@ foreach ($kept in @($earlierText, 'Claude stand-in answer', $afterText, $heldRep
 Press @(0x1B) 'Esc: clear switched-back history selection'
 Shot 'antigravity-switch-back-claude'
 Save @{notice='Chat switched to Claude'; screenshot='antigravity-switch-back-claude.png'; provider=(Get-Content $claudeBackConfig -Raw | ConvertFrom-Json).provider; switchedFrom=(Get-Content $claudeBackConfig -Raw | ConvertFrom-Json).switched_from.provider; rows=$backRows.Count; name=$tabsBefore[0].name} "$caseDir/switch-back.json"
+$runtimeDir = "$profile/home/.multiprompt-runtime"
+$sharedReader = Join-Path $runtimeDir 'reader.py'
+New-Item -ItemType Directory -Force $runtimeDir | Out-Null
+if (Test-Path $sharedReader) { Copy-Item $sharedReader "$caseDir/shared-reader-before-fresh.py" }
+$staleReader = Join-Path $PSScriptRoot '../fixtures/MUBO-221/stale-reader.py'
+Copy-Item $staleReader $sharedReader -Force
+[IO.File]::WriteAllText("$state/stale-reader", 'older shared reader without the Antigravity provider')
+Save @{case='fresh antigravity chat'; sharedReader='reader.py'; staleSha256=(Get-FileHash $sharedReader -Algorithm SHA256).Hash.ToLower(); reason='an older client selected its own bundle last'; pinnedRuntime=$null} "$caseDir/fresh-start-runtime.json"
 Palette-Choose 'new antigravity sessions' 5109 'antigravity-new-session-palette'
 [void](Wait-For 'new Antigravity session tab in Chat View' {
     if (-not (Test-Path "$settings/session.json")) { return $false }
@@ -196,6 +204,19 @@ if (-not $newTab.tmux_session.StartsWith('live-')) { throw 'The new Antigravity 
     (Test-Path "$state/invocations.jsonl") -and (Read-Shared "$state/invocations.jsonl").Contains('antigravity')
 } 30)
 Shot 'antigravity-new-session'
+$launchRows = @((Read-Shared "$state/invocations.jsonl") -split "`n" | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json })
+$launch = @($launchRows | Where-Object { $_.kind -ceq 'reader' -and (($_.argv -join ' ') -match 'host enable antigravity') })[-1]
+if (-not $launch) { throw 'The fresh Antigravity chat never ran a host enable launch' }
+$launchText = $launch.argv -join ' '
+$pinned = [regex]::Match($launchText, '\.multiprompt-runtime/([0-9a-f]{64})\.py')
+if (-not $pinned.Success) { throw ('The fresh Antigravity chat launched the shared pointer instead of its own published runtime: ' + $launchText) }
+$publishRows = @((Read-Shared "$state/runtime-publish.jsonl") -split "`n" | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json })
+$ownRuntime = @($publishRows | Where-Object { $_.sha256 -ceq $pinned.Groups[1].Value })
+if ($ownRuntime.Count -lt 1) { throw 'The launched runtime is not a bundle this app published' }
+if (-not ($publishRows | Where-Object { $_.sharedPointerHeld -eq $true })) { throw 'The shared reader pointer was not held stale during the fresh launch' }
+if ((Read-Shared $sharedReader) -ceq (Read-Shared $staleReader)) {
+    Save @{case='fresh antigravity chat'; sharedReader='reader.py'; staleSha256=(Get-FileHash $sharedReader -Algorithm SHA256).Hash.ToLower(); reason='an older client selected its own bundle last'; pinnedRuntime=$pinned.Groups[1].Value; launch=$launchText; published=@($ownRuntime.sha256); sharedPointerStaleAtLaunch=$true; generation=$ownRuntime[-1].generation} "$caseDir/fresh-start-runtime.json"
+} else { throw 'The shared reader pointer was replaced before the fresh chat proved itself' }
 $freshSid = $newTab.csid
 [void](Wait-For 'the fresh Antigravity chat enabled itself on the server' {
     @((Agent-Configs) | Where-Object { $_.provider -ceq 'antigravity' -and $_.sid -ceq $freshSid -and $_.enabled -eq $true -and $_.tmux.StartsWith('live-') }).Count -eq 1
@@ -212,5 +233,6 @@ Send-Composer $freshText
     (Test-Path $freshHistory) -and (Read-Shared $freshHistory).Contains('Antigravity stand-in reply 1.')
 } 60)
 Copy-Item $freshHistory "$caseDir/fresh-antigravity-history.jsonl"
-Save @{provider='antigravity'; sid=$freshSid; enabled=$true; firstMessage=$freshText; reply='Antigravity stand-in reply 1.'; config=(Split-Path $freshConfig -Leaf)} "$caseDir/fresh-antigravity-reply.json"
+Remove-Item -LiteralPath "$state/stale-reader" -Force -ErrorAction SilentlyContinue
+Save @{provider='antigravity'; sid=$freshSid; enabled=$true; firstMessage=$freshText; reply='Antigravity stand-in reply 1.'; config=(Split-Path $freshConfig -Leaf); pinnedRuntime=$pinned.Groups[1].Value} "$caseDir/fresh-antigravity-reply.json"
 Shot 'antigravity-fresh-reply'

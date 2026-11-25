@@ -1099,6 +1099,40 @@ def install_reaction_worker(namespace):
     namespace['start_message_worker'] = start
 
 
+def runtime_directory():
+    home = Path(os.path.expanduser("~"))
+    directory = home / ".multiprompt-runtime"
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
+def publish_runtime(namespace):
+    import hashlib
+
+    source = namespace["READER_SOURCE"]
+    generation = int(namespace.get("RUNTIME_GENERATION", 1))
+    digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
+    directory = runtime_directory()
+    target = directory / (digest + ".py")
+    if not target.exists():
+        target.write_text(source, encoding="utf-8")
+    selection = directory / "active.json"
+    payload = json.dumps(dict(protocol=1, generation=generation, sha256=digest), separators=(",", ":"))
+    if not selection.exists() or selection.read_text(encoding="utf-8") != payload:
+        selection.write_text(payload, encoding="utf-8")
+    pointer = directory / "reader.py"
+    held = (ROOT / "stale-reader").exists()
+    if not held:
+        try:
+            current = pointer.read_text(encoding="utf-8", errors="replace")
+        except FileNotFoundError:
+            current = None
+        if current != source:
+            pointer.write_text(source, encoding="utf-8")
+    namespace["ENGINE_INFO"] = dict(protocol=1, generation=generation, sha256=digest)
+    record("runtime-publish.jsonl", sha256=digest, generation=generation, file=target.name, sharedPointerHeld=held)
+
+
 def reader_namespace():
     import base64
 
@@ -1108,6 +1142,8 @@ def reader_namespace():
         published.write_text(source, encoding="utf-8")
     namespace = dict(__name__="verified_remote_reader", READER_SOURCE=source)
     exec(compile(source, "<app-supplied-reader>", "exec"), namespace)
+    if state().get("name") == "antigravity-chats":
+        publish_runtime(namespace)
     if state().get("name") == "resync-recovery":
         import hashlib
         full = hashlib.sha256(source.encode("utf-8")).hexdigest()
@@ -1854,6 +1890,8 @@ def ssh():
     python = re.search(r"\bpython3\s", command)
     if python:
         remote = shlex.split(command[python.start():])
+        if state().get("name") == "antigravity-chats":
+            remote = [os.path.expanduser(part) if part.startswith("~") else part for part in remote]
         if remote[1].endswith("/mp_complete.py"):
             return completion(remote)
         record("invocations.jsonl", kind="reader", argv=remote)
