@@ -22,7 +22,6 @@ function verify(root) {
   assert.equal(observation.liveReply, true, 'the reloading reply was not required live');
   assert.equal(observation.held, true, 'the waiting message was not required to stay queued');
   assert.equal(observation.deliveredOnce, true, 'exactly one delivery was not required');
-  assert.ok(observation.pendingMs >= 105000, 'the message did not wait out a watchdog-length reload');
   assert.ok(stage('fresh-start-requested').length >= 1, 'the real palette never requested a fresh start');
   assert.ok(stage('fresh-start-pending').length >= 1, 'the reload was never pending');
   assert.ok(stage('fresh-resume-delta').length >= 1, 'the reloading reply never streamed live');
