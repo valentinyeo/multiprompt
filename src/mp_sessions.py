@@ -493,12 +493,12 @@ def workspace_named_target(send, peers, workspace, text):
             matches.append((name, row))
     if not matches:
         return None, text
-    longest = max(len(name) for name, _row in matches)
-    best = [row for name, row in matches if len(name) == longest]
+    longest = max(matches, key=lambda match: len(match[0]))
+    best = [row for name, row in matches if len(name) == len(longest[0])]
     if len(best) > 1:
         raise ValueError("more than one chat in workspace " + repr(workspace) + " is named " +
                          repr(best[0].get("name")) + ": " + describe_rows(best) + "; pass --to with the {session} form")
-    body = " ".join(text.split()[len(longest.split()):])
+    body = " ".join(text.split()[len(longest[0].split()):])
     if not body:
         raise ValueError("the message is only the chat name " + repr(best[0].get("name")) + "; add the text to send")
     return best[0], body
