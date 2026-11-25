@@ -5534,7 +5534,7 @@ class MUBO_221_AntigravityHistoryRetentionTest(unittest.TestCase):
         return [(row['role'], row['text'], row.get('id')) for row in rows if row.get('role') in ('user', 'assistant')]
 
     def pre_fix_source(self):
-        path = ROOT / 'tools/fixtures/MUBO-221/reader-before-host-history-claim.py'
+        path = ROOT / 'tools/fixtures/MUBO-221/reader-before-host-history-claim.txt'
         scope = dict(__name__='mubo221_prefix_reader')
         exec(compile(path.read_text(encoding='utf-8'), str(path), 'exec'), scope)
         return scope['READER_SOURCE']
