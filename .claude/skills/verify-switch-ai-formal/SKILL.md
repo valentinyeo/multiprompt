@@ -35,6 +35,8 @@ One logical chat address, at most two pending switch requests, five successful s
 
 ## Coverage and sync
 
+MUBO-221 merges master `f4086e71c` (MUBO-558, MUBO-17) at `d0c4798475d8629de8c19e12b06946612b811978`. All twelve covered switch functions, including the busy refusal before the flock in `host_switch_ai` and the recheck inside `host_switch_ai_locked`, are byte-identical to `c56c8bb4d`; MUBO-558 only reorders helper publishing in the reader's bootstrap and MUBO-17 changes streaming log code outside the covered files. The reader's whole-file hash and the sync commit move; the model, bounds, decision table, probes and mutation controls do not. Require fresh hosted self-tests.
+
 MUBO-221 merges master `f6d470f180f746e83f3e4171de2913f9d7dfc015` (MUBO-525, SOFT-3163) at `f8cbf6dff039f687f1c4145540e0162627c30e72`. All twelve covered switch functions keep the bodies they had at `1be48b7fa`, including the busy refusal before the flock in `host_switch_ai` and the check inside `host_switch_ai_locked`. Master's read-only live snapshot, its retention-sweep probe and its store-only wake filter sit outside every covered function, and nothing master added starts a switch or dispatches a message behind the flock. SOFT-3163 adds a sidebar draft-marker invalidation that touches neither. The busy-refusal paragraph below still describes the code at this head. Only the reader's whole-file hash and the sync commit move; model, bounds, probes, decisions and mutation controls stay the same. Require fresh hosted self-tests.
 
 MUBO-221 refuses a busy switch before taking the per-chat `.dispatch` flock at `19e65cb339ea68a7e172e52e48041a0bde604099`. `host_switch_ai` now asks `host_turn_busy` before the flock and again inside `host_switch_ai_locked`, so a chat that is replying is refused promptly instead of waiting behind the dispatch that is holding the flock, while a switch that does queue behind a dispatch still refuses after it. No switch decision, bound, replay or planted mutation changes; the reader hash moves. Require fresh hosted self-tests.
@@ -49,7 +51,7 @@ MUBO-221 reviews `1a59f4ad97899f924ca18a24a5568caf5519d134`. The reader's only c
 
 MUBO-558 reviewed merged source at `f6d470f18`, which carries MUBO-525's read-only event push. It records the app version that published each runtime helper in `tools.json` and refuses to move a helper back to an older version. The publish step runs in the reader's bootstrap before any request, outside every covered switch, usage-limit and auto-switch function. The model, bounds, decisions, probes and mutations are unchanged; only the reader's whole-file hash and the sync commit move.
 
-Last reviewed source/model sync commit is `f8cbf6dff039f687f1c4145540e0162627c30e72`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
+Last reviewed source/model sync commit is `d0c4798475d8629de8c19e12b06946612b811978`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
 
 SOFT-2681 publishes Claude's current native session and changes transcript selection. All twelve covered reader functions are unchanged from the prior sync, as are every other covered file, the model, bounds, decisions, probes and mutations. Only the reader hash and sync commit move. Hosted CI must rerun the full self-test and native replay; this review does not extend the model to transcript rotation.
 
