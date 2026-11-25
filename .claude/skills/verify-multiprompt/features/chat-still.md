@@ -1,6 +1,6 @@
 # A chat stays still
 
-Source files: src/chat*, src/app_state.zig, src/chat_layout_snapshot.zig, src/layout.zig, src/window_layout.zig, src/browser_pane.zig, src/drawing.zig, src/main.zig, build.zig, build.zig.zon, tools/chat-still/*, tools/verify-chat-still, tools/verify-chat-delivery/*, .claude/skills/verify-multiprompt/control-feature-chat*, .github/workflows/chat-still.yml
+Source files: src/chat*, src/app_state.zig, src/chat_layout_snapshot.zig, src/layout.zig, src/window_layout.zig, src/browser_pane.zig, src/drawing.zig, src/main.zig, src/diagnostics.zig, build.zig, build.zig.zon, tools/chat-still/*, tools/verify-chat-still, tools/verify-chat-delivery/*, .claude/skills/verify-multiprompt/control-feature-chat*, .github/workflows/chat-still.yml
 
 Verify on: pull_request
 
