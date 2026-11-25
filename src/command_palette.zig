@@ -6382,7 +6382,7 @@ test "IGSH-1266 Esc closes the pick repo list and starts no tab" {
 test "IGSH-1266 pick repo starts the session in the picked folder" {
     var host_buf: [1024]u8 = undefined;
     var command_buf: [512]u8 = undefined;
-    const picked = workspaceLaunchCommand("", "term-pick", "/home/x/projects/picked", null, &host_buf, &command_buf) orelse
+    const picked = workspaceLaunchCommand("", "term-pick", "/home/x/projects/picked", null, "", &host_buf, &command_buf) orelse
         return error.TestUnexpectedResult;
     var neutral_buf: [512]u8 = undefined;
     const neutral = buildWorkspaceTmuxLaunchCmd(&neutral_buf, "term-pick", "/home/x/projects/picked", "") orelse

@@ -86,7 +86,9 @@ test('IGSH-1447 Ctrl+T starts a live chat without a parking terminal or idle pro
   const palette = read('src/command_palette.zig');
   assert.match(palette, /const live_chat = host_sid != null and newTabOpensChatView\(program\);/);
   assert.match(palette, /shell\.chat_view_on = true;/);
-  assert.match(palette, /live\.starting\(shell\.shell_id, host, host_sid\.\?\)/);
+  const starts = [...palette.matchAll(/live\.starting\(shell\.shell_id, host, ([A-Za-z_][\w.]*)\)/g)].map((match) => match[1]);
+  assert.ok(starts.length >= 2, 'both live chat starts must monitor the startup');
+  assert.ok(!starts.includes('host_sid'), 'the startup helper takes the resolved session id, not the optional');
   assert.match(palette, /if \(live_chat\) buildLiveChatSessionName/);
 });
 
