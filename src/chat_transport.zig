@@ -448,8 +448,7 @@ pub fn respawn(index: u8) void {
     const host = &hosts[index];
     lock(host);
     defer host.mutex.unlock();
-    if ((host.running or host.starting) and host.process != null) _ = w.TerminateProcess(host.process, 0);
-    host.starting = false;
+    if (host.running and host.process != null) _ = w.TerminateProcess(host.process, 0);
 }
 
 fn rejectTerminal(channel: *Channel) bool {

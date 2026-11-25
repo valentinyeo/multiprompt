@@ -18,7 +18,7 @@ jobs:
         with:
           node-version: 22
       - uses: ./.github/actions/setup-zig
-      - run: node --test tools/shared-helper-channels.test.js tools/chat-transport.test.js tools/token-ladder-panel.test.js
+      - run: node --test tools/shared-helper-channels.test.js tools/chat-transport.test.js tools/chat-transport-writer.test.js tools/token-ladder-panel.test.js
       - run: node tools/check-timer-ratchet.mjs
       - run: node tools/strip-comments.mjs --check
       - run: node tools/check-file-size.mjs
