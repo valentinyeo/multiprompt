@@ -1,13 +1,18 @@
 name: Verify idle SSH reuse
 on:
   workflow_dispatch:
+    inputs:
+      app_revision:
+        description: Optional baseline app revision with this same counting harness
+        required: false
+        type: string
   push:
     branches: ['mubo-532-ssh-idle*']
 permissions:
   contents: read
 concurrency:
-  group: ssh-idle-${{ github.ref }}
-  cancel-in-progress: false
+  group: ssh-idle-${{ github.ref }}-${{ inputs.app_revision || 'candidate' }}
+  cancel-in-progress: true
 jobs:
   unit:
     runs-on: ubuntu-latest
@@ -17,6 +22,16 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
+      - name: Read the release ticket title
+        env:
+          HYPERTASK_AGENT_TOKEN: ${{ secrets.HYPERTASK_AGENT_TOKEN }}
+        run: |
+          mkdir -p evidence
+          node --input-type=module -e "import fs from 'node:fs'; import {resolveTicketTitles} from './tools/ticket-titles.mjs'; const titles = await resolveTicketTitles(['MUBO-532'], {}, process.env.HYPERTASK_AGENT_TOKEN); fs.writeFileSync('evidence/MUBO-532.txt', titles['MUBO-532'] + '\n');"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ssh-idle-title
+          path: evidence/MUBO-532.txt
       - uses: ./.github/actions/setup-zig
       - run: node --test tools/shared-helper-channels.test.js tools/chat-transport.test.js tools/chat-transport-writer.test.js tools/token-ladder-panel.test.js
       - run: node tools/check-timer-ratchet.mjs
@@ -29,6 +44,7 @@ jobs:
     timeout-minutes: 30
     env:
       SSH_IDLE_PROOF: '1'
+      APP_REVISION: ${{ inputs.app_revision || github.sha }}
     steps:
       - run: git config --global core.autocrlf false
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -52,15 +68,22 @@ jobs:
       - name: Build app and transparent SSH counter
         shell: pwsh
         run: |
-          $version = ((git describe --tags --match 'v[0-9]*' --abbrev=0 HEAD).Trim()).Substring(1)
-          $revision = (git rev-parse HEAD).Trim()
-          zig build -Dtarget=x86_64-windows-gnu -Dversion="$version" -Drevision="$revision"
-          if ($LASTEXITCODE -ne 0) { throw 'App build failed' }
+          $version = ((git describe --tags --match 'v[0-9]*' --abbrev=0 $env:APP_REVISION).Trim()).Substring(1)
+          $revision = (git rev-parse $env:APP_REVISION).Trim()
+          git worktree add --detach app-source $revision
+          if ($LASTEXITCODE -ne 0) { throw 'App checkout failed' }
+          Push-Location app-source
+          try {
+            zig build -Dtarget=x86_64-windows-gnu -Dversion="$version" -Drevision="$revision"
+            if ($LASTEXITCODE -ne 0) { throw 'App build failed' }
+          } finally { Pop-Location }
+          New-Item -ItemType Directory -Force zig-out/bin | Out-Null
+          Copy-Item app-source/zig-out/bin/* zig-out/bin/
           zig cc -target x86_64-windows-gnu -municode -O2 tools/verify-server-chat/count-ssh.c -o zig-out/bin/count-ssh.exe
           if ($LASTEXITCODE -ne 0) { throw 'Counter build failed' }
           New-Item -ItemType Directory -Force evidence | Out-Null
           $hash = (Get-FileHash zig-out/bin/multiprompt.exe -Algorithm SHA256).Hash.ToLowerInvariant()
-          @{ revision=$revision; version=$version; sha256=$hash; run="$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID" } | ConvertTo-Json | Set-Content evidence/build.json
+          @{ revision=$revision; harness_revision=(git rev-parse HEAD).Trim(); version=$version; sha256=$hash; run="$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID" } | ConvertTo-Json | Set-Content evidence/build.json
           "VERIFY_VERSION=$version" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           "VERIFY_SHA256=$hash" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
       - name: Reconnect state and probe regression tests

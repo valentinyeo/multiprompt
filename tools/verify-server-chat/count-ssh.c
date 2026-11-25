@@ -28,7 +28,8 @@ int wmain(void) {
         .hStdInput = GetStdHandle(STD_INPUT_HANDLE), .hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE),
         .hStdError = GetStdHandle(STD_ERROR_HANDLE) };
     PROCESS_INFORMATION process = {0};
-    BOOL started = CreateProcessW(executable, command, NULL, NULL, TRUE, 0, NULL, NULL, &startup, &process);
+    DWORD flags = GetConsoleWindow() == NULL ? CREATE_NO_WINDOW : 0;
+    BOOL started = CreateProcessW(executable, command, NULL, NULL, TRUE, flags, NULL, NULL, &startup, &process);
     free(command);
     if (!started) return 95;
     CloseHandle(process.hThread);
