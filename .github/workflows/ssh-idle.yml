@@ -9,6 +9,21 @@ concurrency:
   group: ssh-idle-${{ github.ref }}
   cancel-in-progress: false
 jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - uses: ./.github/actions/setup-zig
+      - run: node --test tools/shared-helper-channels.test.js tools/chat-transport.test.js tools/token-ladder-panel.test.js
+      - run: node tools/check-timer-ratchet.mjs
+      - run: node tools/strip-comments.mjs --check
+      - run: node tools/check-file-size.mjs
+      - run: node tools/check-journey-evidence.mjs
+      - run: zig fmt --check src/chat_send.zig src/chat_transport.zig src/telemetry_panel.zig src/vps.zig src/win32.zig
   server-chat:
     runs-on: windows-latest
     timeout-minutes: 30
@@ -48,6 +63,8 @@ jobs:
           @{ revision=$revision; version=$version; sha256=$hash; run="$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID" } | ConvertTo-Json | Set-Content evidence/build.json
           "VERIFY_VERSION=$version" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           "VERIFY_SHA256=$hash" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+      - name: Reconnect state and probe regression tests
+        run: node --test --test-concurrency=1 tools/ssh-reconnect.test.js tools/ssh-probe-511.test.js tools/ssh-clock-standby.test.js
       - name: Server chat, idle login bound, dropped link and idle again
         shell: powershell
         run: ./tools/verify-server-chat/drive.ps1 -Exe "$PWD/zig-out/bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$PWD/evidence"

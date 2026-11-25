@@ -562,11 +562,7 @@ fn parseLadderStatus(json: []const u8, now_secs: f64) !AiPaceSnapshot {
 }
 
 fn ladderFetchRemote(out: []u8) ?usize {
-    var cmd_buf: [600]u8 = undefined;
-    var exe_len: usize = 0;
-    if (!appendSshExe(&cmd_buf, &exe_len)) return null;
-    const tail = std.fmt.bufPrint(cmd_buf[exe_len..], "-T -o BatchMode=yes -o ConnectTimeout=5 {s} cat ~/.local/state/token-ladder/status.json", .{SSH_TARGET_UK}) catch return null;
-    const n = sshOneShotCapture(cmd_buf[0 .. exe_len + tail.len], out);
+    const n = @import("vps.zig").captureSharedCommand(@import("app_state.zig").TMUX_HOST_UK, "cat ~/.local/state/token-ladder/status.json 2>/dev/null; printf '\\n@@MP_LADDER_END@@\\n'", out, "@@MP_LADDER_END@@") orelse return null;
     if (n == 0) return null;
     return n;
 }
