@@ -1,697 +1,20 @@
 name: Tests
-
+run-name: SOFT-3163 measurement ${{ inputs.trials }} trials x ${{ inputs.samples }} samples
 on:
   workflow_dispatch:
-  pull_request:
-  push:
-    branches: [master]
-  schedule:
-    - cron: '12 4 * * *'
-
+    inputs:
+      samples:
+        type: number
+        default: 100
+      trials:
+        type: number
+        default: 5
 permissions:
   contents: read
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-
 jobs:
-  reader-tests:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          fetch-depth: 0
-      - uses: valentinyeo/token-ladder/.github/actions/lint-direct-model-calls@main
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
-        with:
-          python-version: '3.12'
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version: 22
-      - name: Test the squash merge helper builds its own title
-        run: node --test tools/automerge-admit-run.test.js
-      - name: Test commit identity enforcement
-        run: node --test tools/check-commit-identities.test.mjs
-      - name: Check every pushed commit identity
-        if: github.event_name == 'pull_request' || github.event_name == 'push'
-        env:
-          EVENT: ${{ github.event_name }}
-          BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event.before }}
-          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: |
-          if [ "$EVENT" = "pull_request" ]; then BASE=$(git merge-base "$BASE" "$HEAD"); fi
-          node tools/check-commit-identities.mjs "$BASE" "$HEAD"
-      - name: Test the pull request title names its ticket
-        run: node --test tools/check-pr-title.test.mjs tools/merge-title.test.js
-      - name: Check the pull request title names its ticket and its fragments
-        if: github.event_name == 'pull_request'
-        env:
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          BASE: ${{ github.base_ref }}
-          HEAD: ${{ github.event.pull_request.head.sha }}
-        run: |
-          PR_FILES=$(git diff --name-only --diff-filter=AM "$(git merge-base "origin/$BASE" "$HEAD")" "$HEAD") node tools/check-pr-title.mjs
-      - name: Test the deploy proof keeps its secrets masked
-        run: node --test tools/check-deploy-proof-secrets.test.mjs
-      - name: Test the sign-in page base comparison scope
-        run: node --test tools/signin-page-base-check.test.mjs
-      - name: Test touched-journey selection and workflow cancellation
-        run: node --test tools/scoped-pr-checks.test.js tools/touched-journeys.test.js tools/pr-verifier-cancel.test.js tools/pr-verifier-api.test.js tools/pr-verifier-ci.test.js tools/ci-concurrency.test.js tools/pr-verifier.test.js tools/pr-verifier-inherited.test.js tools/pr-verifier-recovery.test.js tools/verifier-dispatch.test.js
-      - name: Test automatic crash report triage
-        run: node --test tools/crash-report-tickets.test.js
-      - name: Test release tag publication
-        run: node --test tools/release-version.test.mjs
-      - name: Test release symbol packaging
-        run: node --test tools/package-symbols.test.mjs
-      - name: Test the release workflow keeps its publication gates
-        run: node --test tools/release-update-gate.test.mjs
-      - name: Test the runtime fingerprint guard
-        run: node --test tools/check-runtime-generation.test.js
-      - name: Test automatic helper bundle versions
-        run: python3 tools/runtime-fingerprint.test.py -v
-      - name: Test double-click thumbs up
-        run: node --test tools/soft-2442-double-click-like.test.js
-      - name: Test send now in a hosted chat
-        run: node --test tools/chat-send-now.test.js
-      - name: Preserve slash skill positions in agent input
-        run: node --test tools/chat-host-skill-anywhere.test.js tools/chat-host-skill-unreadable.test.js
-      - name: Start a skill that arrives above a quote in a hosted chat
-        run: node --test tools/chat-skill-quote.test.js
-      - name: Guard the reader runtime fingerprint
-        env:
-          BASE: ${{ github.event.before || '' }}
-          HEAD: ${{ github.sha }}
-        run: node tools/check-runtime-generation.mjs "${BASE}" "${HEAD}"
-      - name: Test repair PR journey selection
-        run: node --test tools/pr-verifier-repro.test.js
-      - name: Test emergency lane merge order and release path
-        run: node --test tools/check-emergency-lane.test.mjs tools/emergency-release-path.test.mjs
-      - name: Test stable desktop journey command names
-        run: node --test tools/check-journey-commands.test.mjs
-      - name: Reject raw desktop journey commands
-        run: node tools/check-journey-commands.mjs
-      - name: Test the journey evidence guard
-        run: node --test tools/check-journey-evidence.test.js
-      - name: Require journey evidence to survive every run
-        run: node tools/check-journey-evidence.mjs
-      - name: Test the done-video evidence fetcher
-        run: node --test tools/done-video.test.mjs
-      - name: Test the FFmpeg install guard
-        run: node --test tools/check-ffmpeg-install.test.js
-      - name: Require a cached, retried FFmpeg install
-        run: node tools/check-ffmpeg-install.mjs
-      - name: Test the Zig download guard
-        run: node --test tools/check-zig-download.test.js
-      - name: Require the time-limited Zig install
-        run: node tools/check-zig-download.mjs
-      - name: Test the servers slot guard
-        run: node --test tools/check-servers-slots.test.js
-      - name: Require a slot per server in every servers file
-        run: node tools/check-servers-slots.mjs
-      - name: Test source-derived feature journey coverage
-        run: node --test tools/check-feature-coverage.test.mjs tools/publish-verification-maintenance.test.mjs
-      - name: Test the source file-size ratchet
-        run: node --test tools/check-file-size.test.js
-      - name: Cap Zig source file size
-        run: node tools/check-file-size.mjs
-      - name: Test the timer ratchet
-        run: node --test tools/check-timer-ratchet.test.mjs
-      - name: Block new timer and sleep quick fixes
-        run: node tools/check-timer-ratchet.mjs
-      - name: Test the update card time estimate check
-        run: node --test tools/check-update-card-time-wording.test.js
-      - name: Keep time estimates off the update card
-        run: node tools/check-update-card-time-wording.mjs
-      - name: Run the complete chat reader suite
-        run: python3 -W error::DeprecationWarning tools/chat-history-reader-test.py -v
-      - name: Verify shared reader engine startup
-        run: python3 tools/chat-shared-runtime.test.py -v
-      - name: Prove a second user's hosted chat reaches its own browser pane
-        run: python3 tools/owner-chat-browser.test.py -v
-      - name: Track each message by its id
-        run: python3 -W error::DeprecationWarning tools/message-id-delivery-test.py -v
-      - name: Restart a stopped chat AI from the reader
-        run: python3 -W error::DeprecationWarning tools/restart-ai-test.py -v
-      - name: Check the Computer view finds a server desktop
-        run: python3 -W error::DeprecationWarning tools/computer-discovery.test.py -v
-      - name: Check every hosted chat read shape returns its replies
-        run: python3 tools/verify-hosted-chat-reads.py
-      - name: Report every chat exit with its cause
-        run: python3 tools/chat-exit-report.test.py -v
-
-  test:
-    name: test-windows (${{ matrix.group }})
+  pairs:
     runs-on: windows-latest
-    timeout-minutes: ${{ matrix.group == 1 && 15 || matrix.group == 3 && 20 || 10 }}
-    strategy:
-      fail-fast: false
-      matrix:
-        group: [1, 2, 3, 4, 5]
-    env:
-      ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.zig-global-cache
-    steps:
-      - name: Keep LF line endings
-        run: git config --global core.autocrlf false
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          fetch-depth: 0
-      - name: Classify changed paths
-        id: paths
-        shell: bash
-        env:
-          EVENT: ${{ github.event_name }}
-          BASE: ${{ github.event_name == 'schedule' && github.sha || github.event.pull_request.base.sha || (github.ref != 'refs/heads/master' && 'origin/master') || github.event.before || format('{0}^', github.sha) }}
-          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: bash -e -o pipefail tools/classify-test-paths.sh
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        if: steps.paths.outputs.heavy == 'true'
-        with:
-          node-version: 22
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
-        if: steps.paths.outputs.heavy == 'true'
-        with:
-          python-version: '3.12'
-      - name: Test release version
-        if: steps.paths.outputs.heavy == 'true' && matrix.group == 5
-        run: node --test tools/release-version.test.mjs
-      - name: Check version rule
-        if: steps.paths.outputs.heavy == 'true'
-        id: rule
-        shell: bash
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            node tools/version-stamp.mjs check "$(git merge-base ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }})" ${{ github.event.pull_request.head.sha }}
-          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.ref }}" != "refs/heads/master" ]; then
-            node tools/version-stamp.mjs check "$(git merge-base origin/${{ github.event.repository.default_branch }} HEAD)" HEAD
-          else
-            node tools/version-stamp.mjs check HEAD^ HEAD
-          fi
-      - name: Restore Zig toolchain (PR)
-        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
-        with:
-          path: ${{ runner.temp }}/zig-x86_64-windows-0.16.0
-          key: ${{ runner.os }}-zig-toolchain-0.16.0
-      - name: Restore Zig (PR)
-        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
-        with:
-          path: |
-            .zig-cache
-            ${{ env.ZIG_GLOBAL_CACHE_DIR }}
-          key: ${{ runner.os }}-zig-0.16.0-shards-v7-group-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-zig-0.16.0-shards-v7-group-${{ matrix.group }}-
-            ${{ runner.os }}-zig-0.16.0-shards-v6-group-${{ matrix.group }}-
-      - name: Install Zig 0.16.0
-        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
-        uses: ./.github/actions/setup-zig
-      - name: Test chat performance reporting
-        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 2
-        run: node --test tools/chat-perf-reporting.test.js
-      - name: Run tests
-        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
-        run: zig build test --summary all -Dtest-group=${{ matrix.group }} -Dcpu=x86_64_v3 ${{ matrix.group == 2 && '-j1' || '' }}
-      - name: Save approved shared chat proof
-        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1 && always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: shared-chat-style-proof
-          path: chat-shared-*.bmp
-          if-no-files-found: error
-      - name: Save native header capacity proof
-        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1 && always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: header-capacity-proof
-          path: '*header-capacity.bmp'
-          if-no-files-found: error
-      - name: Upload Chat View header ETA proof
-        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1 && always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: chat-header-eta
-          path: chat-header-eta-*.bmp
-          if-no-files-found: error
-      - name: Save native skill search proof
-        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1 && always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: skill-search-proof
-          path: skill-search-*.bmp
-          if-no-files-found: error
-      - name: Run CLEAN chat pixel tests
-        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1 && !cancelled()
-        shell: bash
-        run: zig build test-clean-chat --summary all -Dcpu=x86_64_v3 2>&1 | tee clean-chat-output.log
-      - name: Require every CLEAN pixel test
-        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1 && always()
-        run: node tools/check-clean-chat-output.mjs clean-chat-output.log
-      - name: Sweep real zsb.exe command help
-        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 3
-        run: node --test tools/zsb-help.test.js
-      - name: Test installer prune
-        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 3
-        run: node --test tools/install-prune.test.js
-      - name: Check local listener accounts
-        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1
-        shell: pwsh
-        run: |
-          zig build local-listener-helper -Dcpu=x86_64_v3
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & ./tools/local-listener-accounts.ps1
-      - name: Bound Zig cache before save
-        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
-        shell: bash
-        run: |
-          du -sh .zig-cache "$ZIG_GLOBAL_CACHE_DIR"
-          python3 tools/trim-zig-cache.py --cap-mib 1600
-          du -sh "$ZIG_GLOBAL_CACHE_DIR"
-          if [ -d .zig-cache ]; then du -sh .zig-cache; fi
-
-  test-update-source:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          fetch-depth: 0
-      - name: Classify changed paths
-        id: paths
-        shell: bash
-        env:
-          EVENT: ${{ github.event_name }}
-          BASE: ${{ github.event_name == 'schedule' && github.sha || github.event.pull_request.base.sha || (github.ref != 'refs/heads/master' && 'origin/master') || github.event.before || format('{0}^', github.sha) }}
-          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: bash -e -o pipefail tools/classify-test-paths.sh
-      - name: Test plain changelog fragments and update card notes
-        if: steps.paths.outputs.heavy == 'true'
-        run: node --test tools/changelog-fragments.test.js tools/update-card-notes.test.js tools/update-card-restart.test.js tools/check-release-note.test.mjs tools/ticket-id.test.js tools/ticket-titles.test.js tools/release-notes-tolerance.test.mjs tools/release-never-stops-on-keys.test.mjs tools/version-stamp.test.mjs tools/ticket-title-contract.test.js tools/release-unstick.test.js
-      - name: Verify responsive startup ordering and original regression controls
-        run: |
-          node --test tools/startup-responsive.test.js tools/test-workflow-structure.test.mjs tools/account-host-removal.test.js tools/composer-band.test.js tools/session-restore-orphan.test.js
-          node --test tools/internet-responsive.test.js
-      - name: Test the test laptop release check
-        if: steps.paths.outputs.heavy == 'true'
-        run: node --test tools/laptop-check/run.test.js
-      - name: Test the chat view shows one row per message id
-        if: steps.paths.outputs.heavy == 'true'
-        run: node --test tools/chat-message-rows.test.js
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        if: steps.paths.outputs.heavy == 'true'
-        with:
-          node-version: 22
-      - name: Check version rule
-        if: steps.paths.outputs.heavy == 'true'
-        id: rule
-        shell: bash
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            node tools/version-stamp.mjs check "$(git merge-base ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }})" ${{ github.event.pull_request.head.sha }}
-          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.ref }}" != "refs/heads/master" ]; then
-            node tools/version-stamp.mjs check "$(git merge-base origin/${{ github.event.repository.default_branch }} HEAD)" HEAD
-          else
-            node tools/version-stamp.mjs check HEAD^ HEAD
-          fi
-      - name: Check a shipped change carries a release note
-        if: steps.paths.outputs.heavy == 'true'
-        shell: bash
-        run: node tools/check-release-note.mjs
-      - name: Test release update source regressions
-        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
-        shell: pwsh
-        run: |
-          $before = "$env:RUNNER_TEMP/update-review-before"
-          New-Item -ItemType Directory -Force $before | Out-Null
-          git fetch origin 1e557042ad06b6371baec41ab803dc759c989378
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          git archive --format=tar --output="$env:RUNNER_TEMP/update-review-before.tar" 1e557042ad06b6371baec41ab803dc759c989378 -- src/main.zig src/update_release.zig src/update_release.ps1 src/update_card.zig tools/update-release.test.ps1 .github/workflows/verify.yml .github/workflows/release.yml build.zig
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          tar -xf "$env:RUNNER_TEMP/update-review-before.tar" -C $before
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $env:UPDATE_SOURCE_ROOT = $before
-          node --test tools/update-release-review.test.js > "$env:RUNNER_TEMP/update-review-before.log"
-          $beforeExit = $LASTEXITCODE
-          Remove-Item Env:UPDATE_SOURCE_ROOT
-          $beforeLog = Get-Content "$env:RUNNER_TEMP/update-review-before.log" -Raw
-          if ($beforeExit -ne 1) { throw 'Review regression controls did not fail on the review baseline' }
-          foreach ($finding in 1..9) {
-            if ($beforeLog -notmatch "not ok $finding - R$finding ") { throw "Finding R$finding did not fail first" }
-            Write-Host "FAILING FIRST R$finding CONFIRMED against review baseline"
-          }
-          node --test tools/update-release-review.test.js
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          node --test tools/update-release.test.js
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          node --test tools/update-release-journey.test.js
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Restore Zig toolchain (PR)
-        if: steps.paths.outputs.heavy == 'true'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
-        with:
-          path: ${{ runner.temp }}/zig-x86_64-linux-0.16.0
-          key: ${{ runner.os }}-zig-toolchain-0.16.0
-      - name: Install Zig 0.16.0
-        if: steps.paths.outputs.heavy == 'true'
-        uses: ./.github/actions/setup-zig
-      - name: Reject placeholder release signing key
-        if: steps.paths.outputs.heavy == 'true'
-        run: |
-          key=src/release_signing_public_key.txt
-          cp "$key" "$RUNNER_TEMP/release-signing-public-key.txt"
-          trap 'cp "$RUNNER_TEMP/release-signing-public-key.txt" "$key"' EXIT
-          printf '%s\n' 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' > "$key"
-          if zig build -Dtarget=x86_64-windows-gnu -Drelease=true > "$RUNNER_TEMP/placeholder-error.txt" 2>&1; then
-            echo 'Release build did not reject the fake public key loudly'
-            exit 1
-          fi
-          grep -F 'Release signing public key is still the all-zero placeholder' "$RUNNER_TEMP/placeholder-error.txt"
-          echo 'Release placeholder rejected; ordinary tests remain buildable'
-
-  test-windows-update:
-    if: github.event_name != 'pull_request'
-    needs: [build-windows]
-    runs-on: windows-latest
-    timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        scenario: [Lifecycle, Rollback]
-    env:
-      MULTIPROMPT_TEST_SIGNING_KEY: ${{ github.workspace }}/update-verifier/update-test-key.der
-    steps:
-      - name: Keep LF line endings
-        run: git config --global core.autocrlf false
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          fetch-depth: 0
-      - name: Classify changed paths
-        id: paths
-        shell: bash
-        env:
-          EVENT: ${{ github.event_name }}
-          BASE: ${{ github.event_name == 'schedule' && github.sha || github.event.pull_request.base.sha || (github.ref != 'refs/heads/master' && 'origin/master') || github.event.before || format('{0}^', github.sha) }}
-          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: bash -e -o pipefail tools/classify-test-paths.sh
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        if: steps.paths.outputs.heavy == 'true'
-        with:
-          node-version: 22
-      - name: Check version rule
-        if: steps.paths.outputs.heavy == 'true'
-        id: rule
-        shell: bash
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            node tools/version-stamp.mjs check "$(git merge-base ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }})" ${{ github.event.pull_request.head.sha }}
-          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.ref }}" != "refs/heads/master" ]; then
-            node tools/version-stamp.mjs check "$(git merge-base origin/${{ github.event.repository.default_branch }} HEAD)" HEAD
-          else
-            node tools/version-stamp.mjs check HEAD^ HEAD
-          fi
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
-        with:
-          name: update-verifier-x64-${{ github.run_id }}
-          path: update-verifier
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
-        with:
-          name: native-update-x64-${{ github.run_id }}
-          path: native-update
-      - name: Test safe release updates
-        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
-        run: |
-          powershell -NoProfile -File tools/update-release-fixtures.ps1 -Root "$env:RUNNER_TEMP/update-release-fixtures"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          powershell -NoProfile -File tools/update-release.test.ps1 -Verifier "$pwd/update-verifier/multiprompt.exe" -TestGroup ${{ matrix.scenario }} -Evidence "$env:RUNNER_TEMP/update-proof" -NativeUpdate "$pwd/native-update/multiprompt.exe"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      - name: Upload update restart proof
-        if: steps.paths.outputs.heavy == 'true' && always() && steps.rule.outputs.kind != 'STAMP'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: update-proof-${{ matrix.scenario }}
-          path: ${{ runner.temp }}/update-proof/
-          if-no-files-found: error
-
-  test-vps:
-    name: test-vps (${{ matrix.group }})
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        group: [1, 2, 3]
-    env:
-      ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.zig-global-cache
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          fetch-depth: 0
-      - name: Classify changed paths
-        id: paths
-        shell: bash
-        env:
-          EVENT: ${{ github.event_name }}
-          BASE: ${{ github.event_name == 'schedule' && github.sha || github.event.pull_request.base.sha || (github.ref != 'refs/heads/master' && 'origin/master') || github.event.before || format('{0}^', github.sha) }}
-          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: bash -e -o pipefail tools/classify-test-paths.sh
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        if: steps.paths.outputs.heavy == 'true'
-        with:
-          node-version: 22
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
-        if: steps.paths.outputs.heavy == 'true'
-        with:
-          python-version: '3.12'
-      - name: Test notification relay
-        if: steps.paths.outputs.heavy == 'true' && matrix.group == 1
-        run: python3 -m unittest tools/agent-notifications/test_mp_notify_relay.py -v
-      - name: Test session broadcast
-        if: steps.paths.outputs.heavy == 'true' && matrix.group == 1
-        run: python3 -m unittest tools/agent-notifications/broadcast-test.py -v
-      - name: Test release version
-        if: steps.paths.outputs.heavy == 'true' && matrix.group == 1
-        run: node --test tools/release-version.test.mjs
-      - name: Test Zig cache trimming
-        if: steps.paths.outputs.heavy == 'true' && matrix.group == 1
-        run: node --test tools/trim-zig-cache.test.mjs
-      - name: Check version rule
-        if: steps.paths.outputs.heavy == 'true'
-        id: rule
-        shell: bash
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            node tools/version-stamp.mjs check "$(git merge-base ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }})" ${{ github.event.pull_request.head.sha }}
-          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.ref }}" != "refs/heads/master" ]; then
-            node tools/version-stamp.mjs check "$(git merge-base origin/${{ github.event.repository.default_branch }} HEAD)" HEAD
-          else
-            node tools/version-stamp.mjs check HEAD^ HEAD
-          fi
-      - name: Restore Zig toolchain (PR)
-        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
-        with:
-          path: ${{ runner.temp }}/zig-x86_64-linux-0.16.0
-          key: ${{ runner.os }}-zig-toolchain-0.16.0
-      - name: Restore Zig (PR)
-        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
-        with:
-          path: |
-            .zig-cache
-            ${{ env.ZIG_GLOBAL_CACHE_DIR }}
-          key: ${{ runner.os }}-zig-0.16.0-shards-v6-vps-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-zig-0.16.0-shards-v6-vps-${{ matrix.group }}-
-      - name: Install Zig 0.16.0
-        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
-        uses: ./.github/actions/setup-zig
-      - name: Guard chat stillness before accepting chat changes
-        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1
-        env:
-          CHAT_STILL_BASE: ${{ github.event.pull_request.base.sha || github.event.before || (github.event_name == 'workflow_dispatch' && 'origin/master') || '' }}
-        run: |
-          if grep -zEq '^(src/(chat[^/]*|app_state|layout|window_layout|browser_pane|drawing|main)\.(zig|py)|tools/chat-still/|tools/verify-chat-still$)' "$RUNNER_TEMP/changed-paths"; then
-            bash tools/verify-chat-still --self-test --replay --inherit-from "$CHAT_STILL_BASE" --output "$RUNNER_TEMP/chat-still-formal.json"
-          fi
-      - name: Test remote browser command list
-        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1
-        run: node --test tools/zsb-remote-commands.test.js
-      - name: Test held-session CDP scripts
-        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1
-        run: node --test tools/zsb-cdp-script.test.js
-      - name: Run server tool tests
-        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
-        run: zig build test-vps --summary all -Dtest-vps-group=${{ matrix.group }} -Dcpu=x86_64_v3 ${{ matrix.group == 1 && '-j1' || '' }}
-      - name: Test cross-origin zsb frame input and eval
-        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 2
-        run: node --test tools/zsb-iframe.test.js
-      - name: Run session restore fixtures
-        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 2
-        run: node tools/json-reader/benchmark.mjs --fixtures-only
-      - name: Bound Zig cache before save
-        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
-        shell: bash
-        run: |
-          du -sh .zig-cache "$ZIG_GLOBAL_CACHE_DIR"
-          python3 tools/trim-zig-cache.py --cap-mib 1600
-          du -sh "$ZIG_GLOBAL_CACHE_DIR"
-          if [ -d .zig-cache ]; then du -sh .zig-cache; fi
-
-  test-worker:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          fetch-depth: 0
-      - name: Classify changed paths
-        id: paths
-        shell: bash
-        env:
-          EVENT: ${{ github.event_name }}
-          BASE: ${{ github.event_name == 'schedule' && github.sha || github.event.pull_request.base.sha || (github.ref != 'refs/heads/master' && 'origin/master') || github.event.before || format('{0}^', github.sha) }}
-          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: bash -e -o pipefail tools/classify-test-paths.sh
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        if: steps.paths.outputs.heavy == 'true'
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: service/package-lock.json
-      - name: Check version rule
-        if: steps.paths.outputs.heavy == 'true'
-        id: rule
-        shell: bash
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            node tools/version-stamp.mjs check "$(git merge-base ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }})" ${{ github.event.pull_request.head.sha }}
-          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.ref }}" != "refs/heads/master" ]; then
-            node tools/version-stamp.mjs check "$(git merge-base origin/${{ github.event.repository.default_branch }} HEAD)" HEAD
-          else
-            node tools/version-stamp.mjs check HEAD^ HEAD
-          fi
-      - name: Restore Zig toolchain (PR)
-        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
-        with:
-          path: ${{ runner.temp }}/zig-x86_64-linux-0.16.0
-          key: ${{ runner.os }}-zig-toolchain-0.16.0
-      - name: Install Zig 0.16.0
-        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
-        uses: ./.github/actions/setup-zig
-      - name: Build the account Worker
-        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
-        working-directory: service
-        timeout-minutes: 2
-        run: npm ci --no-audit --no-fund --prefer-offline && npx wrangler deploy --dry-run --outdir .build
-      - name: Install every Multibot tool for each server account
-        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
-        run: node --test tools/install-mp-talk.test.js
-      - name: Run account Worker tests
-        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
-        run: node --test service/test/infra.test.js service/test/worker.test.js service/test/keys.test.js service/test/mp-layout.test.js service/test/journey.test.js tools/mp-open-group.test.js tools/mp-layout-host.test.js tools/mb.test.js tools/mb-tab-archive.test.js tools/mb-tab-pin.test.js tools/palette-verbs.test.js tools/palette-driver-queries.test.js
-
-  build-windows:
-    name: build-windows (${{ matrix.arch }})
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: [arm64, x64]
-    env:
-      ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.zig-global-cache
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          fetch-depth: 0
-      - name: Classify changed paths
-        id: paths
-        shell: bash
-        env:
-          EVENT: ${{ github.event_name }}
-          BASE: ${{ github.event_name == 'schedule' && github.sha || github.event.pull_request.base.sha || (github.ref != 'refs/heads/master' && 'origin/master') || github.event.before || format('{0}^', github.sha) }}
-          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: bash -e -o pipefail tools/classify-test-paths.sh
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        if: steps.paths.outputs.heavy == 'true'
-        with:
-          node-version: 22
-      - name: Restore Zig toolchain (PR)
-        if: steps.paths.outputs.heavy == 'true'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
-        with:
-          path: ${{ runner.temp }}/zig-x86_64-linux-0.16.0
-          key: ${{ runner.os }}-zig-toolchain-0.16.0
-      - name: Restore Zig (PR)
-        if: steps.paths.outputs.heavy == 'true'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
-        with:
-          path: |
-            .zig-cache
-            ${{ env.ZIG_GLOBAL_CACHE_DIR }}
-          key: ${{ runner.os }}-zig-0.16.0-shards-v4-${{ matrix.arch }}-${{ hashFiles('build.zig', 'build.zig.zon') }}-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-zig-0.16.0-shards-v4-${{ matrix.arch }}-
-      - name: Install Zig 0.16.0
-        if: steps.paths.outputs.heavy == 'true'
-        uses: ./.github/actions/setup-zig
-      - name: Test hosted rows retire once above their replies
-        if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
-        run: timeout 180 node --test tools/chat-row-identity.test.js
-      - name: Test Zig syntax preflight
-        if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
-        run: node --test tools/check-zig-syntax.test.mjs
-      - name: Test routing and message IDs
-        if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
-        run: node --test tools/check-routing-ids.test.js
-      - name: Check Zig syntax
-        if: steps.paths.outputs.heavy == 'true'
-        run: node tools/check-zig-syntax.mjs
-      - name: Build release executables for arm64
-        if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'arm64'
-        run: zig build -Dtarget=aarch64-windows-gnu --summary all
-      - name: Cross-compile the Windows version label
-        if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
-        run: timeout 1200 zig build -Dtarget=x86_64-windows-gnu
-      - name: Prepare throwaway update-test signing key
-        if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
-        run: node tools/update-release-fixtures.mjs --prepare-key zig-out/bin/update-test-key.der
-      - name: Build release executable for x64
-        if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
-        run: zig build -Dtarget=x86_64-windows-gnu -Drelease=true --summary all
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
-        with:
-          name: update-verifier-x64-${{ github.run_id }}
-          path: |
-            zig-out/bin/multiprompt.exe
-            zig-out/bin/update-test-key.der
-          if-no-files-found: error
-          retention-days: 1
-          overwrite: true
-
-      - name: Build newer native update fixture
-        if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
-        run: zig build -Dtarget=x86_64-windows-gnu -Drelease=true -Dversion=9.99.999 --prefix "$RUNNER_TEMP/native-update" --summary all
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
-        with:
-          name: native-update-x64-${{ github.run_id }}
-          path: ${{ runner.temp }}/native-update/bin/multiprompt.exe
-          if-no-files-found: error
-          retention-days: 1
-
-
-  speed-baseline:
-    if: github.event_name != 'pull_request'
-    runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 150
     env:
       ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.zig-global-cache
       ZIG_LOCAL_CACHE_DIR: ${{ github.workspace }}/.zig-cache
@@ -701,119 +24,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - name: Restore Zig (PR)
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
-        with:
-          path: |
-            .zig-cache
-            ${{ env.ZIG_GLOBAL_CACHE_DIR }}
-          key: ${{ runner.os }}-zig-0.16.0-speed-${{ hashFiles('build.zig', 'build.zig.zon') }}-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-zig-0.16.0-speed-
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
-        with:
-          python-version: '3.12'
-      - name: Reject PowerShell host name collisions
-        shell: pwsh
-        run: ./tools/check-powershell-host-names.ps1
-      - name: Test session speed oracle
-        run: node --test tools/switch-performance.test.mjs
-      - name: Cache Zig toolchain
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
-        with:
-          path: ${{ runner.temp }}/zig-x86_64-windows-0.16.0
-          key: ${{ runner.os }}-zig-toolchain-0.16.0
-      - name: Install Zig 0.16.0
-        uses: ./.github/actions/setup-zig
-      - name: Build baseline
-        shell: pwsh
-        env:
-          BASE: ${{ github.event.pull_request.base.sha || (github.ref == 'refs/heads/master' && (github.event.before || format('{0}^', github.sha))) || 'origin/master' }}
-        run: |
-          $requested = (git merge-base $env:BASE HEAD).Trim()
-          $base = $requested
-          $buildError = ''
-          for ($attempt = 0; $attempt -lt 12; $attempt += 1) {
-            git worktree remove --force baseline 2>$null
-            git worktree add --detach baseline $base
-            if ($LASTEXITCODE -ne 0) { throw 'Baseline checkout failed' }
-            node tools/switch-performance.mjs instrument baseline
-            if ($LASTEXITCODE -ne 0) { throw 'Baseline timing instrumentation failed' }
-            $log = Join-Path $env:RUNNER_TEMP "baseline-build-$attempt.log"
-            Push-Location baseline
-            try { zig build *> $log } finally { Pop-Location }
-            if ($LASTEXITCODE -eq 0) { break }
-            $firstError = Select-String -Path $log -Pattern 'error:' | Select-Object -First 1
-            if ($firstError) { $buildError = $firstError.Line.Trim() }
-            $parent = (git rev-parse "$base^").Trim()
-            if ($LASTEXITCODE -ne 0 -or -not $parent) { throw "Baseline build failed on $base and has no ancestor left: $buildError" }
-            $base = $parent
-            if ($attempt -eq 11) { throw "Baseline build failed after 12 commits from ${requested}: $buildError" }
-          }
-          zig cc -target x86_64-windows-gnu -municode -O2 tools/verify-chat-delivery/launcher.c -o "baseline/zig-out/bin/ssh.exe"
-          if ($LASTEXITCODE -ne 0) { throw 'SSH fixture build failed' }
-          zig cc -target x86_64-windows-gnu -municode -mwindows -O2 tools/verify-chat-delivery/launcher.c -o "baseline/zig-out/bin/tmux.exe"
-          if ($LASTEXITCODE -ne 0) { throw 'tmux fixture build failed' }
-          "SPEED_BASE=$base" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
-          "SPEED_REQUESTED_BASE=$requested" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
-          if ($base -ne $requested) {
-            "SPEED_BASE_FALLBACK=$buildError" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
-          }
-      - name: Record baseline commit
-        shell: bash
-        run: |
-          mkdir -p evidence/base
-          {
-            printf 'requested base: %s\n' "$SPEED_REQUESTED_BASE"
-            printf 'measured baseline: %s\n' "$SPEED_BASE"
-            if [ -n "${SPEED_BASE_FALLBACK:-}" ]; then
-              printf 'walked back because: %s\n' "$SPEED_BASE_FALLBACK"
-            fi
-          } > evidence/base/baseline.txt
-          cat evidence/base/baseline.txt
-      - name: Measure baseline session speed
-        shell: powershell
-        run: ./tools/switch-performance.ps1 -Exe baseline/zig-out/bin/multiprompt.exe -Evidence evidence/base -Revision "$env:SPEED_BASE"
-      - name: Bound Zig cache before save
-        if: always()
-        shell: bash
-        run: |
-          du -sh .zig-cache "$ZIG_GLOBAL_CACHE_DIR"
-          python3 tools/trim-zig-cache.py --cap-mib 1600
-          du -sh "$ZIG_GLOBAL_CACHE_DIR"
-          if [ -d .zig-cache ]; then du -sh .zig-cache; fi
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: always()
-        with:
-          name: speed-base-${{ github.run_id }}
-          path: evidence/base
-          if-no-files-found: error
-          retention-days: 7
-
-  speed-candidate:
-    if: github.event_name != 'pull_request'
-    runs-on: windows-latest
-    timeout-minutes: 25
-    env:
-      ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.zig-global-cache
-      ZIG_LOCAL_CACHE_DIR: ${{ github.workspace }}/.zig-cache
-    steps:
-      - name: Keep LF line endings
-        run: git config --global core.autocrlf false
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - name: Restore Zig (PR)
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
-        with:
-          path: |
-            .zig-cache
-            ${{ env.ZIG_GLOBAL_CACHE_DIR }}
-          key: ${{ runner.os }}-zig-0.16.0-speed-${{ hashFiles('build.zig', 'build.zig.zon') }}-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-zig-0.16.0-speed-
+          ref: ${{ github.sha }}
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.12'
@@ -823,97 +34,86 @@ jobs:
           path: ${{ runner.temp }}/zig-x86_64-windows-0.16.0
           key: ${{ runner.os }}-zig-toolchain-0.16.0
       - name: Install Zig 0.16.0
-        uses: ./.github/actions/setup-zig
-      - name: Build candidate
         shell: pwsh
         run: |
-          node tools/switch-performance.mjs instrument .
-          if ($LASTEXITCODE -ne 0) { throw 'Candidate timing instrumentation failed' }
-          zig build
-          if ($LASTEXITCODE -ne 0) { throw 'Candidate build failed' }
-          zig cc -target x86_64-windows-gnu -municode -O2 tools/verify-chat-delivery/launcher.c -o "zig-out/bin/ssh.exe"
-          if ($LASTEXITCODE -ne 0) { throw 'SSH fixture build failed' }
-          zig cc -target x86_64-windows-gnu -municode -mwindows -O2 tools/verify-chat-delivery/launcher.c -o "zig-out/bin/tmux.exe"
-          if ($LASTEXITCODE -ne 0) { throw 'tmux fixture build failed' }
-          "SPEED_HEAD=$((git rev-parse HEAD).Trim())" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
-      - name: Measure candidate session speed
-        shell: powershell
-        run: ./tools/switch-performance.ps1 -Exe zig-out/bin/multiprompt.exe -Evidence evidence/head -Revision "$env:SPEED_HEAD"
-      - name: Bound Zig cache before save
-        if: always()
-        shell: bash
-        run: |
-          du -sh .zig-cache "$ZIG_GLOBAL_CACHE_DIR"
-          python3 tools/trim-zig-cache.py --cap-mib 1600
-          du -sh "$ZIG_GLOBAL_CACHE_DIR"
-          if [ -d .zig-cache ]; then du -sh .zig-cache; fi
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: always()
-        with:
-          name: speed-head-${{ github.run_id }}
-          path: evidence/head
-          if-no-files-found: error
-          retention-days: 7
-
-  switch-performance:
-    needs: [speed-baseline, speed-candidate]
-    if: always() && github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          name: speed-base-${{ github.run_id }}
-          path: evidence/base
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          name: speed-head-${{ github.run_id }}
-          path: evidence/head
-      - name: Require session speed limits
-        run: node tools/switch-performance.mjs report evidence/base/samples.json evidence/head/samples.json
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: always()
-        with:
-          name: switch-performance-${{ github.run_id }}
-          path: evidence
-          if-no-files-found: error
-          retention-days: 7
-
-  test-result:
-    name: test
-    needs: [test, test-vps, build-windows, test-worker, test-update-source]
-    if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 2
-    steps:
-      - name: Require every test job
-        env:
-          WINDOWS: ${{ needs.test.result }}
-          VPS: ${{ needs.test-vps.result }}
-          BUILD: ${{ needs.build-windows.result }}
-          WORKER: ${{ needs.test-worker.result }}
-          UPDATE_SOURCE: ${{ needs.test-update-source.result }}
-          EVENT: ${{ github.event_name }}
-        run: |
-          require_jobs() {
-            for result in "$@"; do
-              [ "$result" = success ] || return 1
-            done
+          if (-not (Test-Path "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0/zig.exe")) {
+            $zip = "$env:RUNNER_TEMP/zig.zip"
+            Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $zip
+            if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
+            tar -xf $zip -C $env:RUNNER_TEMP
+            if ($LASTEXITCODE -ne 0) { throw 'Zig extraction failed' }
           }
-          require_jobs success success success success success success success success success
-          for result in failure cancelled skipped; do
-            if require_jobs "$result" success success success success success success success success; then exit 1; fi
-            if require_jobs success "$result" success success success success success success success; then exit 1; fi
-            if require_jobs success success "$result" success success success success success success; then exit 1; fi
-            if require_jobs success success success "$result" success success success success success; then exit 1; fi
-            if require_jobs success success success success "$result" success success success success; then exit 1; fi
-            if require_jobs success success success success success "$result" success success success; then exit 1; fi
-            if require_jobs success success success success success success "$result" success success; then exit 1; fi
-            if require_jobs success success success success success success success "$result" success; then exit 1; fi
-            if require_jobs success success success success success success success success "$result"; then exit 1; fi
-          done
-          echo 'Aggregate routing controls passed'
-          require_jobs "$WINDOWS" "$VPS" "$BUILD" "$WORKER" "$UPDATE_SOURCE"
+          "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - name: Restore Zig build cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            .zig-cache
+            ${{ env.ZIG_GLOBAL_CACHE_DIR }}
+          key: ${{ runner.os }}-zig-0.16.0-pairs-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-zig-0.16.0-pairs-
+            ${{ runner.os }}-zig-0.16.0-speed-
+      - name: Validate measurement tooling
+        shell: pwsh
+        run: |
+          $tokens = $null; $parseErrors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile("$pwd/tools/everyday-performance.ps1", [ref]$tokens, [ref]$parseErrors)
+          if ($parseErrors.Count -gt 0) { throw ($parseErrors | Out-String) }
+          [void][System.Management.Automation.Language.Parser]::ParseFile("$pwd/tools/everyday-performance-pairs.ps1", [ref]$tokens, [ref]$parseErrors)
+          if ($parseErrors.Count -gt 0) { throw ($parseErrors | Out-String) }
+          node --check tools/everyday-performance-profile.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Profiler syntax failed' }
+      - name: Build base and head in production configuration
+        shell: pwsh
+        run: |
+          $base = (git rev-parse origin/master).Trim()
+          $head = (git rev-parse HEAD).Trim()
+          "$base`n$head" | Set-Content revisions.txt
+          git switch --detach --quiet $base
+          zig build -Dtarget=x86_64-windows-gnu -Drelease=true
+          if ($LASTEXITCODE -ne 0) { throw 'Base release build failed; no ancestor fallback allowed' }
+          zig cc -target x86_64-windows-gnu -municode -O2 tools/verify-chat-delivery/launcher.c -o zig-out/bin/ssh.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Base SSH fixture build failed' }
+          zig cc -target x86_64-windows-gnu -municode -mwindows -O2 tools/verify-chat-delivery/launcher.c -o zig-out/bin/tmux.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Base tmux fixture build failed' }
+          New-Item -ItemType Directory -Force base-bin | Out-Null
+          Copy-Item zig-out/bin/* base-bin -Force
+          @{ builtRevision=$base; sourceTree=(git rev-parse "${base}:src").Trim(); build=(git rev-parse "${base}:build.zig").Trim(); sha256=(Get-FileHash base-bin/multiprompt.exe -Algorithm SHA256).Hash } | ConvertTo-Json | Set-Content base-bin/measurement-build.json
+          git switch --detach --quiet $head
+          zig build -Dtarget=x86_64-windows-gnu -Drelease=true
+          if ($LASTEXITCODE -ne 0) { throw 'Head release build failed; no ancestor fallback allowed' }
+          zig cc -target x86_64-windows-gnu -municode -O2 tools/verify-chat-delivery/launcher.c -o zig-out/bin/ssh.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Head SSH fixture build failed' }
+          zig cc -target x86_64-windows-gnu -municode -mwindows -O2 tools/verify-chat-delivery/launcher.c -o zig-out/bin/tmux.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Head tmux fixture build failed' }
+          New-Item -ItemType Directory -Force head-bin | Out-Null
+          Copy-Item zig-out/bin/* head-bin -Force
+          @{ builtRevision=$head; sourceTree=(git rev-parse "${head}:src").Trim(); build=(git rev-parse "${head}:build.zig").Trim(); sha256=(Get-FileHash head-bin/multiprompt.exe -Algorithm SHA256).Hash } | ConvertTo-Json | Set-Content head-bin/measurement-build.json
+          $built = Get-Content head-bin/measurement-build.json -Raw | ConvertFrom-Json
+          if ($built.sourceTree -ne (git rev-parse "${head}:src").Trim() -or $built.build -ne (git rev-parse "${head}:build.zig").Trim()) { throw 'Head build has a different product source tree' }
+      - name: Measure alternating base and head trials
+        shell: powershell
+        run: |
+          $lines = Get-Content revisions.txt
+          $env:BASE_SHA = $lines[0].Trim()
+          $env:HEAD_SHA = $lines[1].Trim()
+          ./tools/everyday-performance-pairs.ps1 -BaseExe base-bin/multiprompt.exe -HeadExe head-bin/multiprompt.exe -BaseRevision $env:BASE_SHA -HeadRevision $env:HEAD_SHA -Evidence evidence -Count ${{ inputs.samples }} -Trials ${{ inputs.trials }}
+          if ($LASTEXITCODE -ne 0) { throw 'Paired measurement failed' }
+      - name: Compare base and head
+        shell: pwsh
+        run: |
+          python tools/everyday-performance-compare.py evidence
+          if ($LASTEXITCODE -ne 0) { throw 'Comparison failed' }
+          Get-Content evidence/comparison.json | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: soft-3163-pairs-${{ github.run_id }}
+          path: |
+            evidence
+            base-bin/measurement-build.json
+            head-bin/measurement-build.json
+            revisions.txt
+          if-no-files-found: error
+          retention-days: 14
