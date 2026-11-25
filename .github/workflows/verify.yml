@@ -551,9 +551,11 @@ jobs:
             $install = Start-Process -FilePath $setup -ArgumentList '/S' -Wait -PassThru
             if ($install.ExitCode -ne 0) { throw "Tesseract installer exited $($install.ExitCode)" }
           }
-          $reader = (& $ocr --version 2>$null | Select-Object -First 1)
-          if ($LASTEXITCODE -ne 0 -or -not $reader) { throw 'Tesseract installation failed' }
-          Write-Host "Tesseract ready: $reader"
+          . ./tools/probe-native-version.ps1
+          $probe = Invoke-NativeVersionProbe -FilePath $ocr -Arguments '--version' -Evidence $env:RUNNER_TEMP
+          if ($probe.ExitCode -ne 0) { throw "Tesseract from $ocr exited $($probe.ExitCode): $($probe.ErrorText)" }
+          if (-not $probe.Line) { throw "Tesseract from $ocr printed no version line: $($probe.ErrorText)" }
+          Write-Host "Tesseract ready: $($probe.Line)"
           Set-Location service
           npm ci --no-audit --no-fund
           if ($LASTEXITCODE -ne 0) { throw 'Account Worker dependencies failed' }

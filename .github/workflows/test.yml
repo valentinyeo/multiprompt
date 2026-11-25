@@ -255,6 +255,10 @@ jobs:
       - name: Test installer prune
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 3
         run: node --test tools/install-prune.test.js
+      - name: Check the version probe reads the real process exit code
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 3
+        shell: pwsh
+        run: ./tools/probe-native-version.test.ps1
       - name: Check local listener accounts
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1
         shell: pwsh
