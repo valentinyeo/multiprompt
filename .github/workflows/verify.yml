@@ -252,7 +252,8 @@ jobs:
           node - <<'NODE' >> "$GITHUB_OUTPUT"
           const { discoverFeatures, journeyMatrix } = require('./tools/verify-features.cjs');
           const { available, pr } = discoverFeatures();
-          const selected = process.env.FEATURES ? JSON.parse(process.env.FEATURES) : process.env.FEATURE && process.env.FEATURE !== 'all' ? [process.env.FEATURE] : process.env.EVENT === 'pull_request' && process.env.FEATURE !== 'all' ? pr : available;
+          const automatic = available.filter(feature => feature !== 'rooms' || process.env.EVENT === 'workflow_dispatch');
+          const selected = process.env.FEATURES ? JSON.parse(process.env.FEATURES) : process.env.FEATURE && process.env.FEATURE !== 'all' ? [process.env.FEATURE] : process.env.EVENT === 'pull_request' && process.env.FEATURE !== 'all' ? pr : automatic;
           if (!Array.isArray(selected) || !selected.length || selected.some(feature => !available.includes(feature)) || new Set(selected).size !== selected.length) throw new Error('Expected unique supported desktop journeys');
           console.log(`builds=${JSON.stringify([...new Set(selected.map(feature => feature === 'chat-still' ? 'chat-still' : feature === 'rooms' ? 'rooms' : 'normal'))])}`);
           console.log(`selected=${JSON.stringify(selected)}`);

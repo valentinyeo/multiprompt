@@ -12,7 +12,7 @@ Ctrl+K **New room** (also available as Ctrl+Shift+N), enter a name, Tab into mem
 
 ## Driving it with control.ps1
 
-Dispatch `gh workflow run verify.yml --ref <branch> -f feature=rooms`. The workflow discovers this file automatically; there is no global pull-request smoke entry. Source mapping selects it for room files and its own driver only. The Rooms build profile uses `-Drooms-preview=true`, matching the shipped release feature without enabling it in other verification builds.
+Dispatch `gh workflow run verify.yml --ref <branch> -f feature=rooms`. The workflow discovers this file automatically; there is no global pull-request smoke entry. Source mapping selects it for room files and its own driver only. Automatic `all` matrices omit Rooms; explicit dispatch (including manual `all`) includes it. The Rooms build profile uses `-Drooms-preview=true`, matching the shipped release feature without enabling it in other verification builds.
 
 `drive.ps1 -Feature rooms` records the desktop with the existing FFmpeg recorder and delegates through `control.ps1` to `control-feature-rooms.ps1`. Only GitHub-hosted Windows, an isolated profile, the runner-owned account Worker, WSL2 OpenSSH/tmux, FFmpeg and Tesseract are supported. The production account service runs locally with disposable credentials, a runner-only certificate and two seeded saved chats. Initial saved chats and provider commands are fixture setup, not proof of room creation. The driver never seeds a room or sends a room command outside the app.
 

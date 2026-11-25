@@ -59,7 +59,7 @@ In a release or Rooms-enabled verification build, use Ctrl+Shift+N or Ctrl+K New
 
 Observable proof: The room keeps one ID and the selected members; replies are attributed once to the right agent. Editing preserves earlier history and prevents private per-chat actions from leaking into a room.
 
-Run `feature=rooms` for the six-step desktop gate in [Rooms](rooms.md). Release builds enable Rooms; non-release verification builds need `-Drooms-preview=true`. The room-reply-grouping diagnostic alone is not desktop proof.
+Run `feature=rooms` for the desktop gate in [Rooms](rooms.md), including fresh creation, closed-chat membership and away/restart recovery. Release builds enable Rooms; non-release verification builds need `-Drooms-preview=true`. The room-reply-grouping diagnostic alone is not desktop proof.
 
 | Palette row or dynamic family | User reaches it |
 | --- | --- |
