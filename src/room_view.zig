@@ -211,18 +211,31 @@ pub const View = struct {
         self.showError("Could not load this room. Check the server connection and try again.");
     }
 
-    pub fn showLoading(self: *View, room_id: []const u8) void {
+    pub fn showLoading(self: *View, room_id: []const u8, identity: ?*const ViewModel) void {
         if (!self.openingRoom(room_id)) self.deferred_submit = false;
         self.opening_len = @min(room_id.len, self.opening.len);
         @memcpy(self.opening[0..self.opening_len], room_id[0..self.opening_len]);
+        if (identity) |model| if (validModel(model) and std.mem.eql(u8, model.room_id, room_id)) {
+            if (!sameRoom(self.model, model)) {
+                self.retire();
+                self.scroll = 0;
+                self.presented_revision = 0;
+                self.picker = false;
+            }
+            self.model = model;
+        };
         self.loading = true;
         self.result = null;
         self.error_len = 0;
-        self.invalidate();
+        self.layout();
     }
 
-    fn openingRoom(self: *const View, room_id: []const u8) bool {
+    pub fn openingRoom(self: *const View, room_id: []const u8) bool {
         return self.opening_len > 0 and std.mem.eql(u8, self.opening[0..self.opening_len], room_id);
+    }
+
+    pub fn isRoomMode(self: *const View) bool {
+        return self.mode == .room;
     }
 
     pub fn showError(self: *View, message: []const u8) void {

@@ -3,7 +3,7 @@ test "a send pressed while the room opens waits for that room and sends once" {
     const empty = ViewModel{ .room_id = "" };
     const room = ViewModel{ .room_id = "room-a", .revision = 4 };
     var view = View{ .model = &empty, .callbacks = callbacks };
-    view.showLoading(room.room_id);
+    view.showLoading(room.room_id, null);
     w.compose(std.unicode.utf8ToUtf16LeStringLiteral("Hello room"));
     view.submit();
     try std.testing.expectEqual(@as(usize, 0), sent);
@@ -17,6 +17,16 @@ test "a send pressed while the room opens waits for that room and sends once" {
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Hello room"), sent_text[0..sent_len]);
     view.flushDeferred();
     try std.testing.expectEqual(@as(usize, 1), sent);
+}
+
+test "a room that is still opening shows its own name instead of an empty screen" {
+    defer reset();
+    const title = std.unicode.utf8ToUtf16LeStringLiteral("Rooms534");
+    const room = ViewModel{ .room_id = "room-a", .revision = 4, .name = title };
+    var view = View{ .model = &room, .callbacks = callbacks };
+    view.showLoading(room.room_id, &room);
+    try std.testing.expectEqualSlices(u16, title, view.model.name);
+    try std.testing.expect(view.loading);
 }
 
 test "a send already on a presented room goes straight away" {
@@ -35,7 +45,7 @@ test "a held send whose draft was cleared sends nothing and shows no error" {
     const empty = ViewModel{ .room_id = "" };
     const room = ViewModel{ .room_id = "room-a", .revision = 4 };
     var view = View{ .model = &empty, .callbacks = callbacks };
-    view.showLoading(room.room_id);
+    view.showLoading(room.room_id, null);
     w.compose(std.unicode.utf8ToUtf16LeStringLiteral("Hello room"));
     view.submit();
     w.compose(&.{});
@@ -52,11 +62,11 @@ test "a held send never follows you into another room or back again" {
     const room = ViewModel{ .room_id = "room-a", .revision = 4 };
     const other = ViewModel{ .room_id = "room-b", .revision = 9 };
     var view = View{ .model = &empty, .callbacks = callbacks };
-    view.showLoading(room.room_id);
+    view.showLoading(room.room_id, null);
     w.compose(std.unicode.utf8ToUtf16LeStringLiteral("Hello room"));
     view.submit();
     try std.testing.expect(view.deferred_submit);
-    view.showLoading(other.room_id);
+    view.showLoading(other.room_id, null);
     w.compose(std.unicode.utf8ToUtf16LeStringLiteral("Other room draft"));
     try std.testing.expect(!view.deferred_submit);
     try std.testing.expect(view.setModel(&other));

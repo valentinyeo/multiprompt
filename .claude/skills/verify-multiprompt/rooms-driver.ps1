@@ -283,8 +283,8 @@ function Dialog-Shot([string]$Name) {
     [IO.File]::WriteAllText("$Evidence/$Name-footer-visible.txt", $text)
     return $text
 }
-function Read-Room([string]$Name) {
-    [void](Shot $Name)
+function Read-Room([string]$Name, [switch]$Existing) {
+    if (-not $Existing.IsPresent) { [void](Shot $Name) }
     $room = Room-Window
     if (-not $room) { throw 'No visible room to read' }
     $bounds = [Windows.Automation.AutomationElement]::FromHandle($room).Current.BoundingRectangle
@@ -295,15 +295,35 @@ function Read-Room([string]$Name) {
     } finally { $source.Dispose() }
     return Read-Crop "$Evidence/$Name-room.png" "$Name-room"
 }
+function Wait-RoomPresented([string]$Name) {
+    $state = Snapshot "$Name-presented"
+    $room = @(Room-Data $state)[0]
+    if ($null -eq $room) { return }
+    $roomId = [string]$room.id
+    $count = @(Room-Events $state | Where-Object { ($_.type -eq 'human' -or $_.type -eq 'agent_reply') -and $_.room_id -eq $roomId }).Count
+    if ($count -le 0) { return }
+    $pattern = '\[rooms\] view presented room=' + [regex]::Escape($roomId) + ' after=\d+ messages=(\d+)'
+    [void](Wait-For "room view presents all $count saved room messages" {
+        $log = Read-Shared "$settings/debug.log"
+        $open = $log.LastIndexOf('[rooms] view opened')
+        if ($open -lt 0) { $open = 0 }
+        $rows = [regex]::Matches($log.Substring($open), $pattern)
+        if ($rows.Count -eq 0) { return $false }
+        ([int]$rows[$rows.Count - 1].Groups[1].Value -ge $count)
+    } 30)
+}
 function Shot-Room([string]$Name) {
     Doctor
     $room = Room-Window
     if (-not $room) { throw 'No visible room to read' }
+    Wait-RoomPresented $Name
     [RoomsDesktop]::Wheel($main, $room, $app.Id, 7200)
     $pages = @()
     $previous = ''
     for ($page = 0; $page -lt 16; $page++) {
-        $text = Shot "$Name-page-$page"
+        $shot = Shot "$Name-page-$page"
+        $text = (($shot + ' ' + (Read-Room "$Name-page-$page" -Existing)) -replace '\s+', ' ').Trim()
+        [IO.File]::WriteAllText("$Evidence/$Name-page-$page-visible.txt", $text)
         if ($page -gt 0 -and $text -ceq $previous) { break }
         $pages += $text
         $previous = $text

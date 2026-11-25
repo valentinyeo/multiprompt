@@ -141,6 +141,8 @@ const OwnedModel = struct {
 var owned_model: ?*OwnedModel = null;
 var building_model: ?*OwnedModel = null;
 var create_model = room_view.ViewModel{ .room_id = "", .name = &.{}, .revision = 0, .members = &.{}, .candidates = &.{}, .messages = &.{} };
+var loading_model = room_view.ViewModel{ .room_id = "", .name = &.{}, .revision = 0, .members = &.{}, .candidates = &.{}, .messages = &.{} };
+var loading_arena: ?std.heap.ArenaAllocator = null;
 var create_arena: ?std.heap.ArenaAllocator = null;
 var selection_generation: u64 = 0;
 var read_generation: u64 = 0;
@@ -318,9 +320,59 @@ fn freeOwned(value: *OwnedModel) void {
     std.heap.page_allocator.destroy(value);
 }
 
+fn clearLoadingModel() void {
+    if (loading_arena) |*arena| arena.deinit();
+    loading_arena = null;
+    loading_model = .{ .room_id = "", .name = &.{}, .revision = 0, .members = &.{}, .candidates = &.{}, .messages = &.{} };
+}
+
+fn presentLoadingRoom(location: RoomLocation) void {
+    clearLoadingModel();
+    if (!created) return;
+    loading_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    const a = if (loading_arena) |*arena| arena.allocator() else unreachable;
+    var built = room_view.ViewModel{ .room_id = "", .name = &.{}, .revision = 0, .members = &.{}, .candidates = &.{}, .messages = &.{} };
+    var matched = false;
+    for (catalog()) |row| {
+        if (!std.mem.eql(u8, row.id, &location.room_id)) continue;
+        const members = a.alloc(room_view.Member, row.members.len) catch break;
+        var ok = true;
+        for (row.members, 0..) |member, index| {
+            members[index] = .{
+                .id = a.dupe(u8, member.id) catch { ok = false; break; },
+                .alias = a.dupe(u16, member.alias) catch { ok = false; break; },
+                .name = a.dupe(u16, member.name) catch { ok = false; break; },
+                .appearance = member.appearance,
+                .name_color = member.name_color,
+                .presence = member.presence,
+            };
+        }
+        if (!ok) break;
+        built = .{
+            .room_id = a.dupe(u8, row.id) catch break,
+            .name = wide(a, row.name) orelse break,
+            .revision = row.revision,
+            .members = members,
+            .candidates = &.{},
+            .messages = &.{},
+        };
+        matched = true;
+        break;
+    }
+    if (!matched) {
+        clearLoadingModel();
+        return;
+    }
+    loading_model = built;
+    var log: [160]u8 = undefined;
+    diagnostics.syncLog(std.fmt.bufPrint(&log, "[rooms] view placeholder room={s} members={d}", .{ loading_model.room_id, loading_model.members.len }) catch unreachable);
+}
+
 fn clearModels() void {
     stopReplyWatch();
+    clearLoadingModel();
     if (created) view.resetScope(&model);
+    diagnostics.syncLog("[rooms] view cleared");
     if (owned_model) |value| freeOwned(value);
     if (building_model) |value| freeOwned(value);
     owned_model = null;
@@ -601,16 +653,19 @@ pub fn setAppliedLayout(bytes: []const u8) bool {
         if (route == null or !std.mem.eql(u8, &key, &route_key)) {
             if (!flushUi()) {
                 account_generation +%= 1;
-                if (created and front == .selected) view.showLoading(&front.selected.room_id);
+                if (created and front == .selected) view.showLoading(&front.selected.room_id, null);
                 return false;
             }
             clearModels();
-            if (created and front == .selected) restoreDraft(front.selected);
+            if (created and front == .selected) {
+                presentLoadingRoom(front.selected);
+                restoreDraft(front.selected);
+            }
             clearCatalog();
             candidate_count = 0;
             account_generation +%= 1;
             if (controller) |*c| if (c.job == null) { controller = null; };
-            if (created and front == .selected) view.showLoading(&front.selected.room_id);
+            if (created and front == .selected) view.showLoading(&front.selected.room_id, if (loading_arena != null) &loading_model else null);
         }
     }
     return true;
@@ -1434,6 +1489,8 @@ fn publishModel() bool {
     item.value.candidates = item.candidates.items;
     item.value.messages = item.messages.items;
     if (!view.setModel(&item.value)) return false;
+    var presented: [200]u8 = undefined;
+    diagnostics.syncLog(std.fmt.bufPrint(&presented, "[rooms] view presented room={s} after={d} messages={d}", .{ item.value.room_id, item.after, item.messages.items.len }) catch unreachable);
     if (conflict_refresh) |generation| {
         if (generation.selection == selection_generation and generation.view_generation == view.generation and front == .selected and std.mem.eql(u8, &front.selected.room_id, item.value.room_id)) view.refreshEditRevision();
         conflict_refresh = null;
@@ -2503,7 +2560,18 @@ pub fn select(location: RoomLocation) void {
     }
     if (!saveDraft()) return;
     if (!enter()) return;
-    clearModels();
+    diagnostics.syncLog("[rooms] view opened");
+    var reusable = false;
+    if (front != .create and view.isRoomMode()) if (c) |value| if (owned_model) |current| {
+        reusable = value.has_host_uuid and std.mem.eql(u8, &value.host_uuid, &location.store.store_uuid) and std.mem.eql(u8, &current.value.room_id, &location.room_id);
+    };
+    if (reusable) {
+        if (owned_model) |current| _ = view.setModel(&current.value);
+        diagnostics.syncLog("[rooms] view kept the loaded room while it refreshes");
+    } else {
+        clearModels();
+        presentLoadingRoom(location);
+    }
     retained_selection = location;
     restore_pending = false;
     front = .{ .selected = location };
@@ -2512,7 +2580,7 @@ pub fn select(location: RoomLocation) void {
     @import("workspaces.zig").updateMainWindowTitle();
     resize(app_state.g_main_hwnd);
     syncVisibility();
-    view.showLoading(&location.room_id);
+    if (!reusable) view.showLoading(&location.room_id, if (loading_arena != null) &loading_model else null);
     view.focus();
     if (!found) return;
     selection_waiting = true;
