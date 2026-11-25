@@ -90,9 +90,11 @@ def publish_runtime():
     bootstrap = "import base64,sys;s=base64.b64decode(sys.stdin.buffer.readline()).decode();exec(compile(s,'<room-runtime>','exec'),dict(__name__='__main__',READER_SOURCE=s))"
     try:
         subprocess.run([sys.executable, '-u', '-c', bootstrap, 'host', 'list'], input=base64.b64encode(RUNTIME_SOURCE) + b'\n', stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5, check=False)
-    except (OSError, subprocess.TimeoutExpired):
+    except (OSError, subprocess.TimeoutExpired) as error:
+        sys.stderr.write('[room_bridge] publish failed %s\n' % type(error).__name__)
         return False
     remember_published()
+    sys.stderr.write('[room_bridge] published runtime %s\n' % hashlib.sha256(RUNTIME_SOURCE).hexdigest()[:12])
     return True
 
 
