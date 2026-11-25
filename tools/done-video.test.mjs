@@ -85,7 +85,7 @@ test('findJourneyVideo prefers root journey.mp4 and rejects missing or empty vid
   assert.equal(findJourneyVideo(dir), path.resolve(dir, 'journey.mp4'));
 });
 
-test('main downloads matching base and head evidence and prints both video paths', t => {
+for (const event of ['pull_request', 'workflow_dispatch']) test(`main downloads matching base and head clips from ${event} and rejects stale heads`, t => {
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'done-video-main-'));
   t.after(() => fs.rmSync(out, { recursive: true, force: true }));
   const written = [];
@@ -93,9 +93,13 @@ test('main downloads matching base and head evidence and prints both video paths
   const io = {
     exec: (command, args) => {
       assert.equal(command, 'gh');
+      if (args[0] === 'pr') return { status: 0, stdout: JSON.stringify({ headRefOid: 'a'.repeat(40) }) };
       const endpoint = args.find(arg => arg.startsWith('repos/')) || '';
       if (endpoint.includes('/workflows/pr-verifier.yml/runs')) {
-        return { status: 0, stdout: JSON.stringify({ workflow_runs: [{ id: 901, display_title: 'verify PR 521' }, { id: 900, display_title: 'verify PR 521' }] }) };
+        return { status: 0, stdout: JSON.stringify({ workflow_runs: [
+          { id: 902, display_title: 'verify PR 521', head_sha: 'old', event: 'pull_request' },
+          ...[901, 900].map(id => ({ id, display_title: 'verify PR 521', event, head_sha: event === 'pull_request' ? 'a'.repeat(40) : 'master' })),
+        ] }) };
       }
       if (endpoint.includes('/runs/901/artifacts')) {
         return { status: 0, stdout: JSON.stringify([{ artifacts: [{ id: 10, name: 'pr-verifier-selection', expired: false }] }]) };
@@ -116,7 +120,10 @@ test('main downloads matching base and head evidence and prints both video paths
     extractZip: (archivePath, targetDir) => {
       fs.mkdirSync(targetDir, { recursive: true });
       const id = fs.readFileSync(archivePath, 'utf8');
-      if (id === '20') fs.writeFileSync(path.join(targetDir, 'selection.json'), JSON.stringify({ features: ['server-chat', 'appearance'] }));
+      if (id === '20') {
+        fs.writeFileSync(path.join(targetDir, 'selection.json'), JSON.stringify({ features: ['server-chat', 'appearance'] }));
+        fs.writeFileSync(path.join(targetDir, 'pr.json'), JSON.stringify({ headRefOid: 'a'.repeat(40) }));
+      }
       else fs.writeFileSync(path.join(targetDir, id === '23' ? 'before.mp4' : 'after.mp4'), 'video-bytes');
     },
     tempDir: () => out,
@@ -126,6 +133,12 @@ test('main downloads matching base and head evidence and prints both video paths
   const code = main(['521', '--out', out], io);
   assert.equal(code, 0, errors.join(''));
   assert.equal(written.join(''), `${path.join(out, `verify-server-chat-${'b'.repeat(40)}`, 'before.mp4')}\n${path.join(out, 'verify-server-chat', 'after.mp4')}\n`);
+  const exec = io.exec;
+  io.exec = (command, args) => args[0] === 'pr'
+    ? { status: 0, stdout: JSON.stringify({ headRefOid: 'c'.repeat(40) }) }
+    : exec(command, args);
+  assert.equal(main(['521', '--out', out], io), 1);
+  assert.match(errors.join(''), /no pr-verifier.yml run found|older PR head/);
 });
 
 

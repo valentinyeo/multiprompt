@@ -172,26 +172,35 @@ function fetchRunArtifacts(io, repo, runId) {
   return list.flatMap(page => Array.isArray(page?.artifacts) ? page.artifacts : []);
 }
 
-function readSelectionFeatures(io, repo, artifacts, scratchDir) {
+function readSelectionFeatures(io, repo, artifacts, scratchDir, expectedHead = '') {
   const selectionArtifact = newestByName(artifacts).find(item => item.name === 'pr-verifier-selection');
-  if (!selectionArtifact) return [];
+  if (!selectionArtifact) {
+    if (expectedHead) throw new CliError('cannot confirm the manually dispatched verifier head without its selection artifact');
+    return [];
+  }
   try {
     const archive = path.join(scratchDir, 'selection.zip');
     const dir = path.join(scratchDir, 'selection');
     io.downloadZip(repo, selectionArtifact.id, archive);
     io.extractZip(archive, dir);
+    if (expectedHead) {
+      const pr = JSON.parse(fs.readFileSync(path.join(dir, 'pr.json'), 'utf8'));
+      if (pr.headRefOid !== expectedHead) throw new CliError('the verifier evidence belongs to an older PR head; wait for the current verifier');
+    }
     const file = path.join(dir, 'selection.json');
     if (!fs.existsSync(file)) return [];
     const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
     return Array.isArray(parsed.features) ? parsed.features : [];
-  } catch {
+  } catch (error) {
+    if (expectedHead) throw error instanceof CliError ? error : new CliError('cannot read the manually dispatched verifier head');
     return [];
   }
 }
 
 export function run(parsed, io = defaultIo()) {
+  const pr = ghJson(io, ['pr', 'view', parsed.pr, '--repo', parsed.repo, '--json', 'headRefOid']);
   const response = ghJson(io, ['api', `repos/${parsed.repo}/actions/workflows/${defaults.workflow}/runs?per_page=100`]);
-  const runs = selectVerifierRuns(response?.workflow_runs || [], parsed.pr);
+  const runs = selectVerifierRuns(response?.workflow_runs || [], parsed.pr).filter(run => run.head_sha === pr.headRefOid || run.event === 'workflow_dispatch');
   if (!runs.length) throw new CliError(`no ${defaults.workflow} run found for PR #${parsed.pr} in ${parsed.repo}`);
   let chosenRun = null;
   let runArtifacts = [];
@@ -208,9 +217,8 @@ export function run(parsed, io = defaultIo()) {
   fs.mkdirSync(baseDir, { recursive: true });
   const scratchDir = fs.mkdtempSync(path.join(baseDir, '.dl-'));
   try {
-    const preferred = !parsed.journey && listJourneyArtifacts(runArtifacts).length > 1
-      ? readSelectionFeatures(io, parsed.repo, runArtifacts, scratchDir)
-      : [];
+    const preferred = readSelectionFeatures(io, parsed.repo, runArtifacts, scratchDir,
+      chosenRun.event === 'workflow_dispatch' ? pr.headRefOid : '');
     const artifact = selectEvidenceArtifact(runArtifacts, parsed.journey, preferred);
     const before = selectBeforeArtifact(runArtifacts, artifact);
     const videoPaths = [];
