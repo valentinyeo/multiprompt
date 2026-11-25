@@ -9,3 +9,9 @@ C. Code inspection only, with no real runtime files or transcripts read: console
 Coordination fault: the supplied hypertask executable is a plan-pick worker shim and returns 'no board login; orchestrator files it'. Board writes and the paired Android check must be handed to owner chat Multi Bot Bugs. No board credentials or runtime chat data were accessed. docs/worker-brief.md is absent in this checkout; no subagents were started.
 
 Plan: commit A/B fixture regressions first, push and dispatch GitHub Actions to prove red; then commit and push the minimal bridge and saved-host fixes, dispatch the same workflow to prove green, open at most one PR under the queue cap, and return ownership without waiting for PR checks or verifier.
+
+RED: https://github.com/valentinyeo/multiprompt/actions/runs/45644970036 at 20275b712b03c4acf3e16b2cfa755187a67b90d9. Both wrappers fail the relay fixture with AssertionError: 'port_conflict' != 'empty_reply' and 'port_conflict' != 'tunnel_down'. The saved Codex start returns visible:false, visible_error:unknown_host; restart also returns visible:false. The existing exact list-shape assertion additionally exposes the WIP's new offline_detail field. Health (12 tests) and relay (37 tests) pass. No tests ran on this server.
+
+A fix: both wrapper copies now classify the service's python3 mp_notify_relay.py invocation as a supported bridge, alongside SSH. Non-Python invocations, similarly named backup scripts, and python -c lookalikes stay conflicts. All three diagnostic paths use the same classifier. Successful replies and authentication are unchanged.
+
+Tooling fault: the worker gh shim refuses run watch, although this brief requires pre-PR red/green proof. Used the installed native /usr/bin/gh run watch for the focused pre-PR run only, as a tracked task. Will not wait for PR checks or the verifier after opening the PR.
