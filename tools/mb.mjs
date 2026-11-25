@@ -21,7 +21,7 @@ commands:
   pin <name> [--host N] [--json]
   unpin <name> [--host N] [--json]
   rename <name> <title> [--host N]
-  move <name> [--group <group>] [--workspace <name>] [--host N]
+  move <name> [--workspace <name>] [--group <group>]
   style <name> [--face N] [--color N] [--photo FILE] [--host N]
   star <name> on|off [--host N]
   mute <name> on|off [--host N]
@@ -44,6 +44,10 @@ every write names its server: --host wins, then the host recorded when the chat 
 then this machine's slot, which is MULTIPROMPT_HOST or "multiprompt_slot" on this machine's
 entry in the installed servers file. A tab that is already open keeps its own host, so a
 verb aimed at an open tab never needs a slot.
+
+open and close also reach the desktop app installed on this machine: a shell tab you open
+appears there at once, and a tab you close leaves the sidebar when the desktop allows it.
+Without the desktop app both verbs work on the layout alone.
 
 environment:
   MULTIPROMPT_KEY   admin or workspace key (never printed)
@@ -285,6 +289,7 @@ async function placeShell(ctx, flags) {
   ctx.features = LAYOUT_FEATURES;
   const photoChanged = flags.photo ? await syncPhoto(ctx, host, session, pngFromFile(flags.photo), false) : false;
   const revision = photoChanged ? (await readLayout(ctx)).data.revision : result.revision;
+  showOpenOnDesktop(ctx, host, session, workspace, group, title);
   ctx.out(`${result.changed || photoChanged ? 'opened' : 'already open'} ${session} (revision ${revision})`);
   return 0;
 }
@@ -312,6 +317,7 @@ async function close(ctx, flags) {
   const name = flags._[0];
   if (!name || flags._.length !== 1) throw new Failure('give one session name');
   const host = flags.host === undefined ? null : hostSlot(flags.host);
+  const desktopSnapshot = desktopListing(ctx);
   const owners = readOwners(ctx);
   const result = await edit(ctx, layout => {
     const tab = choose(layout, name, host);
@@ -322,6 +328,7 @@ async function close(ctx, flags) {
   const session = name;
   const owned = Object.values(owners.sessions).find(item => item.owner === 'mb' && (item.session.toLowerCase() === clean(session).toLowerCase() || clean(item.name || '').toLowerCase() === clean(session).toLowerCase()) && (host === null || item.host === host));
   if (owned) await releaseOwned(ctx, owners, owned);
+  hideOnDesktop(ctx, desktopSnapshot, name, host);
   ctx.out(`${result.changed ? 'closed' : 'already closed'} ${clean(name)}${result.changed ? ` (revision ${result.revision})` : ''}`);
 }
 
@@ -350,10 +357,68 @@ function zsbCall(ctx, args) {
 function listingTabs(listing) {
   const tabs = [];
   for (const workspace of listing.workspaces || []) {
-    tabs.push(...(workspace.tabs || []));
-    for (const group of workspace.groups || []) tabs.push(...(group.tabs || []));
+    for (const tab of workspace.tabs || []) tabs.push({ workspace: workspace.name, tab });
+    for (const group of workspace.groups || []) for (const tab of group.tabs || []) tabs.push({ workspace: workspace.name, tab });
   }
   return tabs;
+}
+
+function desktopBinary(env) {
+  const home = env.HOME || '';
+  for (const candidate of [env.MULTIPROMPT_ZSB, join(home, '.multiprompt-runtime/mp-zsb'), join(home, '.local/bin/zsb')]) {
+    if (candidate && existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+function desktopListing(ctx) {
+  const binary = desktopBinary(ctx.env);
+  if (!binary) return null;
+  try {
+    const listing = zsbCall({ ...ctx, env: { ...ctx.env, MULTIPROMPT_ZSB: binary } }, ['workspace-list']);
+    return Array.isArray(listing.workspaces) ? listing : null;
+  } catch {
+    return null;
+  }
+}
+
+function desktopTabNamed(listing, name, hostName) {
+  const wanted = clean(name).toLowerCase();
+  const found = listingTabs(listing).filter(({ tab }) => (hostName === null || tab.host === hostName) &&
+    (String(tab.title || '').toLowerCase() === wanted || String(tab.tmux || '').toLowerCase() === wanted));
+  return found.length === 1 ? found[0].tab : null;
+}
+
+function showOpenOnDesktop(ctx, host, session, workspace, group, title) {
+  const listing = desktopListing(ctx);
+  if (!listing) return;
+  const hostName = (listing.hosts || [])[host];
+  if (hostName === undefined) return;
+  if (desktopTabNamed(listing, session, hostName)) return;
+  if (!(listing.workspaces || []).some(item => item.name === workspace)) return;
+  const anchor = listingTabs(listing).find(({ workspace: name, tab }) => name === workspace && tab.host === hostName);
+  const args = ['shell-open', '--workspace', workspace, '--host', hostName, '--name', title || session, '--attach', session];
+  if (group !== null) args.push('--group', group);
+  else if (anchor) args.push('--after-tab', String(anchor.tab.id));
+  else return;
+  try {
+    zsbCall(ctx, args);
+  } catch (error) {
+    ctx.err(`mb: opened in the layout, and the desktop kept its own tab: ${error.message}`);
+  }
+}
+
+function hideOnDesktop(ctx, listing, name, host) {
+  if (!listing) return;
+  const hostName = host === null ? null : (listing.hosts || [])[host];
+  if (host !== null && hostName === undefined) return;
+  const tab = desktopTabNamed(listing, name, hostName);
+  if (!tab) return;
+  try {
+    zsbCall(ctx, ['session-close', '--tab', String(tab.id)]);
+  } catch (error) {
+    ctx.err(`mb: closed in the layout, and the desktop kept its own tab: ${error.message}`);
+  }
 }
 
 async function pinSession(ctx, flags, pinned) {
@@ -364,7 +429,7 @@ async function pinSession(ctx, flags, pinned) {
   const hostName = host === null ? null : (listing.hosts || [])[host];
   if (host !== null && hostName === undefined) throw new Failure('host must be a configured slot');
   const wanted = clean(flags._[0]).toLowerCase();
-  const matches = listingTabs(listing).filter(tab => (host === null || tab.host === hostName) &&
+  const matches = listingTabs(listing).map(({ tab }) => tab).filter(tab => (host === null || tab.host === hostName) &&
     (String(tab.title || '').toLowerCase() === wanted || String(tab.tmux || '').toLowerCase() === wanted));
   if (matches.length > 1) throw new Failure('more than one tab matches; pass --host and the terminal session name');
   if (!matches.length) throw new Failure(`no tab named '${clean(flags._[0])}'`);
@@ -442,22 +507,17 @@ async function renameSession(ctx, flags) {
 }
 
 async function moveSession(ctx, flags) {
-  if (flags._.length !== 1) throw new Failure('move needs one session');
-  if (flags.group === undefined && flags.workspace === undefined) throw new Failure('give --group or --workspace');
-  const group = flags.group === undefined ? null : groupName(flags.group);
-  const workspace = flags.workspace === undefined ? null : workspaceName(flags.workspace);
-  const host = flags.host === undefined ? null : hostSlot(flags.host);
-  if (group !== null) requireFeature(await readLayout(ctx), 'groups');
-  const result = await edit(ctx, layout => {
-    const tab = choose(layout, flags._[0], host);
-    if (!tab) throw new Failure('no such session');
-    if (workspace && !layout.workspaces.some(item => item.name === workspace)) throw new Failure(`workspace ${workspace} not found or not visible to this key`);
-    let changed = false;
-    if (workspace && tab.workspace !== workspace) { tab.workspace = workspace; changed = true; }
-    if (group !== null && (tab.group || null) !== group) { tab.group = group; changed = true; }
-    return changed ? layout : null;
-  });
-  ctx.out(result.changed ? `moved ${flags._[0]} (revision ${result.revision})` : `already moved ${flags._[0]}`);
+  if (!flags._.length) throw new Failure('move needs one session');
+  const args = ['move', ...flags._];
+  if (flags.workspace !== undefined) args.push('--workspace', flags.workspace);
+  if (flags.group !== undefined) args.push('--group', flags.group);
+  const sessions = ctx.sessions || (argv => spawnSync('python3', [mpSessionsScript(ctx.env), ...argv], { encoding: 'utf8', env: ctx.env, timeout: 60000 }));
+  const result = sessions(args);
+  const text = (result.stdout || '').trimEnd();
+  if (text) ctx.out(text);
+  const failure = (result.stderr || '').trimEnd();
+  if (failure) ctx.err(failure);
+  return result.status ?? 1;
 }
 
 async function style(ctx, flags) {
@@ -964,6 +1024,10 @@ export async function run(argv, overrides = {}) {
       if (!home) throw new Failure('HOME is required');
       return await health({ env, out, err }, flags);
     }
+    if (command === 'move') {
+      const flags = parse(rest);
+      return await moveSession({ env, out, err, sessions: overrides.sessions }, flags);
+    }
     const key = env.MULTIPROMPT_KEY;
     if (!key) throw new Failure('set MULTIPROMPT_KEY');
     const home = env.HOME;
@@ -988,7 +1052,7 @@ export async function run(argv, overrides = {}) {
       return 0;
     }
     const flags = parse(rest);
-    const commands = { list, open, close, rename: renameSession, move: moveSession, style, star, mute, manual, settings, pull };
+    const commands = { list, open, close, rename: renameSession, style, star, mute, manual, settings, pull };
     if (!commands[command]) throw new Failure(`unknown command ${command}`);
     const code = await commands[command](ctx, flags);
     return code || 0;

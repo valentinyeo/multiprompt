@@ -176,5 +176,64 @@
                 Snapshot ($way + '-sent')
                 $result.checks += @{ name = ('dictation-' + $way); passed = $true; delivered = $expected; elapsedMilliseconds = $elapsed; sendRect = $send; micRect = $mic }
             }
+            $stallMarker = Join-Path $scratch 'roaming/ZigShell/dictation-stall'
+            $stallRound = 0
+            foreach ($way in @('stop-click', 'send-click')) {
+                if ([VerifyNative]::EditText($handle) -cne '') {
+                    Press @(0x11, 0x41) 'Ctrl+A: select the draft left by the previous stalled case'
+                    Press @(0x08) 'Backspace: clear the draft before the stalled case'
+                    Wait-Until { [VerifyNative]::EditText($handle) -ceq '' } 'MUBO-290 composer empty before the stalled provider case'
+                }
+                New-Item -ItemType File -Force $stallMarker | Out-Null
+                [VerifyNative]::BringToForeground($script:window)
+                Record 'Click the owned composer to recover typing focus from the hidden console'
+                [VerifyNative]::ClickClient($handle, 8, 8)
+                Wait-ChatFocus 'Edit' ('mubo-290-' + $way + '-composer')
+                Press @(0x11, 0x44) 'Ctrl+D: start dictation while the provider will not answer'
+                $iteration++
+                Wait-Until {
+                    @((Read-DictationAudit $auditPath) | Where-Object { $_ -match '\tfixture-audio-bytes\t89160$' }).Count -eq $iteration
+                } 'MUBO-290 recorded PCM reached the real capture worker' -Seconds 2 -PollMilliseconds 20
+                Assert-DictationMic $micLive $true ($way + '-stall-listening')
+                $typed = 'typing-' + $way
+                Type-Text $typed
+                Wait-Until { [VerifyNative]::EditText($handle) -ceq $typed } 'MUBO-290 typing is accepted while the provider stalls' -Seconds 1 -PollMilliseconds 10
+                $sendRect = Get-DictationSend $mic
+                Record ('End the recording with ' + $way + ' while the provider is still stalled')
+                $immediate = [Diagnostics.Stopwatch]::StartNew()
+                if ($way -ceq 'stop-click') {
+                    [VerifyNative]::ClickClient($script:window, [int](($mic[0] + $mic[2]) / 2), [int](($mic[1] + $mic[3]) / 2))
+                } else {
+                    [VerifyNative]::ClickClient($script:window, [int](($sendRect[0] + $sendRect[2]) / 2), [int](($sendRect[1] + $sendRect[3]) / 2))
+                }
+                Wait-Until {
+                    [void][VerifyNative]::DwmFlush()
+                    $idlePixels = [VerifyNative]::DictationMicPixels($script:window, $mic, $false, (Join-Path $Evidence ($way + '-stall-idle-mic.png')))
+                    $idlePixels[0] -eq 0 -and $idlePixels[1] -ge 3
+                } ('MUBO-290 the microphone must be idle within a moment of the ' + $way) -Seconds 1 -PollMilliseconds 20
+                $elapsed = $immediate.ElapsedMilliseconds
+                if ($elapsed -gt 1000) { throw "MUBO-290 the microphone was still recording $elapsed ms after the $way" }
+                Save-Json @{ WM_GETTEXT = [VerifyNative]::EditText($handle); micRect = $mic; sendRect = $sendRect; elapsedMilliseconds = $elapsed } ('mubo-290-' + $way + '.json')
+                Wait-Until {
+                    @((Read-DictationAudit $auditPath) | Where-Object { $_ -match '\tfixture-provider-stall\t0$' }).Count -eq ($stallRound + 1)
+                } 'MUBO-290 the background transcription reached the stalled provider' -Seconds 3 -PollMilliseconds 20
+                $audit = @((Read-DictationAudit $auditPath))
+                if (@($audit | Where-Object { $_ -match '\tfixture-provider-stall-end\t0$' }).Count -ne $stallRound) { throw 'MUBO-290 the button waited for the background transcription' }
+                if ([VerifyNative]::EditText($handle) -cne $typed) { throw 'MUBO-290 the stalled recording lost the typed draft' }
+                $stallRound++
+                Wait-Until {
+                    @((Read-DictationAudit $auditPath) | Where-Object { $_ -match '\tempty-transcript\t' }).Count -eq $stallRound
+                } 'MUBO-290 the stalled background transcription finished on its own' -Seconds 10 -PollMilliseconds 50
+                Remove-Item $stallMarker -Force
+                if ($way -ceq 'send-click') {
+                    Wait-Until { [VerifyNative]::EditText($handle) -ceq '' } 'MUBO-290 the armed send leaves once the words are known' -Seconds 6 -PollMilliseconds 50
+                    $expected = $typed
+                    Wait-Until {
+                        (Test-Path $outbox) -and @((Get-Content $outbox -Raw | ConvertFrom-Json).queues | ForEach-Object { $_.messages } | Where-Object { $_.t -ceq $expected }).Count -eq 1
+                    } 'MUBO-290 the stalled send delivers the typed words exactly once' -Seconds 5 -PollMilliseconds 50
+                }
+                Snapshot ($way + '-stall-released')
+                $result.checks += @{ name = ('mubo-290-' + $way); passed = $true; elapsedMilliseconds = $elapsed; micRect = $mic; sendRect = $sendRect }
+            }
             Snapshot 'after'
         

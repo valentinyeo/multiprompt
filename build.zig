@@ -210,6 +210,7 @@ pub fn build(b: *std.Build) void {
 
     const exe_tests = b.addTest(.{
         .root_module = exe.root_module,
+        .filters = if (b.option([]const u8, "test-filter", "Run matching desktop module tests")) |filter| &.{filter} else &.{},
     });
 
     const listener_helper = b.addTest(.{
@@ -430,6 +431,9 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&b.addSystemCommand(&.{ "node", "--test", "tools/switch-performance.test.mjs" }).step);
     const chat_cpu_regression = b.addSystemCommand(&.{ "node", "--test", "tools/chat-cpu.test.js" });
     test_step.dependOn(&chat_cpu_regression.step);
+    const chat_skill_pill_anywhere = b.addSystemCommand(&.{ "node", "--test", "tools/chat-skill-pill-anywhere.test.js" });
+    chat_skill_pill_anywhere.setEnvironmentVariable("ZIG", b.graph.zig_exe);
+    test_step.dependOn(&chat_skill_pill_anywhere.step);
     const chat_last_batch_time_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-last-batch-time.test.js" });
     test_step.dependOn(&chat_last_batch_time_tests.step);
     const chat_live_redraw_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-live-redraw.test.js" });

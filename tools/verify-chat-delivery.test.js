@@ -1360,7 +1360,7 @@ test('native runner-session journeys are manual and nightly, not release gates',
   assert.match(caller, /feature: chat-delivery\n      hax_sessions_proof: true/);
   const redRun = read('.github/workflows/check-red-run.yml');
   assert.match(redRun, /name: Install Zig 0\.16\.0/);
-  assert.match(redRun, /zig-x86_64-linux-0\.16\.0.*GITHUB_PATH/);
+  assert.match(redRun, /uses: \.\/\.github\/actions\/setup-zig/);
   const released = read('.github/workflows/release.yml');
   assert.doesNotMatch(released, /runner-sessions|hax_sessions_proof|hax-sessions\.yml/);
 });
