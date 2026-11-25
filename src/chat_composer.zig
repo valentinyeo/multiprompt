@@ -219,7 +219,7 @@ fn chatComposerMaxEditH() i32 {
     return chatComposerBaseEditH() * CHAT_COMPOSER_MAX_LINES;
 }
 
-pub const DictationState = enum { idle, listening, finishing };
+pub const DictationState = enum { idle, listening };
 pub var chat_dictation_state: DictationState = .idle;
 var chat_dictation_engine_toggle: *const fn () void = @import("voice.zig").toggleDictation;
 
@@ -267,22 +267,19 @@ fn chatDictationMicFit(wanted: i32, room: i32) i32 {
 }
 
 pub fn chatDictationSync() void {
-    const next: DictationState = if (app_state.g_dictation_draft_owner_len == 0 or !app_state.g_dictation_running.load(.acquire))
-        .idle
-    else if (app_state.g_dictation_recording.load(.acquire))
-        .listening
-    else
-        .finishing;
+    const listening = app_state.g_dictation_draft_owner_len > 0 and
+        app_state.g_dictation_running.load(.acquire) and app_state.g_dictation_recording.load(.acquire);
+    const next: DictationState = if (listening) .listening else .idle;
     if (next == chat_dictation_state) return;
-    const was_idle = chat_dictation_state == .idle;
     chat_dictation_state = next;
-    if (was_idle and next != .idle) {
-        chat_dictation_started_ms = @import("win32.zig").GetTickCount64();
-        chat_dictation_wave = [_]u8{0} ** DICTATION_WAVE_BARS;
-        if (app_state.g_main_hwnd != null) _ = @import("win32.zig").SetTimer(app_state.g_main_hwnd, app_state.TIMER_CHAT_DICTATION, 100, null);
-    } else if (next == .idle) {
-        chat_dictation_started_ms = 0;
-        if (app_state.g_main_hwnd != null) _ = @import("win32.zig").KillTimer(app_state.g_main_hwnd, app_state.TIMER_CHAT_DICTATION);
+    chat_dictation_started_ms = if (listening) @import("win32.zig").GetTickCount64() else 0;
+    chat_dictation_wave = [_]u8{0} ** DICTATION_WAVE_BARS;
+    if (app_state.g_main_hwnd != null) {
+        if (listening) {
+            _ = @import("win32.zig").SetTimer(app_state.g_main_hwnd, app_state.TIMER_CHAT_DICTATION, 100, null);
+        } else {
+            _ = @import("win32.zig").KillTimer(app_state.g_main_hwnd, app_state.TIMER_CHAT_DICTATION);
+        }
     }
     chatComposerButtonsRefresh();
     if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
@@ -303,10 +300,7 @@ pub fn chatSendOrFinishDictation() void {
         @import("chat_send.zig").sendChatPrompt();
         return;
     }
-    if (app_state.g_dictation_recording.load(.acquire)) {
-        chatDictationToggle();
-        if (app_state.g_dictation_recording.load(.acquire)) return;
-    }
+    @import("voice.zig").dictationStopRecording();
     app_state.g_dictation_send_queued.store(true, .release);
 }
 
@@ -474,7 +468,7 @@ test "IGSH-909 send and stop share one slot so the composer never shows more tha
     }
 }
 
-test "IGSH-965 send while dictating stops the recording and queues one send" {
+test "IGSH-965 send while dictating stops the recording at once and queues one send" {
     const Engine = struct {
         var toggles: u32 = 0;
         fn toggle() void {
@@ -517,22 +511,19 @@ test "IGSH-965 send while dictating stops the recording and queues one send" {
     app_state.g_dictation_running.store(true, .release);
     app_state.g_dictation_recording.store(true, .release);
     chatSendOrFinishDictation();
-    try std.testing.expectEqual(@as(u32, 0), Engine.toggles);
     try std.testing.expect(!app_state.g_dictation_send_queued.load(.acquire));
     try std.testing.expect(app_state.g_dictation_recording.load(.acquire));
     app_state.g_chat_draft_owner[0] = 'a';
     chatSendOrFinishDictation();
-    try std.testing.expectEqual(@as(u32, 1), Engine.toggles);
     try std.testing.expect(!app_state.g_dictation_recording.load(.acquire));
     try std.testing.expect(app_state.g_dictation_send_queued.load(.acquire));
     chatSendOrFinishDictation();
-    try std.testing.expectEqual(@as(u32, 1), Engine.toggles);
     try std.testing.expect(app_state.g_dictation_send_queued.load(.acquire));
     app_state.g_dictation_send_queued.store(false, .release);
     app_state.g_dictation_running.store(false, .release);
     chatSendOrFinishDictation();
-    try std.testing.expectEqual(@as(u32, 1), Engine.toggles);
     try std.testing.expect(!app_state.g_dictation_send_queued.load(.acquire));
+    try std.testing.expectEqual(@as(u32, 0), Engine.toggles);
 }
 
 pub fn chatComposerHasText() bool {
@@ -3191,7 +3182,7 @@ fn testChatDictation(action: enum { ctrl_start, ctrl_stop, enter_stop, mic_start
     } else {
         try std.testing.expect(chatDictationKey(WM_KEYDOWN, 0x44, 0, true, false, false));
     }
-    try std.testing.expectEqual(DictationState.finishing, chat_dictation_state);
+    try std.testing.expectEqual(DictationState.idle, chat_dictation_state);
     try std.testing.expect(!app_state.g_dictation_recording.load(.acquire));
     try std.testing.expect(app_state.g_dictation_running.load(.acquire));
     const before = GetWindowTextW(edit, &text, text.len);
@@ -3544,7 +3535,6 @@ test "IGSH-887 the elapsed timer counts up as minutes and seconds" {
 test "IGSH-887 the mic is a round button when idle and a wide pill while dictating" {
     try std.testing.expectEqual(uiScaled(32), chatDictationMicWidth(.idle));
     try std.testing.expect(chatDictationMicWidth(.listening) > chatDictationMicWidth(.idle) * 3);
-    try std.testing.expectEqual(chatDictationMicWidth(.listening), chatDictationMicWidth(.finishing));
     const saved = chat_dictation_state;
     defer chat_dictation_state = saved;
     chat_dictation_state = .idle;

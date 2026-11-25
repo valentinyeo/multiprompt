@@ -57,6 +57,8 @@ MUBO-194 stores optional `workspace` and `group` strings in `chat_names_publish`
 
 MUBO-194 merges master `b4f6f6a22`. The mention and offline-identity edits sit in different reader regions from `chat_names_publish`, so the merged reader carries all three and no covered switch, usage-limit or auto-switch function changes. The model, bounds, decisions, probes and mutations are unchanged; only the reader's whole-file hash and the sync commit move.
 
+MUBO-452 holds a queued message through a pending fresh start in `message_expire` and `message_worker`. `host_fresh_phase_wait` and `host_fresh_pending` read the host session state and are new; no covered `host_switch_*`, `host_usage_limit`, `host_auto_switch_*` or `host_dispatch_switch` function calls them, so the model, bounds, decisions, probes and mutations are unchanged. Merging master `5baddb613` keeps the echo, send and render hashes at that master's values; only the reader's whole-file hash and the sync commit move.
+
 | Source | Covered behavior |
 | --- | --- |
 | `src/chat_history_reader.py`: `host_switch_ai`, `host_switch_abort`, `host_switch_handover`, `host_switch_rows`, `host_switch_follow`, `host_dispatch_switch` | Busy refusal, handover capture, start before the old stop, abort on a failed start, queued-message adoption, locator and config moves, follow chain and dispatch eligibility |
