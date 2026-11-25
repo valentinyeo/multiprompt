@@ -13,14 +13,15 @@ const targets = {
   'focus.zig': ['foregroundIsOurs'],
   'console.zig': ['switchToShell'],
   'chat_session.zig': ['chatFileOnReady', 'refreshChatBlockCache', 'refreshChatTranscript'],
-  'chat_render.zig': ['chatRelayout', 'chatPaintTranscriptContent'],
-  'chat_composer.zig': ['layoutChatControls', 'chatComposerSubclassProc', 'refreshChatBrushes'],
+  'chat_render.zig': ['chatRelayout', 'chatPaintTranscriptContent', 'chatRelayoutPreservingScroll'],
+  'chat_composer.zig': ['layoutChatControls', 'chatComposerSubclassProc', 'refreshChatBrushes', 'chatDraftBindToActive', 'chatDraftFlush', 'chatDraftLoad', 'chatDraftKeyForShell', 'chatDraftWriteFile', 'chatReplyRefreshPreview', 'chatComposerAutoGrow', 'chatLiveStripFromStore', 'getChatDraftPath'],
   'sidebar.zig': ['paintSidebar'],
   'window_layout.zig': ['paintChatView'],
   'window_frame.zig': ['paint'],
   'session.zig': ['saveSession'],
   'chat_capture.zig': ['captureChatTranscript'],
   'dwrite_text.zig': ['draw', 'prepare'],
+  'file_io.zig': ['readFileAllocWin32', 'writeFileAtomicSync', 'writeFileAtomicW', 'win32MoveReplace'],
 };
 for (const [file, functions] of Object.entries(targets)) {
   const filename = path.join(root, 'src', file);
