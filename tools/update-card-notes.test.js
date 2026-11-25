@@ -220,6 +220,13 @@ test('the real release proof uses the downloaded production notes and their matc
   assert.match(proof, /REAL_CARD_RECEIPT=/);
   assert.match(proof, /'-Before'/);
   assert.match(proof, /before-card\.png/);
+  const cardProof = read('tools/update-card-release-proof.ps1');
+  assert.match(cardProof, /\[ValidateSet\('new', 'released'\)\]\[string\]\$Contract = 'new'/);
+  assert.match(cardProof, /New card painted no published change lines/);
+  assert.match(cardProof, /Released old card already logs a ticket id/);
+  assert.match(cardProof, /Released old card already links the release notes/);
+  assert.match(cardProof, /Released old painter named no published note to wrap/);
+  assert.match(cardProof, /Card binary carries no version marker/);
   const script = read('tools/update-card-real-release-proof.ps1');
   assert.match(script, /\[switch\]\$Before/);
   assert.match(script, /'before-card'/);
@@ -261,9 +268,9 @@ test('changed implementation is comment-free and leaves no error log', async () 
 });
 
 
-test('IGSH-1090 published executable paints its own published notes, with no binary edits', {
+test('IGSH-1090 published executable characterizes its own published notes, and a new build names every change', {
   skip: process.platform !== 'win32' || process.env.GITHUB_WORKFLOW !== 'Test repeat',
-  timeout: 180000,
+  timeout: 240000,
 }, async t => {
   const os = require('node:os');
   const { createHash } = require('node:crypto');
@@ -296,14 +303,55 @@ test('IGSH-1090 published executable paints its own published notes, with no bin
   const notes = JSON.parse(fs.readFileSync(assets['release-notes.json'], 'utf8'));
   assert.equal(notes.version, release.tag_name.slice(1));
   assert.ok(notes.releases.some(item => item.changes.some(change => change.startsWith('IGSH-1090 ') || change === 'Update cards explain each change, without generic messages.')));
-  const proof = spawnSync('pwsh', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
-    path.join(root, 'tools/update-card-release-proof.ps1'), '-Exe', assets['multiprompt-x64.exe'],
-    '-Notes', assets['release-notes.json'], '-Evidence', path.join(directory, 'proof')],
-  { encoding: 'utf8', timeout: 120000, maxBuffer: 8 * 1024 * 1024 });
-  assert.equal(proof.status, 0, proof.stdout + proof.stderr);
-  assert.match(proof.stdout, /RELEASE_CARD_RECEIPT=/);
-  assert.match(proof.stdout, /RELEASE_CARD_PNG=/);
-  console.log(proof.stdout);
+  const newest = notes.releases.find(item => item.version === notes.version);
+  assert.ok(newest && newest.changes.length > 0, 'The newest published release names no change');
+  const featureShipped = notes.releases.some(item => item.changes.some(change => change.startsWith('MUBO-577 ') || change === 'Update card says what the new version brings'));
+  const proof = (binary, label, contract) => spawnSync('pwsh', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+    path.join(root, 'tools/update-card-release-proof.ps1'), '-Exe', binary, '-Notes', assets['release-notes.json'],
+    '-Evidence', path.join(directory, label), '-Contract', contract],
+  { encoding: 'utf8', timeout: 120000, maxBuffer: 32 * 1024 * 1024 });
+  const receipt = label => JSON.parse(fs.readFileSync(path.join(directory, label, 'released-card.json'), 'utf8'));
+  const expected = newest.changes.map(change => change.replace(/^(?:IGSH|MUBO)-\d+ /, '')).slice(0, 3);
+  const expectedIds = newest.changes.map(change => (change.match(/^(?:IGSH|MUBO)-\d+/) || [''])[0]).slice(0, 3);
+  if (featureShipped) {
+    const published = proof(assets['multiprompt-x64.exe'], 'published', 'new');
+    assert.equal(published.status, 0, published.stdout + published.stderr);
+    assert.match(published.stdout, /RELEASE_CARD_RECEIPT=/);
+    assert.match(published.stdout, /RELEASE_CARD_PNG=/);
+    const shipped = receipt('published');
+    assert.equal(shipped.contract, 'new');
+    assert.equal(shipped.binaryVersion, release.tag_name.slice(1));
+    assert.deepEqual(shipped.painted, expected);
+    assert.deepEqual(shipped.ids, expectedIds);
+    assert.equal(shipped.seeAll, true);
+    console.log(published.stdout);
+  } else {
+    const published = proof(assets['multiprompt-x64.exe'], 'before', 'released');
+    assert.equal(published.status, 0, published.stdout + published.stderr);
+    assert.match(published.stdout, /RELEASE_CARD_RECEIPT=/);
+    assert.match(published.stdout, /RELEASE_CARD_PNG=/);
+    const before = receipt('before');
+    assert.equal(before.contract, 'released');
+    assert.equal(before.binaryVersion, release.tag_name.slice(1));
+    const legacy = newest.changes.filter(change => /^IGSH-\d+ /.test(change)).slice(0, 3);
+    assert.ok(before.painted.length <= legacy.length, `Published card named ${before.painted.length} lines its old filter keeps ${legacy.length}`);
+    for (const line of before.painted) assert.ok(legacy.includes(line), `Published card painted an unpublished line: ${line}`);
+    if (legacy.length === 0) assert.deepEqual(before.painted, [], 'The published card named a change its IGSH-only filter drops');
+    assert.deepEqual(before.ids, []);
+    assert.equal(before.seeAll, false);
+    const branch = path.join(root, 'zig-out/bin/multiprompt.exe');
+    assert.ok(fs.existsSync(branch), 'Branch build is missing');
+    const after = proof(branch, 'after', 'new');
+    assert.equal(after.status, 0, after.stdout + after.stderr);
+    assert.match(after.stdout, /RELEASE_CARD_RECEIPT=/);
+    assert.match(after.stdout, /RELEASE_CARD_PNG=/);
+    const built = receipt('after');
+    assert.equal(built.contract, 'new');
+    assert.deepEqual(built.painted, expected);
+    assert.deepEqual(built.ids, expectedIds);
+    assert.equal(built.seeAll, true);
+    console.log(published.stdout + after.stdout);
+  }
 });
 
 test('IGSH-1118 native card wraps long real notes, scrolls internally, and rejects the old released painter', {
@@ -346,21 +394,33 @@ test('IGSH-1118 native card wraps long real notes, scrolls internally, and rejec
   const old = await api('releases/tags/v0.28.983');
   const before = path.join(directory, 'before.exe');
   await download(old, 'multiprompt-x64.exe', before);
-  const proof = (binary, label) => spawnSync('pwsh', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+  assert.match(fs.readFileSync(before, 'latin1'), /MPVERSION=0\.28\.983;/, 'Pinned old painter is not the v0.28.983 release binary');
+  const proof = (binary, label, contract) => spawnSync('pwsh', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
     path.join(root, 'tools/update-card-release-proof.ps1'), '-Exe', binary, '-Notes', notes,
-    '-Evidence', path.join(directory, label), '-Wrapped'],
-  { encoding: 'utf8', timeout: 120000, maxBuffer: 16 * 1024 * 1024 });
-  const red = proof(before, 'red');
+    '-Evidence', path.join(directory, label), '-Wrapped', '-Contract', contract],
+  { encoding: 'utf8', timeout: 180000, maxBuffer: 32 * 1024 * 1024 });
+  const red = proof(before, 'red', 'released');
   assert.notEqual(red.status, 0, red.stdout + red.stderr);
   assert.match(red.stdout + red.stderr, /Card did not expose wrapped note bounds/);
-  console.log('WRAPPED_CARD_RED v0.28.983 rejects the unwrapped painter');
-  const green = proof(exe, 'green');
+  const redReceipt = JSON.parse(fs.readFileSync(path.join(directory, 'red', 'released-card.json'), 'utf8'));
+  assert.equal(redReceipt.contract, 'released');
+  assert.equal(redReceipt.binaryVersion, '0.28.983');
+  assert.ok(redReceipt.painted.length > 0, 'The pinned old painter named no published note, so it cannot prove the wrapping rejection');
+  for (const line of redReceipt.painted) assert.match(line, /^IGSH-\d+ /);
+  assert.deepEqual(redReceipt.ids, []);
+  assert.equal(redReceipt.seeAll, false);
+  console.log('WRAPPED_CARD_RED v0.28.983 painted real published notes without wrapped bounds');
+  const green = proof(exe, 'green', 'new');
   assert.equal(green.status, 0, green.stdout + green.stderr);
   assert.match(green.stdout, /WRAPPED_CARD_RECEIPT=/);
   assert.match(green.stdout, /WRAPPED_CARD_IMAGE=wrapped-normal:/);
   assert.match(green.stdout, /WRAPPED_CARD_IMAGE=wrapped-minimum:/);
   assert.match(green.stdout, /WRAPPED_CARD_IMAGE=wrapped-scrolled:/);
   assert.match(green.stdout, /WRAPPED_CARD_IMAGE=wrapped-collapsed:/);
+  const greenReceipt = JSON.parse(fs.readFileSync(path.join(directory, 'green', 'wrapped-card.json'), 'utf8'));
+  assert.equal(greenReceipt.contract, 'new');
+  assert.equal(greenReceipt.painted.length, 3);
+  assert.equal(greenReceipt.scrollVerified, true);
   console.log(green.stdout);
 });
 

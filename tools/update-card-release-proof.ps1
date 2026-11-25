@@ -1,12 +1,22 @@
-param([Parameter(Mandatory=$true)][string]$Exe, [Parameter(Mandatory=$true)][string]$Notes, [Parameter(Mandatory=$true)][string]$Evidence, [switch]$Wrapped)
+param([Parameter(Mandatory=$true)][string]$Exe, [Parameter(Mandatory=$true)][string]$Notes, [Parameter(Mandatory=$true)][string]$Evidence, [switch]$Wrapped, [ValidateSet('new', 'released')][string]$Contract = 'new')
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:OS -ne 'Windows_NT') { throw 'Release card proof runs only on GitHub Windows' }
 New-Item -ItemType Directory -Force $Evidence | Out-Null
 $document = Get-Content $Notes -Raw | ConvertFrom-Json
 $changes = @($document.releases | Where-Object { $_.version -eq $document.version } | ForEach-Object { $_.changes })
-if ($Wrapped) { $changes = @($document.releases | Select-Object -First 20 | ForEach-Object { $_.changes } | Sort-Object { $_.Length } -Descending | Select-Object -First 16) }
+if ($Wrapped) {
+    $pool = @($document.releases | ForEach-Object { $_.changes })
+    if ($Contract -eq 'released') {
+        $pool = @($pool | Where-Object { $_ -match '^IGSH-\d+ ' })
+        if ($pool.Count -eq 0) { throw 'Released old painter proof needs published IGSH notes' }
+    }
+    $changes = @($pool | Sort-Object { $_.Length } -Descending | Select-Object -First 16)
+}
 if ($changes.Count -eq 0) { throw 'Released card proof needs real product notes' }
+$binaryVersion = [regex]::Match([Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Exe)), 'MPVERSION=(\d+\.\d+\.\d+);')
+if (-not $binaryVersion.Success) { throw 'Card binary carries no version marker' }
+$binaryVersion = $binaryVersion.Groups[1].Value
 $cardExe = Join-Path $Evidence 'card.exe'
 Copy-Item -LiteralPath $Exe -Destination $cardExe
 $hash = (Get-FileHash $cardExe -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -50,19 +60,39 @@ try {
     $image = Join-Path $Evidence 'released-card.png'
     try { $bitmap.Save($image) } finally { $bitmap.Dispose() }
     Copy-Item -LiteralPath $log -Destination (Join-Path $Evidence 'debug.log') -ErrorAction SilentlyContinue
-    $painted = @($changes | ForEach-Object { ($_ -replace '^(?:IGSH|MUBO)-\d+ ', '') })
-    for ($i = 0; $i -lt [Math]::Min(3, $changes.Count); $i++) {
-        $note = [regex]::Match($text, '\[update\] card note ' + $i + '=([^\r\n]*)')
-        if (-not $note.Success -or $note.Groups[1].Value -cne $painted[$i]) { throw 'Released card differs from published notes' }
-        $id = [regex]::Match($text, '\[update\] card note id ' + $i + '=([^\r\n]*)')
-        $expectedId = [regex]::Match($changes[$i], '^((?:IGSH|MUBO)-\d+)').Groups[1].Value
-        if (-not $id.Success -or $id.Groups[1].Value -cne $expectedId) { throw 'Released card lost the published ticket id' }
-    }
-    if ($text -match '\[update\] card note \d+=.*(?:IGSH|MUBO)-\d+') { throw 'Released card painted a ticket number into the change text' }
-    if ($text -notmatch '\[update\] card see all=https://github\.com/valentinyeo/multiprompt/releases/tag/v') { throw 'Released card has no See all destination' }
+    $published = @($changes)
+    $plainLines = @($published | ForEach-Object { ($_ -replace '^(?:IGSH|MUBO)-\d+ ', '') })
+    $publishedIds = @($published | ForEach-Object { [regex]::Match($_, '^((?:IGSH|MUBO)-\d+)').Groups[1].Value })
+    $named = @([regex]::Matches($text, '\[update\] card note \d+=([^\r\n]*)') | ForEach-Object { $_.Groups[1].Value })
+    $views = [regex]::Matches($text, '\[update\] card view=collapsed n=(\d+)')
+    if ($views.Count -eq 0) { throw 'Released app painted no card view line' }
+    if ([int]$views[$views.Count - 1].Groups[1].Value -ne $named.Count) { throw 'Released card view count differs from its note lines' }
     if ($text -match '\[update\] card note \d+=.*(behind the scenes|latest improvements)') { throw 'Released card showed filler' }
+    if ($Contract -eq 'released') {
+        $legacy = @($published | Where-Object { $_ -match '^IGSH-\d+ ' })
+        if ($named.Count -gt [Math]::Min(3, $legacy.Count)) { throw 'Released old card painted more lines than its own filter keeps' }
+        foreach ($line in $named) { if ($legacy -notcontains $line) { throw 'Released old card painted a line it never published verbatim' } }
+        if ($text -match '\[update\] card note id ') { throw 'Released old card already logs a ticket id' }
+        if ($text -match '\[update\] card see all=') { throw 'Released old card already links the release notes' }
+        if ($Wrapped -and $named.Count -eq 0) { throw 'Released old painter named no published note to wrap' }
+        $paintedIds = @()
+        $seeAll = $false
+    } else {
+        if ($named.Count -eq 0) { throw 'New card painted no published change lines' }
+        if ($named.Count -ne [Math]::Min(3, $published.Count)) { throw 'New card painted a different number of change lines than published' }
+        for ($i = 0; $i -lt $named.Count; $i++) {
+            if ($named[$i] -cne $plainLines[$i]) { throw 'New card differs from the published change text' }
+            $id = [regex]::Match($text, '\[update\] card note id ' + $i + '=([^\r\n]*)')
+            if (-not $id.Success -or $id.Groups[1].Value -cne $publishedIds[$i]) { throw 'New card lost the published ticket id' }
+        }
+        if ($text -match '\[update\] card note \d+=.*(?:IGSH|MUBO)-\d+') { throw 'New card painted a ticket number into the change text' }
+        if ($text -notmatch '\[update\] card see all=https://github\.com/valentinyeo/multiprompt/releases/tag/v') { throw 'New card has no See all destination' }
+        $paintedIds = $publishedIds
+        $seeAll = $true
+    }
     if ((Get-FileHash $cardExe -Algorithm SHA256).Hash.ToLowerInvariant() -ne $hash) { throw 'Released binary changed during proof' }
-    @{ version = $document.version; sha256 = $hash; changes = $changes; painted = $painted; simulatedOffer = '999.0.0'; success = $true } | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 (Join-Path $Evidence 'released-card.json')
+    $receipt = @{ contract = $Contract; binaryVersion = $binaryVersion; version = $document.version; sha256 = $hash; changes = $published; painted = $named; ids = $paintedIds; seeAll = $seeAll; simulatedOffer = '999.0.0'; success = $true }
+    $receipt | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 (Join-Path $Evidence 'released-card.json')
     if ($Wrapped) {
         function Wait-Card([scriptblock]$Condition, [string]$Failure) {
             $deadline = [DateTime]::UtcNow.AddSeconds(10)
@@ -143,7 +173,7 @@ try {
         }
         Wait-Card { (Card-Bounds).scroll -eq 0 -and $script:cardLog -match '\[update\] card remaining=' } 'Notes did not return to their first line'
         Capture-Card 'wrapped-collapsed'
-        $wrappedReceipt = @{ version = $document.version; sha256 = $hash; wrapped = $true; scrollVerified = $true; normal = $normal; collapsed = $collapsed; scrolled = $scrolled; restartBefore = $restartBefore; restartAfter = $restartAfter; changes = $changes; painted = $painted; simulatedOffer = '999.0.0'; success = $true }
+        $wrappedReceipt = @{ contract = $Contract; binaryVersion = $binaryVersion; version = $document.version; sha256 = $hash; wrapped = $true; scrollVerified = $true; normal = $normal; collapsed = $collapsed; scrolled = $scrolled; restartBefore = $restartBefore; restartAfter = $restartAfter; changes = $published; painted = $named; simulatedOffer = '999.0.0'; success = $true }
         $wrappedReceipt | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 (Join-Path $Evidence 'wrapped-card.json')
         Write-Output ('WRAPPED_CARD_RECEIPT=' + [Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $Evidence 'wrapped-card.json'))))
     }
