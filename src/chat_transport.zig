@@ -36,6 +36,7 @@ const Host = struct {
     outgoing_bytes: usize = 0,
     wake: w.HANDLE = null,
     ready: w.HANDLE = null,
+    progress: w.HANDLE = null,
     retry_at: u64 = 0,
     next_id: u32 = 0,
     channels: std.ArrayList(*Channel) = .empty,
@@ -201,6 +202,8 @@ fn bootHost(host: *Host, index: u8) bool {
     if (host.wake == null) return false;
     if (host.ready == null) host.ready = w.CreateEventW(null, 0, 0, null);
     if (host.ready == null) return false;
+    if (host.progress == null) host.progress = w.CreateEventW(null, 1, 0, null);
+    if (host.progress == null) return false;
     var cmd: [2048]u16 = undefined;
     var pos: usize = 0;
     const console = @import("console.zig");
@@ -394,6 +397,23 @@ pub fn read(channel: *Channel, bytes: []u8, wait: bool) ?usize {
     }
 }
 
+pub fn readWithin(channel: *Channel, bytes: []u8, timeout_ms: u32) ?usize {
+    const host = channel.host;
+    const deadline = w.GetTickCount64() + timeout_ms;
+    while (true) {
+        const n = read(channel, bytes, false) orelse return null;
+        if (n > 0) return n;
+        const now = w.GetTickCount64();
+        if (now >= deadline) return null;
+        lock(host);
+        const progress = host.progress;
+        host.mutex.unlock();
+        if (progress == null) return null;
+        _ = w.WaitForSingleObject(progress, @intCast(@min(deadline - now, 50)));
+        _ = w.ResetEvent(progress);
+    }
+}
+
 pub fn cancel(channel: *Channel) void {
     const host = channel.host;
     lock(host);
@@ -495,6 +515,7 @@ fn dispatch(host: *Host, line: []const u8) bool {
         }
         channel.bytes.appendSlice(a, bytes) catch return false;
         if (!channel.terminal) channel.bytes.append(a, '\n') catch return false;
+        if (host.progress != null) _ = w.SetEvent(host.progress);
         notify(channel);
         return true;
     }

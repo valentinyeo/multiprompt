@@ -118,14 +118,29 @@ fn safePath(value: []const u8) bool {
     return true;
 }
 
-pub fn launchCommand(out: []u8, session: []const u8, cwd: []const u8, sid: []const u8) ?[]const u8 {
-    return launchCommandFor(out, .claude, session, cwd, sid, READER);
+pub fn launchCommand(out: []u8, session: []const u8, cwd: []const u8, sid: []const u8, reader: []const u8) ?[]const u8 {
+    return launchCommandFor(out, .claude, session, cwd, sid, reader);
 }
 
 pub fn runtimePath(out: []u8, sha256: []const u8) ?[]const u8 {
     if (sha256.len != 64) return null;
     for (sha256) |c| if (!std.ascii.isDigit(c) and !(c >= 'a' and c <= 'f')) return null;
     return std.fmt.bufPrint(out, "~/.multiprompt-runtime/{s}.py", .{sha256}) catch null;
+}
+
+pub const PublishedRuntime = struct { sha: [64]u8, path: []const u8 };
+
+pub fn publishedRuntime(out: []u8, bundle: []const u8) ?PublishedRuntime {
+    var digest: [32]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(bundle, &digest, .{});
+    var sha: [64]u8 = undefined;
+    const text = std.fmt.bufPrint(&sha, "{s}", .{std.fmt.fmtSliceHexLower(&digest)}) catch return null;
+    const path = runtimePath(out, text) orelse return null;
+    return .{ .sha = sha, .path = path };
+}
+
+pub fn publishedRuntimeMatches(own: [64]u8, published: []const u8) bool {
+    return published.len == own.len and std.mem.eql(u8, &own, published);
 }
 
 pub fn launchCommandFor(out: []u8, provider: Provider, session: []const u8, cwd: []const u8, sid: []const u8, reader: []const u8) ?[]const u8 {
@@ -332,16 +347,16 @@ test "IGSH-1266 new Claude sessions start on the app owned host" {
 
 test "IGSH-1447 a new Claude tab is a live chat with no shell or terminal Claude under it" {
     var out: [1024]u8 = undefined;
-    const command = launchCommand(&out, "live-abc", "~/projects", "ffffffff-ffff-4fff-bfff-ffffffffffff") orelse return error.TestUnexpectedResult;
+    const command = launchCommand(&out, "live-abc", "~/projects", "ffffffff-ffff-4fff-bfff-ffffffffffff", READER) orelse return error.TestUnexpectedResult;
     try std.testing.expectEqualStrings("python3 ~/.multiprompt-runtime/reader.py host enable claude ffffffff-ffff-4fff-bfff-ffffffffffff --tmux live-abc --cwd ~/projects --permission-mode bypassPermissions && python3 ~/.multiprompt-runtime/reader.py host start claude ffffffff-ffff-4fff-bfff-ffffffffffff", command);
     try std.testing.expect(std.mem.indexOf(u8, command, ">/dev/null") == null);
     try std.testing.expect(std.mem.indexOf(u8, command, "handover") == null);
     try std.testing.expect(std.mem.indexOf(u8, command, "send-keys") == null);
     try std.testing.expect(std.mem.indexOf(u8, command, "claude --session-id") == null);
     try std.testing.expect(std.mem.indexOf(u8, command, "\"") == null);
-    try std.testing.expect(launchCommand(&out, "live-abc", "~/projects", "bad") == null);
-    try std.testing.expect(launchCommand(&out, "live-a;b", "~/projects", "ffffffff-ffff-4fff-bfff-ffffffffffff") == null);
-    try std.testing.expect(launchCommand(&out, "live-abc", "~/pro jects", "ffffffff-ffff-4fff-bfff-ffffffffffff") == null);
+    try std.testing.expect(launchCommand(&out, "live-abc", "~/projects", "bad", READER) == null);
+    try std.testing.expect(launchCommand(&out, "live-a;b", "~/projects", "ffffffff-ffff-4fff-bfff-ffffffffffff", READER) == null);
+    try std.testing.expect(launchCommand(&out, "live-abc", "~/pro jects", "ffffffff-ffff-4fff-bfff-ffffffffffff", READER) == null);
 }
 
 test "IGSH-1546 a Codex or Pi live chat starts on the host with its own provider and no Claude permission flag" {
@@ -366,7 +381,25 @@ test "IGSH-1546 a Codex or Pi live chat starts on the host with its own provider
     try std.testing.expect(std.mem.indexOf(u8, antigravity, ">/dev/null") == null);
     const claude = launchCommandFor(&out, .claude, "live-abc", "~/projects", sid, READER) orelse return error.TestUnexpectedResult;
     var expected: [1024]u8 = undefined;
-    try std.testing.expectEqualStrings(launchCommand(&expected, "live-abc", "~/projects", sid) orelse return error.TestUnexpectedResult, claude);
+    try std.testing.expectEqualStrings(launchCommand(&expected, "live-abc", "~/projects", sid, READER) orelse return error.TestUnexpectedResult, claude);
+}
+
+test "MUBO-221 the runtime fingerprint is the hash of this app's own bundle" {
+    var path_buf: [96]u8 = undefined;
+    const first = publishedRuntime(&path_buf, "MP_SEND_SOURCE = ''\nreader one\n") orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(usize, 64), first.sha.len);
+    for (first.sha) |c| try std.testing.expect(std.ascii.isDigit(c) or (c >= 'a' and c <= 'f'));
+    try std.testing.expectEqualStrings("~/.multiprompt-runtime/", first.path[0..24]);
+    try std.testing.expect(std.mem.indexOf(u8, first.path, &first.sha) != null);
+    try std.testing.expect(std.mem.endsWith(u8, first.path, ".py"));
+    try std.testing.expect(publishedRuntimeMatches(first.sha, &first.sha));
+    const stale = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
+    try std.testing.expect(!publishedRuntimeMatches(first.sha, stale));
+    try std.testing.expect(!publishedRuntimeMatches(first.sha, "too-short"));
+    var second_path: [96]u8 = undefined;
+    const second = publishedRuntime(&second_path, "MP_SEND_SOURCE = ''\nreader two\n") orelse return error.TestUnexpectedResult;
+    try std.testing.expect(!std.mem.eql(u8, &first.sha, &second.sha));
+    try std.testing.expect(!publishedRuntimeMatches(first.sha, &second.sha));
 }
 
 test "MUBO-221 a chat starts from the runtime it published, not the shared pointer" {

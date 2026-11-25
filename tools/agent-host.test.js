@@ -29,7 +29,7 @@ test('IGSH-1266 new Claude sessions start on the app owned host and typing a com
   assert.match(body, /pickRepoOpen\(with_agent, false, workspaceHostForNewTab\(workspace\), plain_claude\)/);
   assert.match(palette, /const plain_claude = app_state\.g_search_pick_repo_plain_claude;\s*closePickRepo\(\);/);
   assert.match(palette, /spawnWorkspaceSessionAt\(host, path, program_buf\[0\.\.program_len\], with_agent, plain_claude\)/);
-  assert.match(body, /const launch_cmd = workspaceLaunchCommand\(program, session, cwd, host_sid, &host_buf, &cmd_buf\) orelse \{/);
+  assert.match(body, /const launch_cmd = workspaceLaunchCommand\(program, session, cwd, host_sid, runtime, &host_buf, &cmd_buf\) orelse \{/);
   assert.match(body, /var host_buf: \[WORKSPACE_HOST_LAUNCH_MAX\]u8 = undefined;/);
   assert.match(body, /if \(launch_cmd\.len > app_state\.g_pending_tmux_cmd\.len\)/, 'the pending command buffer must be checked before the copy');
   assert.ok(body.indexOf('var host_buf: [WORKSPACE_HOST_LAUNCH_MAX]u8') < body.indexOf('workspaceLaunchCommand'), 'the host buffer must outlive the command');
@@ -39,10 +39,10 @@ test('IGSH-1266 new Claude sessions start on the app owned host and typing a com
   const commandEnd = palette.indexOf('pub fn spawnWorkspaceTmuxSession() bool {');
   assert.ok(command >= 0 && commandEnd > command, 'workspaceLaunchCommand must exist');
   const choice = palette.slice(command, commandEnd);
-  assert.match(choice, /if \(host_sid\) \|sid\| \{\s*const provider = agent_host\.hostedWorkspaceProvider\(program\) orelse return null;\s*return agent_host\.launchCommandFor\(host_out, provider, session, cwd, sid, agent_host\.READER\);/);
+  assert.match(choice, /if \(host_sid\) \|sid\| \{\s*const provider = agent_host\.hostedWorkspaceProvider\(program\) orelse return null;\s*return agent_host\.launchCommandFor\(host_out, provider, session, cwd, sid, runtime\);/);
   assert.match(choice, /return buildWorkspaceTmuxLaunchCmd\(command_out, session, cwd, program\);/);
   assert.match(choice, /try std\.testing\.expectEqualStrings\(expected, spawned\);/);
-  assert.match(choice, /try std\.testing\.expect\(workspaceLaunchCommand\("codex", "term-abc", "~\/projects", sid, &host_buf, &command_buf\) == null\);/);
+  assert.match(choice, /try std\.testing\.expect\(workspaceLaunchCommand\("codex", "term-abc", "~\/projects", sid, agent_host\.READER, &host_buf, &command_buf\) == null\);/);
 
   assert.ok(!palette.includes('fn buildCodexTmuxLaunchCmd('), 'Codex no longer types into a terminal');
 });
