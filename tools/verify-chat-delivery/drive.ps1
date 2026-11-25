@@ -64,6 +64,7 @@ if ($env:CHAT_INSTANT_PROOF -eq '1') { $plans = @(@{name='instant-chat'; mode='b
 if ($env:CHAT_MODEL_PROOF -eq '1') { $plans = @(@{name='model-settings'; mode='idle'; text='model draft retained'}) }
 if ($env:CHAT_WORKING_LIVE_PROOF -eq '1') { $plans = @(@{name='working-live'; mode='busy'; text='/teach Show the hosted working indicator'}, @{name='steady-live'; mode='idle'; text='Read while a reply streams'}) }
 if ($env:CHAT_FRESH_START_PROOF -eq '1') { $plans = @(@{name='fresh-start-live'; mode='busy'; text='message sent during the reload'}) }
+if ($env:CHAT_WORKSPACE_SWITCH_PROOF -eq '1') { $plans = @(@{name='workspace-switch'; mode='idle'; text='whole workspace switch'}) }
 $queueTexts = @{a='shell queued alpha'; b='chat queued beta'; a2='shell queued alpha edited'; shellDraft='shell draft gamma'; chatDraft='chat draft delta'; agentPaste="agent report line one`nagent report line two"; suggestion='Try asking about the next step'}
 if ($env:CHAT_CANCEL_PROOF -eq '1') { $plans = @(@{name='cancel-held'; mode='busy'; text='cancel keep one'}) }
 if ($env:CHAT_RECALL_PROOF -eq '1') { $plans = @(@{name='recall-handed'; mode='idle'; text='recall keep one'}) }
@@ -122,9 +123,9 @@ function Doctor([bool]$Chat = $false) {
         throw 'Doctor: visible UI Automation identity or fixed title missing'
     }
     $session = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
-    $expectedTmux = if ($env:CHAT_HAX_PROOF -eq '1' -or $env:CHAT_LIVE_DELIVERY_PROOF -eq '1') { $expectedShells } else { 1 }
+    $expectedTmux = if ($env:CHAT_HAX_PROOF -eq '1' -or $env:CHAT_LIVE_DELIVERY_PROOF -eq '1' -or $env:CHAT_WORKSPACE_SWITCH_PROOF -eq '1') { $expectedShells } else { 1 }
     if (@($session.tabs).Count -ne $expectedShells -or @($session.tabs | Where-Object { $_.kind -eq 'tmux' }).Count -ne $expectedTmux -or
-        ($expectedShells -eq 2 -and $env:CHAT_LIVE_DELIVERY_PROOF -ne '1' -and @($session.tabs | Where-Object { $_.kind -eq 'cmd' }).Count -ne 1)) { throw 'Doctor: expected owned tmux and local tabs were not saved' }
+        ($expectedShells -eq 2 -and $env:CHAT_LIVE_DELIVERY_PROOF -ne '1' -and $env:CHAT_WORKSPACE_SWITCH_PROOF -ne '1' -and @($session.tabs | Where-Object { $_.kind -eq 'cmd' }).Count -ne 1)) { throw 'Doctor: expected owned tmux and local tabs were not saved' }
     if ($Chat) {
         $focus = [ChatDeliveryDesktop]::Focus($main)
         if ($focus[0] -ne $main.ToInt64() -or $focus[1] -ne $composer.ToInt64()) { throw 'Doctor: owned composer must have foreground typing focus' }
@@ -562,6 +563,7 @@ foreach ($plan in $plans) {
     $isInstant = $plan.name -eq 'instant-chat'
     $isModel = $plan.name -eq 'model-settings'
     $isRecall = $plan.name -eq 'recall-handed'
+    $isWorkspaceSwitch = $env:CHAT_WORKSPACE_SWITCH_PROOF -eq '1'
     $socketTemp = $null
     $hasTranscript = $isModel -or $isRecall -or $isInstant -or $isResync -or $isLiveDelivery -or $isReply -or $isNotes -or $isReaction -or $isAccepted -or $isQueue -or $isSendStays -or $isCancel -or $isActivity -or $isHistory -or $isSending -or $isRemote -or $isHax
     $steps = [Collections.Generic.List[object]]::new()
@@ -576,12 +578,12 @@ foreach ($plan in $plans) {
         $env:USERPROFILE = "$profile/home"
         $env:HOME = "$profile/home"
         $env:MP_VERIFY_STATE = $state
-        if ($isModel -or $isRecall -or $isFreshStart -or $plan.name -in @('working-live', 'steady-live')) {
+        if ($isModel -or $isRecall -or $isFreshStart -or $isWorkspaceSwitch -or $plan.name -in @('working-live', 'steady-live')) {
             $socketTemp = Join-Path ([IO.Path]::GetPathRoot($profile)) ('mp' + [guid]::NewGuid().ToString('N').Substring(0, 12))
             New-Item -ItemType Directory $socketTemp | Out-Null
             $env:MP_VERIFY_SOCKET_TEMP = $socketTemp
         }
-        if ($plan.name -in @('working-live', 'steady-live', 'fresh-start-live')) {
+        if ($plan.name -in @('working-live', 'steady-live', 'fresh-start-live') -or $isWorkspaceSwitch) {
             New-Item -ItemType Directory -Force "$profile/home/.local/state/multiprompt/agent-host", "$socketTemp/mp-agent-host-0" | Out-Null
         }
         [IO.File]::WriteAllText("$settings/ssh-path.txt", $Ssh)
@@ -673,6 +675,17 @@ foreach ($plan in $plans) {
             Copy-Item "$settings/chat-outbox.json" "$caseDir/outbox-seed.json"
             Save $mapping "$caseDir/mapping.json"
         }
+        if ($isWorkspaceSwitch) {
+            $savedSession.single_window = $true
+            $savedSession.active_workspace = 0
+            $savedSession.workspace_count = 1
+            $savedSession.workspaces = @(@{name='Verify workspace'; wid='ws-verify-workspace'; last_shell=1})
+            $savedSession.tabs = @(
+                @{kind='tmux'; name='Workspace chat one'; manual=$true; tmux_host=0; tmux_session='ws-chat-one'; cv=$false; pid=0; ai_agent=1; csid='11111111-5555-4555-8555-000000000001'; workspace=0},
+                @{kind='tmux'; name='Workspace chat two'; manual=$true; tmux_host=0; tmux_session='ws-chat-two'; cv=$false; pid=0; ai_agent=1; csid='11111111-5555-4555-8555-000000000002'; workspace=0}
+            )
+            $expectedShells = 2
+        }
         Save $savedSession "$settings/session.json"
         if ($isRemote) {
             $saved = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
@@ -701,6 +714,8 @@ foreach ($plan in $plans) {
             . "$PSScriptRoot/working-live.ps1"
         } elseif ($env:CHAT_STARTUP_FAILURE_PROOF -eq '1') {
             . "$PSScriptRoot/startup-failure.ps1"
+        } elseif ($isWorkspaceSwitch) {
+            . "$PSScriptRoot/workspace-switch.ps1"
         } elseif ($isModel) {
             . "$PSScriptRoot/model-settings.ps1"
         } elseif ($isRecall) {
@@ -1530,7 +1545,7 @@ foreach ($plan in $plans) {
         try {
             if (Test-Path "$settings/debug.log") { Copy-Item "$settings/debug.log" "$caseDir/debug.log"; Get-Content "$caseDir/debug.log" | Add-Content "$Evidence/debug.log" }
             if (Test-Path $state) { Copy-Item $state "$caseDir/stand-in" -Recurse -Force }
-            if (($isModel -or $isRecall -or $isFreshStart -or $plan.name -in @('working-live', 'steady-live')) -and (Test-Path "$profile/home/.local/state/multiprompt/agent-host")) { Copy-Item "$profile/home/.local/state/multiprompt/agent-host" "$caseDir/host" -Recurse -Force }
+            if (($isModel -or $isRecall -or $isFreshStart -or $isWorkspaceSwitch -or $plan.name -in @('working-live', 'steady-live')) -and (Test-Path "$profile/home/.local/state/multiprompt/agent-host")) { Copy-Item "$profile/home/.local/state/multiprompt/agent-host" "$caseDir/host" -Recurse -Force }
             foreach ($file in @('agent-buffer.jsonl', 'invocations.jsonl')) {
                 $source = "$caseDir/stand-in/$file"
                 if (Test-Path $source) { Get-Content $source | Add-Content "$Evidence/$file" }
@@ -1640,6 +1655,10 @@ if ($env:CHAT_STARTUP_FAILURE_PROOF -eq '1') {
 }
 if ($env:CHAT_FRESH_START_PROOF -eq '1') {
     & node "$PSScriptRoot/../chat-fresh-start-live-proof.mjs" $Evidence
+    exit $LASTEXITCODE
+}
+if ($env:CHAT_WORKSPACE_SWITCH_PROOF -eq '1') {
+    & node "$PSScriptRoot/../workspace-switch-ai-proof.mjs" $Evidence
     exit $LASTEXITCODE
 }
 if ($env:CHAT_MISSING_PROOF -eq '1') {

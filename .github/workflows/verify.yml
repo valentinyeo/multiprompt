@@ -429,6 +429,7 @@ jobs:
       CAPTION_BROWSER_THEME: ${{ matrix.caption-browser-theme }}
       CHAT_ACCEPTED_PROOF: ${{ inputs.chat_accepted_proof && '1' || '' }}
       CHAT_FRESH_START_PROOF: ${{ matrix.feature == 'chat-fresh-start' && '1' || '' }}
+      CHAT_WORKSPACE_SWITCH_PROOF: ${{ matrix.feature == 'workspace-switch-ai' && '1' || '' }}
       CHAT_CANCEL_PROOF: ${{ inputs.chat_cancel_proof && '1' || '' }}
       CHAT_RECALL_PROOF: ${{ inputs.chat_recall_proof && '1' || '' }}
       CHAT_SENDING_PROOF: ${{ inputs.sending_status_proof && '1' || '' }}
@@ -466,7 +467,7 @@ jobs:
       RELEASE_TAG: ${{ inputs.tag || '' }}
     steps:
       - name: Select instant chat driver
-        if: env.CHAT_INSTANT_PROOF == '1' || env.CHAT_MODEL_PROOF == '1' || env.CHAT_WORKING_LIVE_PROOF == '1' || env.CHAT_DOUBLE_CLICK_PROOF == '1'
+        if: env.CHAT_INSTANT_PROOF == '1' || env.CHAT_MODEL_PROOF == '1' || env.CHAT_WORKING_LIVE_PROOF == '1' || env.CHAT_DOUBLE_CLICK_PROOF == '1' || env.CHAT_WORKSPACE_SWITCH_PROOF == '1'
         shell: pwsh
         run: Add-Content $env:GITHUB_ENV 'FEATURE=chat-delivery'
       - name: Keep LF line endings
@@ -738,6 +739,12 @@ jobs:
       - name: Check newest-message evidence validation
         if: env.FEATURE == 'chat-newest'
         run: node --test tools/chat-newest-proof.test.mjs
+      - name: Build the zsb command-line wrapper
+        if: matrix.feature == 'workspace-switch-ai'
+        shell: pwsh
+        run: |
+          zig cc -target x86_64-windows-gnu -municode -O2 tools/verify-workspace-switch-ai/zsb-wrapper.c -o verify-bin/zsb.exe
+          if ($LASTEXITCODE -ne 0) { throw 'zsb command-line wrapper build failed' }
       - name: Compile chat delivery remote-shell boundary
         if: env.FEATURE == 'session-actions' || env.FEATURE == 'chat-delivery' || env.FEATURE == 'chat-fresh-start' || env.FEATURE == 'chat-startup-failure' || env.FEATURE == 'chat-messages-only' || env.FEATURE == 'chat-full-history' || env.FEATURE == 'chat-newest' || env.FEATURE == 'chat-switch-speed' || env.FEATURE == 'chat-still' || env.FEATURE == 'tmux-binding' || env.FEATURE == 'server-shell-input' || env.FEATURE == 'chat-options' || env.FEATURE == 'chat-slash'
         shell: pwsh
