@@ -45,6 +45,25 @@ function Read-LogText {
     $reader = [IO.StreamReader]::new($stream)
     try { $reader.ReadToEnd() } finally { $reader.Dispose() }
 }
+function Copy-ToEvidence {
+    $target = Join-Path $evidencePath 'sandbox'
+    New-Item -ItemType Directory -Force $target | Out-Null
+    foreach ($file in 'session.json', 'session.json.launch.json', 'chat-outbox.json', 'settings.json') {
+        $source = Join-Path $settings $file
+        if (Test-Path $source) { Copy-Item $source (Join-Path $target $file) -ErrorAction SilentlyContinue }
+    }
+    $stateDir = Join-Path $root 'state'
+    if (Test-Path $stateDir) {
+        foreach ($file in 'invocations.jsonl', 'reader-boundary.jsonl', 'model-reader.jsonl', 'completion.jsonl', 'capture.jsonl', 'state.json', 'workload.json') {
+            $source = Join-Path $stateDir $file
+            if (Test-Path $source) { Copy-Item $source (Join-Path $target ('state-' + $file)) -ErrorAction SilentlyContinue }
+        }
+    }
+    $claude = Join-Path $env:USERPROFILE '.claude'
+    if (Test-Path $claude) {
+        Get-ChildItem -Recurse -File $claude -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName.Substring($claude.Length) + ' ' + $_.Length } | Set-Content -Encoding UTF8 (Join-Path $target 'claude-tree.txt')
+    }
+}
 function Read-StreamEvents {
     $file = Join-Path $evidencePath 'stream-count.json'
     if (-not (Test-Path $file)) { return 0 }
@@ -262,6 +281,7 @@ try {
     if ($null -ne $job) { try { [void]$job.Stop() } catch { Write-Host "job stop failed: $($_.Exception.Message)" }; $job.Dispose() }
     $ready.Dispose()
     if ($null -ne $process) { $process.Dispose() }
+    Copy-ToEvidence
     if (Test-Path $logPath) {
         $size = (Get-Item $logPath).Length
         if ($size -lt 40MB) { Copy-Item $logPath "$evidencePath/debug.log" } else { Write-Host "debug.log is $size bytes; keeping the series and skipping the copy" }
