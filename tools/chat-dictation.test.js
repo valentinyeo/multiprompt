@@ -198,7 +198,7 @@ test('IGSH-812 replay replaces only hardware/provider I/O and retains the produc
     assert.notEqual(broken, voice);
     assert.throws(() => seamContract(broken), assert.AssertionError, required);
   }
-  assert.match(driver, /\$env:MULTIPROMPT_DICTATION_FIXTURE = \$null\s+if \(\$Feature -eq 'chat-dictation'\)/);
+  assert.match(driver, /\$env:MULTIPROMPT_DICTATION_FIXTURE = \$null\s+if \(\$Feature -in @\('chat-dictation', 'chat-dictation-switch'\)\)/);
   assert.match(driver, /'IGSH_246', 'MULTIPROMPT_DICTATION_FIXTURE'(?:, '[A-Z_]+')*\)\)/);
 });
 
@@ -229,7 +229,7 @@ test('IGSH-812 registration is additive and existing contract checks remain on t
   assert.ok(featureMatrix(workflow).available.includes('chat-dictation'));
   assert.ok(featureMatrix(workflow).full.includes('chat-dictation'));
   assert.match(workflow, /run: node --test [^\n]*tools\/chat-dictation.test.js/);
-  assert.match(workflow, /FEATURE -eq 'chat-dictation' -and \$env:RELEASE_TAG\) \{ throw/);
+  assert.match(workflow, /FEATURE -in @\('chat-dictation', 'chat-dictation-switch'\) -and \$env:RELEASE_TAG\) \{ throw/);
   for (const required of ['Check verification contracts', 'Check workspace focus journey contract', 'Check browser recovery journey contract', 'Validate journey and syntax', 'node tools/check-workspace-focus.mjs', 'node tools/check-browser-pane-stuck.mjs', 'Language.Parser]::ParseFile', 'Build branch executable', 'Launch Doctor Drive Evidence Cleanup', 'Upload durable verification evidence']) assert.ok(workflow.includes(required), required);
   const map = read(skill + 'features/chat-dictation.md');
   assert.deepEqual(map.match(/^## .+$/gm), ['## Sub-features', '## How to get to it (user POV)', '## Driving it with control.ps1', '## Gotchas']);
