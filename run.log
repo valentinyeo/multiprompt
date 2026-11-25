@@ -1,0 +1,47 @@
+MUBO-136 round 2 | Owner chat: Multi Bot Bugs
+Goal: /clear leaves an empty hosted chat after reload and the next message sends normally.
+
+Pickup
+- Read all eight branch commits, cc0289405 through ef3da233c.
+- Merged origin/master 9db3f9b5a in 2bf6233d0 and pushed.
+- Kept master's MUBO-135 provider/history reset fields and single-reply assertions.
+- Updated the merged journey to forget pre-clear expected replies, retain empty-reload checks, and require the post-clear reply exactly once after another reload.
+- Title file and one-sentence changelog already exist in cc0289405.
+
+Red proof
+- Test-only revision: cc0289405e50d6c422a7cde9c2092a8433651091.
+- https://github.com/valentinyeo/multiprompt/actions/runs/45559393133
+- Original reader-tests job 139019168412: the full reader suite passed, then all three hosted-clear regression tests failed with invalid_op from the missing clear control. Inspected raw job log.
+- Round-2 failed-job rerun at the same test-only revision reproduced all three failures on 2026-11-25 at 08:14Z. Inspected --log-failed output; invalid_op is the failure in each case.
+- Current head harness against master 9db3f9b5a: https://github.com/valentinyeo/multiprompt/actions/runs/45574235584 (server-chat negative control; pending).
+
+Green proof
+- Previous head ef3da233cf00cad640fddce0bcf2ea57eec65e53 Tests: https://github.com/valentinyeo/multiprompt/actions/runs/45569155563 (success).
+- Previous head server-chat: https://github.com/valentinyeo/multiprompt/actions/runs/45569159658 (success). Downloaded result.json, all four cases passed, cleanup activeAfterStop=0; build.json records ef3da233c.
+- Merged head 2bf6233d0 Tests: https://github.com/valentinyeo/multiprompt/actions/runs/45574217058 (reader-tests passed; remaining matrix pending).
+- Inspected reader-tests job 139069141020: 563 reader tests passed, all four clear tests passed, HOSTED_CHAT_READS PASS 176/176 cases.
+- Merged head server-chat: https://github.com/valentinyeo/multiprompt/actions/runs/45574221870 (success). Downloaded and inspected result.json, doctor.json, build.json, copied messages, clear.png and after-clear.png. All five cases passed and cleanup activeAfterStop=0. Both empty-view copies contain zero bytes. Only the new exchange appears afterwards.
+- Merged head formal delivery: https://github.com/valentinyeo/multiprompt/actions/runs/45574184660 (success; push-triggered). summary.json retains three inherited delivery findings and catches both planted breaks; inherited_from=91d6d9e9cb27aa29ecc58a2e8473013e0de18cc0. Additional dispatch 45574226478 failed before testing because the Zig download timed out.
+- Merged head chat-still: https://github.com/valentinyeo/multiprompt/actions/runs/45574231058 (success). formal.json records six inherited geometry findings from the same master; no new property pass is claimed.
+
+Scope
+- Shared reader behavior changes. Bare hosted Claude /clear is a host control, not a provider prompt. The stable chat/send address survives; a new provider context and empty display history persist. Other-user watch stays on the host-owned display history.
+- Android Bugs must check its client against this shared-reader change. No Android verification is claimed here; board tooling is unavailable to this worker.
+- verify-hosted-chat-reads still applies to response/watch, hosted pinning and same/other-user routing; Tests ran its current 176-case matrix. The focused clear regression additionally covers an other-user stream after clear.
+- verify-chat-delivery-formal still applies to fixed-session send/outbox/echo decisions; clear/restart is outside that model. The fixture and real Windows server-chat journey cover that transition.
+- verify-chat-still still applies to passive refresh/scroll geometry; no covered scroll function changed. Explicit clear intentionally empties the view.
+- chat-full-history and chat-messages-only also fail on master (MUBO-546); no fix in this PR.
+
+Faults for the owner
+- docs/worker-brief.md is absent in this checkout.
+- hypertask shim reports: plan-pick worker: no board login. Put the fault or note in your final message; the orchestrator files it.
+- Did not use another agent's credentials or write to the board.
+- No local build or test was run. All execution proof uses GitHub-hosted Actions and disposable fixtures.
+
+Follow-up
+- Switch AI run https://github.com/valentinyeo/multiprompt/actions/runs/45574184643 rejected whole-reader hash drift. Static comparison confirms all twelve covered functions are unchanged from master. Updated only its hash, sync commit and scope note; rerun follows push.
+- Before-video dispatch 45574235584 failed at checkout because I supplied abbreviated revisions. No product failure or before evidence came from it. Retrying with full revisions.
+- Principle Prove It Works shaped the verification: inspected copied transcript bytes, snapshots, screenshots and raw CI logs instead of treating a successful build as proof.
+
+PR and verifier: pending. Do not merge.
+Author model: openai/gpt-6.1-sol

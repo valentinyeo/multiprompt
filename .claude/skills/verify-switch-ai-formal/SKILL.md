@@ -35,7 +35,9 @@ One logical chat address, at most two pending switch requests, five successful s
 
 ## Coverage and sync
 
-Last reviewed source/model sync commit is `90f504e13fabf89b998e070a98c7feab9f41057c`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
+Last reviewed source/model sync commit is `2bf6233d01f65f21f4afb3b3eb8e06dcf3cc7a66`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
+
+MUBO-136 adds a hosted clear control and pins its empty display history in the other-user stream. All twelve covered reader functions are unchanged from master, as are the other covered files, model, bounds, decisions, probes and mutations. Clear and provider restart are outside the switch model. Only the reader hash and sync commit move; GitHub Actions reruns the self-test and replay.
 
 SOFT-2681 publishes Claude's current native session and changes transcript selection. All twelve covered reader functions are unchanged from the prior sync, as are every other covered file, the model, bounds, decisions, probes and mutations. Only the reader hash and sync commit move. Hosted CI must rerun the full self-test and native replay; this review does not extend the model to transcript rotation.
 
