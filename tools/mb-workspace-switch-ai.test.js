@@ -237,7 +237,7 @@ test('workspace switch-ai retries after an idle chat takes a new send and never 
   assert.equal(result.code, 0, result.errors.join('\n'));
   assert.match(result.lines[0], /^switching 2 of 3 chats in Work to antigravity/);
   assert.ok(result.lines.includes('switched Alpha Chat -> antigravity'), result.lines.join('\n'));
-  assert.ok(!result.lines.some(line => line.includes('refused') || line.includes('failed')), result.lines.join('\n'));
+  assert.ok(!result.lines.filter(line => !line.startsWith('workspace ')).some(line => line.includes('refused') || line.includes('failed')), result.lines.join('\n'));
   const saved = h.state();
   assert.equal(saved.workspaces[0].tabs[2].provider, 'antigravity');
   assert.equal(saved.workspaces[0].tabs[2].messages, 3);
@@ -261,7 +261,8 @@ test('workspace switch-ai reports a refused target with the host reason and exit
     'switched Alpha Chat -> antigravity',
     'refused Already Antigravity: unsupported_provider',
     'refused Grouped Pi: unsupported_provider',
-    'workspace Work: 1 switched, 0 already, 0 busy, 2 refused, 0 failed'
+    'workspace Work: 1 switched, 0 already, 0 busy, 2 refused, 0 failed',
+    'workspace switch incomplete: 2 chats not on antigravity'
   ]);
   assert.equal(h.state().workspaces[0].tabs[3].provider, 'codex');
   assert.equal(h.state().workspaces[0].groups[0].tabs[0].provider, 'pi');
@@ -285,7 +286,8 @@ test('workspace switch-ai leaves a chat on its old AI when the switch start fail
     'failed Alpha Chat: the new AI could not start',
     'already Already Antigravity (antigravity)',
     'switched Grouped Pi -> antigravity',
-    'workspace Work: 1 switched, 1 already, 0 busy, 0 refused, 1 failed'
+    'workspace Work: 1 switched, 1 already, 0 busy, 0 refused, 1 failed',
+    'workspace switch incomplete: 1 chat not on antigravity'
   ]);
   const broken = h.state();
   assert.equal(broken.workspaces[0].tabs[2].provider, 'claude');

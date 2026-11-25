@@ -769,11 +769,10 @@ async function workspaceSwitchAi(ctx, flags) {
       ctx.out(`switching ${pending.length} of ${chats.length} chats in ${workspace.name} to ${target}${again}, one at a time`);
     }
     for (const tab of chats) {
-      if (String(tab.provider || '').toLowerCase() === target) {
-        results.push({ tab: tab.id, title: tab.title || tab.tmux || String(tab.id), outcome: 'already', provider: target });
-        continue;
-      }
-      const result = await switchOneChat(ctx, tab, target, waitMs);
+      const current = String(tab.provider || '').toLowerCase();
+      const result = current === target
+        ? { tab: tab.id, title: tab.title || tab.tmux || String(tab.id), outcome: 'already', provider: target }
+        : await switchOneChat(ctx, tab, target, waitMs);
       if (result.outcome === 'switched') {
         totals.switched += 1;
         const switchedAt = (ctx.now ? ctx.now() : new Date()).toISOString();
