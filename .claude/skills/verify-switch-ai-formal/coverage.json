@@ -1,8 +1,8 @@
 {
-  "sync_commit": "1a59f4ad97899f924ca18a24a5568caf5519d134",
+  "sync_commit": "90f504e13fabf89b998e070a98c7feab9f41057c",
   "files": {
-    "src/chat_history_reader.py": "85327917cfd5927315aba015e57cad0586c2f7246fefa0720924280f89a1096a",
-    "tools/chat-switch-ai.test.js": "8e4f2d7816bb19aeea1acbf97cca362618165f0ea3cbf8aa529c59ef276a7411",
+    "src/chat_history_reader.py": "e5e5d20895b298ab8babc2db5a588b563c45644a1ff75ef165bb1deb1122c7e1",
+    "tools/chat-switch-ai.test.js": "3d69cbe05762594b36a52f997bb26f20392789777b242f2f35a3f9f90f766d0e",
     "tools/chat-auto-switch.test.js": "6a47e3322b342e536e3a0d3b1a7ae088a3b1cbdaf3e443a4b66f2c84edb6daf8",
     "tools/fixtures/SOFT-2469/claude-usage-limit.jsonl": "0d2c86c3a7ec942ab5336d7db5d903b85fe10ca89542b897babd50b550cdaa7c",
     "tools/fixtures/SOFT-2469/codex-usage-limit.jsonl": "cd2299ee18f310587a93603a943f4ae35aa9c7ceb360c228996cf002c136e027",
@@ -36,9 +36,17 @@
       "the toggle defaults on, saves off and stops the switch",
       "one usage-limit predicate per provider reads only that provider error text"
     ],
-    "tools/fixtures/SOFT-2469/claude-usage-limit.jsonl": ["Claude result event reporting a usage limit"],
-    "tools/fixtures/SOFT-2469/codex-usage-limit.jsonl": ["Codex error event reporting a usage limit"],
-    "tools/fixtures/SOFT-2469/pi-usage-limit.jsonl": ["Pi message_end event reporting a rate limit"],
-    "tools/fixtures/SOFT-2469/agy-resource-exhausted.ndjson": ["Antigravity result event reporting resource exhaustion"]
+    "tools/fixtures/SOFT-2469/claude-usage-limit.jsonl": [
+      "Claude result event reporting a usage limit"
+    ],
+    "tools/fixtures/SOFT-2469/codex-usage-limit.jsonl": [
+      "Codex error event reporting a usage limit"
+    ],
+    "tools/fixtures/SOFT-2469/pi-usage-limit.jsonl": [
+      "Pi message_end event reporting a rate limit"
+    ],
+    "tools/fixtures/SOFT-2469/agy-resource-exhausted.ndjson": [
+      "Antigravity result event reporting resource exhaustion"
+    ]
   }
 }

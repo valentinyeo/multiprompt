@@ -57,12 +57,34 @@ pub fn quote(a: std.mem.Allocator, message: []const u8) ![]u8 {
     return out.toOwnedSlice(a);
 }
 
+fn commandLine(message: []const u8) ?[]const u8 {
+    if (message.len < 2 or message[0] != '/') return null;
+    var name_end: usize = 1;
+    while (name_end < message.len and message[name_end] != ' ' and message[name_end] != '\t' and message[name_end] != '\r' and message[name_end] != '\n') : (name_end += 1) {
+        const c = message[name_end];
+        const named = (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or (c >= '0' and c <= '9') or c == ':' or c == '_' or c == '-';
+        if (!named) return null;
+    }
+    if (name_end == 1) return null;
+    var end = name_end;
+    while (end < message.len and message[end] != '\r' and message[end] != '\n') : (end += 1) {}
+    return trimEnd(message[0..end]);
+}
+
 pub fn compose(a: std.mem.Allocator, quoted: ?[]const u8, message: []const u8) ![]u8 {
     const text = quoted orelse return a.dupe(u8, message);
     if (trimEnd(text).len == 0) return a.dupe(u8, message);
     if (trimEnd(message).len == 0) return a.dupe(u8, "");
     const quoted_text = try quote(a, text);
     defer a.free(quoted_text);
+    if (commandLine(message)) |command| {
+        var pos: usize = 0;
+        while (pos < message.len and message[pos] != '\r' and message[pos] != '\n') : (pos += 1) {}
+        while (pos < message.len and (message[pos] == '\r' or message[pos] == '\n')) : (pos += 1) {}
+        const rest = message[pos..];
+        if (trimEnd(rest).len == 0) return std.fmt.allocPrint(a, "{s}\n{s}", .{ command, quoted_text });
+        return std.fmt.allocPrint(a, "{s}\n{s}\n\n{s}", .{ command, quoted_text, rest });
+    }
     return std.fmt.allocPrint(a, "{s}\n\n{s}", .{ quoted_text, message });
 }
 
@@ -91,6 +113,31 @@ test "Android ReplyQuote fixture" {
         defer a.free(result);
         try std.testing.expectEqualStrings(case.expected, result);
     }
+}
+
+test "MUBO-457 a skill typed in a quote reply sends the command line first" {
+    const a = std.testing.allocator;
+    const sent = try compose(a, "the earlier answer", "/pstack:poteto-help why did this arrive as plain text?\nand a following line");
+    defer a.free(sent);
+    try std.testing.expect(std.mem.startsWith(u8, sent, "/pstack:poteto-help why did this arrive as plain text?\n> the earlier answer"));
+    try std.testing.expectEqualStrings("/pstack:poteto-help why did this arrive as plain text?\n> the earlier answer\n\nand a following line", sent);
+}
+
+test "MUBO-457 a skill reply with no other text keeps its quote after the command" {
+    const a = std.testing.allocator;
+    const sent = try compose(a, "the earlier answer", "/pstack:poteto-help");
+    defer a.free(sent);
+    try std.testing.expectEqualStrings("/pstack:poteto-help\n> the earlier answer", sent);
+}
+
+test "MUBO-457 an ordinary quote reply keeps the quote first" {
+    const a = std.testing.allocator;
+    const sent = try compose(a, "the earlier answer", "my answer");
+    defer a.free(sent);
+    try std.testing.expectEqualStrings("> the earlier answer\n\nmy answer", sent);
+    const path = try compose(a, "the earlier answer", "/tmp/notes.txt says hello");
+    defer a.free(path);
+    try std.testing.expectEqualStrings("> the earlier answer\n\n/tmp/notes.txt says hello", path);
 }
 
 test "Android previews and Unicode whitespace with CR line endings" {

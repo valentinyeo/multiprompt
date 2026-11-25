@@ -1,0 +1,1 @@
+A skill typed mid-sentence drops that word from the message

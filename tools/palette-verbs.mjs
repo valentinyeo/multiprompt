@@ -3,7 +3,7 @@ export const screenOnly = {
   "chat": "the chat open on this screen",
   "pane": "the browser or computer pane on this screen",
   "menu": "menus that only open another list",
-  "local": "marks stored on this PC (lock, keep-alive, snooze, remind, archive), plus quit, restart, and crash tools",
+  "local": "marks stored on this PC (lock, keep-alive, snooze, remind), plus quit, restart, and crash tools",
   "account": "sign-in and account devices",
   "focus": "focusing a tab or workspace already on screen"
 };
@@ -38,7 +38,7 @@ export const verbs = {
   "SEARCH_TABCTX_GROUP_NEW": "group",
   "SEARCH_TABCTX_GROUP_NEW_TAB_IN": "open",
   "SEARCH_TABCTX_GROUP_REMOVE": "move",
-  "SEARCH_TABCTX_ARCHIVE": "close",
+  "SEARCH_TABCTX_ARCHIVE": "archive",
   "SEARCH_TABCTX_HIDE": "close",
   "SEARCH_TABCTX_MOVE_NEW_WS": "workspace",
   "SEARCH_TABCTX_MUTE": "mute",

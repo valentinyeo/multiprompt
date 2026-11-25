@@ -66,16 +66,50 @@ pub fn parseMarkdown(allocator: std.mem.Allocator, markdown: []const u8, fallbac
     };
 }
 
+fn markerFor(name: []const u8, buf: []u8) ?[]const u8 {
+    if (name.len == 0 or name.len + 1 > buf.len) return null;
+    buf[0] = '/';
+    @memcpy(buf[1..][0..name.len], name);
+    return buf[0 .. name.len + 1];
+}
+
+fn markerIndex(text: []const u8, marker: []const u8) ?usize {
+    var from: usize = 0;
+    while (std.mem.indexOfPos(u8, text, from, marker)) |at| {
+        const end = at + marker.len;
+        const opens = at == 0 or std.ascii.isWhitespace(text[at - 1]);
+        const closes = end == text.len or std.ascii.isWhitespace(text[end]);
+        if (opens and closes) return at;
+        from = at + 1;
+    }
+    return null;
+}
+
+pub fn textSkill(text: []const u8, skills: []const Skill) ?Skill {
+    const trimmed = std.mem.trimStart(u8, text, " \t\r\n");
+    var found: ?struct { skill: Skill, at: usize } = null;
+    for (skills) |skill| {
+        var buf: [129]u8 = undefined;
+        const marker = markerFor(skill.name, &buf) orelse continue;
+        const at = markerIndex(trimmed, marker) orelse continue;
+        if (at == 0) continue;
+        if (found == null or at < found.?.at) found = .{ .skill = skill, .at = at };
+    }
+    return if (found) |hit| hit.skill else null;
+}
+
 pub fn composeMessage(allocator: std.mem.Allocator, prompt: []const u8, skill: Skill) ![]u8 {
-    const marker = try std.fmt.allocPrint(allocator, "/{s}", .{skill.name});
-    defer allocator.free(marker);
-    if (!std.mem.startsWith(u8, prompt, marker) or
-        (prompt.len > marker.len and !std.ascii.isWhitespace(prompt[marker.len]))) return allocator.dupe(u8, prompt);
-    const without_marker = std.mem.trim(u8, prompt[marker.len..], " \t\r\n");
+    var buf: [129]u8 = undefined;
+    const marker = markerFor(skill.name, &buf) orelse return allocator.dupe(u8, prompt);
+    const trimmed = std.mem.trim(u8, prompt, " \t\r\n");
+    const at = markerIndex(trimmed, marker) orelse return allocator.dupe(u8, prompt);
+    const body = std.mem.trim(u8, skill.body, " \t\r\n");
+    if (at > 0) return std.fmt.allocPrint(allocator, "{s}\n\n/{s}\n\n<skill name=\"{s}\">\n{s}\n</skill>", .{ prompt, skill.name, skill.name, body });
+    const without_marker = std.mem.trim(u8, trimmed[marker.len..], " \t\r\n");
     return if (without_marker.len == 0)
-        std.fmt.allocPrint(allocator, "/{s}\n\n<skill name=\"{s}\">\n{s}\n</skill>", .{ skill.name, skill.name, std.mem.trim(u8, skill.body, " \t\r\n") })
+        std.fmt.allocPrint(allocator, "/{s}\n\n<skill name=\"{s}\">\n{s}\n</skill>", .{ skill.name, skill.name, body })
     else
-        std.fmt.allocPrint(allocator, "{s}\n\n/{s}\n\n<skill name=\"{s}\">\n{s}\n</skill>", .{ without_marker, skill.name, skill.name, std.mem.trim(u8, skill.body, " \t\r\n") });
+        std.fmt.allocPrint(allocator, "{s}\n\n/{s}\n\n<skill name=\"{s}\">\n{s}\n</skill>", .{ without_marker, skill.name, skill.name, body });
 }
 
 fn isDisabled(overrides: ?std.json.Value, name: []const u8) bool {
@@ -268,13 +302,39 @@ test "skill-only sends match Android" {
     try std.testing.expectEqualStrings("/i-have-adhd\n\n<skill name=\"i-have-adhd\">\nbody of i-have-adhd\n</skill>", message);
 }
 
-test "SOFT-3086 a selected skill runs only while its command leads the message" {
+test "MUBO-491 a skill typed mid-sentence starts and keeps every word" {
+    const a = std.testing.allocator;
+    const skill = Skill{ .name = @constCast("valentin-mode"), .description = @constCast(""), .body = @constCast("mode instructions"), .source = .multiprompt };
+    const typed = "why is this not done via /valentin-mode ?";
+    const sent = try composeMessage(a, typed, skill);
+    defer a.free(sent);
+    try std.testing.expectEqualStrings("why is this not done via /valentin-mode ?\n\n/valentin-mode\n\n<skill name=\"valentin-mode\">\nmode instructions\n</skill>", sent);
+}
+
+test "MUBO-491 a skill word that is not the skill stays plain text" {
+    const a = std.testing.allocator;
+    const skill = Skill{ .name = @constCast("valentin-mode"), .description = @constCast(""), .body = @constCast("mode instructions"), .source = .multiprompt };
+    for ([_][]const u8{ "see https://x.test/valentin-mode", "/valentin-mode/path and /valentin-modex", "no skill here", "/tmp/notes.txt says hello" }) |text| {
+        const sent = try composeMessage(a, text, skill);
+        defer a.free(sent);
+        try std.testing.expectEqualStrings(text, sent);
+    }
+}
+
+test "MUBO-491 a selected skill anywhere in a message runs and keeps the typed words" {
     const a = std.testing.allocator;
     const skill = Skill{ .name = @constCast("review"), .description = @constCast(""), .body = @constCast("review instructions"), .source = .multiprompt };
-    for ([_][]const u8{ "why /review ?", "why /review", " /review", "why\n/review", "/review/path", "/reviewer" }) |text| {
+    for ([_][]const u8{ "/review/path", "/reviewer" }) |text| {
         const message = try composeMessage(a, text, skill);
         defer a.free(message);
         try std.testing.expectEqualStrings(text, message);
+    }
+    for ([_][]const u8{ "why /review ?", "why\n/review" }) |text| {
+        const message = try composeMessage(a, text, skill);
+        defer a.free(message);
+        const expected = try std.fmt.allocPrint(a, "{s}\n\n/review\n\n<skill name=\"review\">\nreview instructions\n</skill>", .{text});
+        defer a.free(expected);
+        try std.testing.expectEqualStrings(expected, message);
     }
     const message = try composeMessage(a, "/review check this", skill);
     defer a.free(message);
@@ -282,6 +342,21 @@ test "SOFT-3086 a selected skill runs only while its command leads the message" 
     const only = try composeMessage(a, "/review", skill);
     defer a.free(only);
     try std.testing.expectEqualStrings("/review\n\n<skill name=\"review\">\nreview instructions\n</skill>", only);
+    const indented = try composeMessage(a, " /review", skill);
+    defer a.free(indented);
+    try std.testing.expectEqualStrings("/review\n\n<skill name=\"review\">\nreview instructions\n</skill>", indented);
+}
+
+test "MUBO-491 the skill catalog finds the skill a message names mid-sentence" {
+    const skills = [_]Skill{
+        .{ .name = @constCast("ship"), .description = @constCast(""), .body = @constCast("ship body"), .source = .multiprompt },
+        .{ .name = @constCast("valentin-mode"), .description = @constCast(""), .body = @constCast("mode body"), .source = .multiprompt },
+    };
+    try std.testing.expectEqualStrings("valentin-mode", textSkill("why is this not done via /valentin-mode ?", &skills).?.name);
+    try std.testing.expectEqualStrings("ship", textSkill("then /ship it", &skills).?.name);
+    for ([_][]const u8{ "/ship it", " /ship it", "see https://x.test/ship", "/ships and /ship/path", "nothing to run" }) |text| {
+        try std.testing.expect(textSkill(text, &skills) == null);
+    }
 }
 
 test "SOFT-2476 linked skill folders are discovered but nested links stay unvisited" {

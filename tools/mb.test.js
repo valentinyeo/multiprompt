@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 let run;
@@ -171,6 +171,113 @@ test('open groups a shell once, and a different workspace is refused', async () 
   assert.match(moved.errors[0], /already open in Work/);
   assert.equal(box.puts.length, openedPuts);
   rmSync(box.dir, { recursive: true, force: true });
+});
+
+const MOVE_ZSB = `#!${process.execPath}
+const { readFileSync, writeFileSync } = require('node:fs');
+const [verb, ...flags] = process.argv.slice(2);
+const stateFile = process.env.MB_MOVE_STATE;
+require('node:fs').appendFileSync(process.env.MB_MOVE_LOG, JSON.stringify([verb, ...flags]) + '\\n');
+const state = JSON.parse(readFileSync(stateFile, 'utf8'));
+const value = name => flags.includes(name) ? flags[flags.indexOf(name) + 1] : null;
+if (verb === 'workspace-list') {
+  console.log(JSON.stringify(state.listing));
+  process.exit(0);
+}
+if (verb !== 'session-move') {
+  console.log(JSON.stringify({ ok: false, error: 'unexpected' }));
+  process.exit(0);
+}
+const tabId = Number(value('--tab'));
+const workspaceName = value('--workspace');
+const groupName = value('--group');
+let moved = null;
+let origin = null;
+for (const workspace of state.listing.workspaces) {
+  for (const tab of [...(workspace.tabs || [])]) {
+    if (tab.id !== tabId) continue;
+    workspace.tabs.splice(workspace.tabs.indexOf(tab), 1);
+    moved = tab;
+    origin = workspace;
+  }
+  for (const group of workspace.groups || []) {
+    for (const tab of [...(group.tabs || [])]) {
+      if (tab.id !== tabId) continue;
+      group.tabs.splice(group.tabs.indexOf(tab), 1);
+      moved = tab;
+      origin = workspace;
+    }
+  }
+}
+if (!moved) {
+  console.log(JSON.stringify({ ok: false, error: 'unknown_tab' }));
+  process.exit(0);
+}
+const target = workspaceName === null ? origin : state.listing.workspaces.find(workspace => workspace.name === workspaceName);
+if (!target) {
+  console.log(JSON.stringify({ ok: false, error: 'unknown_workspace', valid_names: state.listing.workspaces.map(workspace => workspace.name) }));
+  process.exit(0);
+}
+if (groupName === null) target.tabs = [...(target.tabs || []), moved];
+else {
+  const group = (target.groups || []).find(item => item.name === groupName);
+  if (!group) {
+    console.log(JSON.stringify({ ok: false, error: 'unknown_group' }));
+    process.exit(0);
+  }
+  group.tabs = [...(group.tabs || []), moved];
+}
+writeFileSync(stateFile, JSON.stringify(state));
+console.log(JSON.stringify({ ok: true, moved: true, tab: tabId }));
+`;
+
+test('moving a tab to a workspace or group puts it there and repeats the same result', async () => {
+  assert.equal(typeof run, 'function');
+  const dir = mkdtempSync(join(tmpdir(), 'mb-move-'));
+  const bin = join(dir, 'bin');
+  mkdirSync(bin);
+  const zsb = join(bin, 'zsb');
+  writeFileSync(zsb, MOVE_ZSB, { mode: 0o755 });
+  const state = join(dir, 'state.json');
+  const listing = {
+    ok: true,
+    hosts: ['remote-1'],
+    workspaces: [
+      { id: 0, name: 'Home', active: true, groups: [{ id: 1, name: 'Ops', tabs: [] }], tabs: [{ id: 40, title: 'Move Me', host: 'remote-1', tmux: 'live-move' }] },
+      { id: 1, name: 'Away', active: false, groups: [{ id: 1, name: 'Ops', tabs: [] }], tabs: [] }
+    ]
+  };
+  writeFileSync(state, JSON.stringify({ listing }));
+  const log = join(dir, 'calls.jsonl');
+  const env = { HOME: dir, PATH: `${bin}:${process.env.PATH}`, MULTIPROMPT_HOST: '0', MB_MOVE_STATE: state, MB_MOVE_LOG: log };
+  const call = async args => {
+    const lines = [], errors = [];
+    const code = await run(args, {
+      env, out: line => lines.push(line), err: line => errors.push(line),
+      fetch() { assert.fail('move must not write the account service'); }
+    });
+    return { code, lines, errors };
+  };
+  const first = await call(['move', 'Move Me', '--workspace', 'Away']);
+  assert.equal(first.code, 0, text(first));
+  const second = await call(['move', 'Move Me', '--workspace', 'Away']);
+  assert.equal(second.code, 0, text(second));
+  assert.deepEqual(second.lines, first.lines);
+  let placed = JSON.parse(readFileSync(state, 'utf8')).listing.workspaces;
+  assert.deepEqual(placed[1].tabs.map(tab => tab.id), [40]);
+  assert.deepEqual(placed[0].tabs, []);
+  const grouped = await call(['move', 'Move Me', '--group', 'Ops']);
+  assert.equal(grouped.code, 0, text(grouped));
+  const again = await call(['move', 'Move Me', '--group', 'Ops']);
+  assert.equal(again.code, 0, text(again));
+  assert.deepEqual(again.lines, grouped.lines);
+  placed = JSON.parse(readFileSync(state, 'utf8')).listing.workspaces;
+  assert.deepEqual(placed[1].groups[0].tabs.map(tab => tab.id), [40]);
+  const moves = readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line)).filter(call => call[0] === 'session-move');
+  assert.equal(moves.length, 4);
+  assert.deepEqual(moves[0], moves[1]);
+  assert.deepEqual(moves[2], moves[3]);
+  rmSync(dir, { recursive: true, force: true });
 });
 
 test('groups are refused before tmux when the service does not advertise them', async () => {

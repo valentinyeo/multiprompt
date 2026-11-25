@@ -88,7 +88,7 @@ pub fn spanAt(text: []const u16, pos: usize, chats: []const Chat) ?Span {
 pub fn plainNameLinkAt(text: []const u16, pos: usize) ?struct { start: usize, end: usize } {
     if (pos >= text.len or !boundary(text, pos)) return null;
     var order: [app.MAX_SHELLS]u16 = undefined;
-    const chats = currentLive(null);
+    const chats = currentLive();
     const n = @min(chats.len, order.len);
     for (0..n) |i| order[i] = @intCast(i);
     var i: usize = 0;
@@ -123,7 +123,7 @@ pub fn plainNameLinkAt(text: []const u16, pos: usize) ?struct { start: usize, en
 }
 
 pub fn liveSessionForName(name: []const u16) ?[]const u8 {
-    for (currentLive(null)) |chat| {
+    for (currentLive()) |chat| {
         if (sameName(name, chat.name)) return chat.session;
     }
     return null;
@@ -344,14 +344,13 @@ fn pickChats() []const Chat {
 }
 
 pub fn apply(text: []const u16, out: []u16) []const u16 {
-    return annotate(text, pickChats(), currentLive(null), out);
+    return annotate(text, pickChats(), currentLive(), out);
 }
 
-pub fn currentLive(exclude: ?u32) []const Chat {
+pub fn currentLive() []const Chat {
     var n: usize = 0;
     var i: u32 = 0;
     while (i < app.shell_count and n < live_list.len) : (i += 1) {
-        if (exclude) |skip| if (skip == i) continue;
         const shell = &app.shells[i];
         if (shell.name_len == 0 or shell.name_len > shell.name.len or shell.tmux_session_len == 0 or shell.tmux_session_len > shell.tmux_session.len) continue;
         const session = shell.tmux_session[0..shell.tmux_session_len];
@@ -365,8 +364,8 @@ pub fn currentLive(exclude: ?u32) []const Chat {
     return live_list[0..n];
 }
 
-pub fn show(exclude: ?u32, query: []const u8) []const Chat {
-    const chats = currentLive(exclude);
+pub fn show(query: []const u8) []const Chat {
+    const chats = currentLive();
     var entries: [app.MAX_SHELLS]complete.Entry = undefined;
     const n = @min(chats.len, entries.len);
     for (chats[0..n], 0..) |chat, i| {
@@ -680,12 +679,18 @@ pub fn providerName(agent: u8) []const u8 {
 
 const mention_for_you = std.unicode.utf8ToUtf16LeStringLiteral(". This message is for you. Context:\n\n");
 const mention_fyi_only = std.unicode.utf8ToUtf16LeStringLiteral(" (FYI only; read along, do not act unless asked). Context:\n\n");
+const mention_source_lead = std.unicode.utf8ToUtf16LeStringLiteral("\n\n(Valentin wrote this to you. It also mentions ");
 const mention_source_mark = std.unicode.utf8ToUtf16LeStringLiteral("\n\n(This line is addressed to ");
 
 pub fn trimWireNote(text: []const u16) []const u16 {
-    const mark = mention_source_mark[0..mention_source_mark.len];
-    const idx = std.mem.lastIndexOf(u16, text, mark) orelse return text;
-    return text[0..idx];
+    var cut: usize = 0;
+    var found = false;
+    for ([_][]const u16{ mention_source_lead, mention_source_mark }) |mark| {
+        const idx = std.mem.lastIndexOf(u16, text, mark) orelse continue;
+        if (!found or idx > cut) cut = idx;
+        found = true;
+    }
+    return if (found) text[0..cut] else text;
 }
 
 pub fn mentionContextTail(blocks: []const ChatBlock, text: []const u16, omit_trailing_user: bool, out: []u8) ?[]const u8 {
@@ -731,7 +736,7 @@ pub fn mentionContextTail(blocks: []const ChatBlock, text: []const u16, omit_tra
 
 pub fn mentionSourceNote(targets: []const Chat, out: []u16) ?[]const u16 {
     if (targets.len == 0) return null;
-    const lead = "\n\n(This line is addressed to ";
+    const lead = "\n\n(Valentin wrote this to you. It also mentions ";
     var w: usize = appendAscii(out, 0, lead) orelse return null;
     for (targets, 0..) |chat, i| {
         if (i > 0) {
@@ -741,15 +746,15 @@ pub fn mentionSourceNote(targets: []const Chat, out: []u16) ?[]const u16 {
         w = appendUtf8(out, w, chat.name) orelse return null;
     }
     const mid = if (targets.len == 1)
-        " and was already delivered to it. Do not answer for "
+        ", which already got its own copy. Answer it as your own message, but do not answer for "
     else
-        " and was already delivered to them. Do not answer for ";
+        ", which already got their own copies. Answer it as your own message, but do not answer for ";
     w = appendAscii(out, w, mid) orelse return null;
     for (targets, 0..) |chat, i| {
         if (i > 0) w = appendAscii(out, w, if (i + 1 == targets.len) " or " else ", ") orelse return null;
         w = appendUtf8(out, w, chat.name) orelse return null;
     }
-    w = appendAscii(out, w, " or relay it unless you are also asked.)") orelse return null;
+    w = appendAscii(out, w, " or relay it.)") orelse return null;
     return out[0..w];
 }
 
@@ -875,7 +880,7 @@ test "IGSH-1811 @ names another live chat and the sent text keeps its session" {
     try std.testing.expect(annotate(plain, &.{}, &chats, &same).ptr == plain.ptr);
 }
 
-test "IGSH-1811 the list is other live chats filtered by the typed name" {
+test "IGSH-1811 the list is live chats filtered by the typed name" {
     const Snap = struct { name: [64]u16, name_len: u32, session: [64]u8, session_len: u32, chat_view_on: bool };
     const count = app.shell_count;
     var prior: [4]Snap = undefined;
@@ -906,15 +911,20 @@ test "IGSH-1811 the list is other live chats filtered by the typed name" {
     set.chat(2, "Terminal", "term-main");
     set.chat(3, "Multi Bot Android", "multiprompt-android");
     app.shells[3].chat_view_on = true;
-    const rows = show(0, "sf");
+    const rows = show("sf");
     try std.testing.expectEqual(@as(usize, 1), rows.len);
     try std.testing.expectEqualStrings("SF Design Lead", rows[0].name);
     try std.testing.expectEqualStrings("live-design", rows[0].session);
     try std.testing.expectEqual(@as(u32, 1), rows[0].index);
-    try std.testing.expectEqual(@as(usize, 1), show(0, "sf").len);
-    try std.testing.expectEqual(@as(usize, 0), show(0, "missing").len);
-    try std.testing.expectEqual(@as(usize, 3), show(null, "").len);
-    const android = show(0, "multi");
+    try std.testing.expectEqual(@as(usize, 1), show("sf").len);
+    try std.testing.expectEqual(@as(usize, 0), show("missing").len);
+    try std.testing.expectEqual(@as(usize, 3), show("").len);
+    const self_row = show("this");
+    try std.testing.expectEqual(@as(usize, 1), self_row.len);
+    try std.testing.expectEqualStrings("This chat", self_row[0].name);
+    try std.testing.expectEqualStrings("live-here", self_row[0].session);
+    try std.testing.expectEqual(@as(u32, 0), self_row[0].index);
+    const android = show("multi");
     try std.testing.expectEqual(@as(usize, 1), android.len);
     try std.testing.expectEqualStrings("multiprompt-android", android[0].session);
 }
@@ -1222,4 +1232,51 @@ test "MUBO-247 real mention shapes separate addressing, reference, fyi and unsur
     try std.testing.expectEqualStrings("live-builder", comma_deliveries[0].chat.session);
     try std.testing.expectEqual(DeliveryKind.fyi, comma_deliveries[1].kind);
     try std.testing.expectEqualStrings("live-ops", comma_deliveries[1].chat.session);
+}
+
+test "MUBO-454 the typing chat answers the line that mentions another chat" {
+    const chats = [_]Chat{
+        .{ .name = "A", .session = "live-a", .index = 0 },
+        .{ .name = "X", .session = "live-x", .index = 1 },
+        .{ .name = "Y", .session = "live-y", .index = 2 },
+    };
+    var storage: [16][640]u16 = undefined;
+    var slot: usize = 0;
+    const w = struct {
+        fn next(store: [][640]u16, used: *usize, text: []const u8) []const u16 {
+            const buf = &store[used.*];
+            used.* += 1;
+            return utf16(text, buf);
+        }
+    }.next;
+    const typed = w(&storage, &slot, "@X{live-x} ship it");
+    var targets: [4]Chat = undefined;
+    const found = mentionTargets(typed, "live-a", &chats, &targets);
+    try std.testing.expectEqual(@as(usize, 1), found.len);
+    try std.testing.expectEqualStrings("live-x", found[0].session);
+    var suffix_buf: [512]u16 = undefined;
+    const suffix = mentionSourceNote(found, &suffix_buf).?;
+    const want = w(&storage, &slot, "\n\n(Valentin wrote this to you. It also mentions X, which already got its own copy. Answer it as your own message, but do not answer for X or relay it.)");
+    try std.testing.expectEqualSlices(u16, want, suffix);
+    var wire_buf: [1024]u16 = undefined;
+    const wire = composeWireText("live-a", &chats, typed, &wire_buf);
+    try std.testing.expect(std.mem.endsWith(u16, wire, want));
+    try std.testing.expect(std.mem.eql(u16, trimWireNote(wire), typed));
+    const old_wire = w(&storage, &slot, "@X{live-x} ship it\n\n(This line is addressed to X and was already delivered to it. Do not answer for X or relay it unless you are also asked.)");
+    try std.testing.expect(std.mem.eql(u16, trimWireNote(old_wire), typed));
+    const two = w(&storage, &slot, "@X{live-x} and @Y{live-y} ship it");
+    const two_targets = mentionTargets(two, "live-a", &chats, &targets);
+    try std.testing.expectEqual(@as(usize, 2), two_targets.len);
+    const two_suffix = mentionSourceNote(two_targets, &suffix_buf).?;
+    const two_want = w(&storage, &slot, "\n\n(Valentin wrote this to you. It also mentions X and Y, which already got their own copies. Answer it as your own message, but do not answer for X or Y or relay it.)");
+    try std.testing.expectEqualSlices(u16, two_want, two_suffix);
+    const self_typed = w(&storage, &slot, "@A{live-a} note to me");
+    var deliveries_buf: [4]Delivery = undefined;
+    try std.testing.expectEqual(@as(usize, 0), mentionTargets(self_typed, "live-a", &chats, &targets).len);
+    try std.testing.expectEqual(@as(usize, 0), mentionDeliveries(self_typed, "live-a", &chats, &deliveries_buf).len);
+    try std.testing.expect(std.mem.eql(u16, composeWireText("live-a", &chats, self_typed, &wire_buf), self_typed));
+    var note_buf: [640]u16 = undefined;
+    const x_note = mentionNote("A", w(&storage, &slot, "@X ship it"), "", &note_buf).?;
+    const x_want = w(&storage, &slot, "Valentin mentioned you in A. This message is for you. Context:\n\n@X ship it");
+    try std.testing.expectEqualSlices(u16, x_want, x_note);
 }

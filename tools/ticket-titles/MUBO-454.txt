@@ -1,0 +1,1 @@
+A message mentioning other chats still counts for this chat

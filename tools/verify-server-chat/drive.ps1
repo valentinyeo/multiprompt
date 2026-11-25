@@ -16,8 +16,6 @@ $settings = Join-Path $profile 'roaming/ZigShell'
 $actions = [Collections.Generic.List[object]]::new()
 $result = @{ feature = 'server-chat'; status = 'failed'; version = $ExpectedVersion; sha256 = $ExpectedHash; cases = @(); agentBoundary = 'Real Windows app, Windows OpenSSH, WSL Linux OpenSSH server, tmux and production host/reader. Only the paid Claude process is a deterministic stream-json provider. Clear proves server receipt and a subsequent reply, not Claude context erasure.' }
 $job = $null
-$recorder = $null
-$writer = $null
 Start-Transcript "$Evidence/driver.log"
 function Save($Value, [string]$Path) { [IO.File]::WriteAllText($Path, ($Value | ConvertTo-Json -Depth 15), [Text.UTF8Encoding]::new($false)) }
 function Wait-For([string]$Name, [scriptblock]$Check, [int]$Seconds = 90) {
@@ -53,6 +51,10 @@ function Press([int[]]$Keys, [string]$Label) {
 function Type-Text([string]$Text) {
     $actions.Add(@{ input = 'type'; text = $Text; at = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() })
     foreach ($letter in $Text.ToCharArray()) { Doctor; [ChatDeliveryDesktop]::Character($letter); Start-Sleep -Milliseconds 20 }
+}
+function Reply-Count([string]$Text, [string]$Reply) {
+    if ([string]::IsNullOrEmpty($Reply)) { return 0 }
+    return ([regex]::Matches($Text, [regex]::Escape($Reply))).Count
 }
 function Copy-Chat([string]$Name) {
     $offset = (Log-Text).Length
@@ -100,14 +102,6 @@ try {
     Add-Type -Path "$PSScriptRoot/../verify-chat-delivery/desktop.cs"
     Add-Type -Path "$PSScriptRoot/../verify-chat-delivery/job.cs"
     [void][ChatDeliveryDesktop]::SetThreadDpiAwarenessContext([IntPtr](-4))
-    $recorder = [Diagnostics.Process]::new()
-    $recorder.StartInfo = [Diagnostics.ProcessStartInfo]::new((Get-Command ffmpeg.exe).Source, "-y -f gdigrab -framerate 10 -i desktop -c:v libx264 -preset ultrafast -pix_fmt yuv420p `"$Evidence/journey.mp4`"")
-    $recorder.StartInfo.UseShellExecute = $false
-    $recorder.StartInfo.RedirectStandardInput = $true
-    $recorder.StartInfo.RedirectStandardError = $true
-    [void]$recorder.Start()
-    $videoLog = $recorder.StandardError.ReadToEndAsync()
-    $writer = $recorder.StandardInput
     $job = [VerifyJob]::new()
     $app = $job.Start($Exe, $profile, "$Evidence/stdout.log", "$Evidence/stderr.log", '--no-window-restore')
     $main = Wait-For 'owned app window' { $h = [ChatDeliveryDesktop]::Window($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
@@ -118,14 +112,31 @@ try {
     if (-not $opened.Contains('Server received: server seed')) { throw 'Open did not show the real server reply' }
     Shot 'open'
     $result.cases += @{ name = 'open'; passed = $true; detail = 'Copied the host-persisted seed reply from the real UI' }
+    $replies = @('Server received: server seed')
     foreach ($case in @(@{ name = 'send'; text = 'windows send proof' }, @{ name = 'clear'; text = '/clear' }, @{ name = 'after-clear'; text = 'windows after clear' })) {
         Send-Line $case.text
         $wireText = if ($case.name -eq 'clear') { '/clear ' } else { $case.text }
         [void](Wait-For ('server receipt for ' + $case.name) { $snapshot = Server-Snapshot ($case.name + '-server'); @($snapshot.inputs | Where-Object { $_.text -ceq $wireText }).Count -eq 1 })
-        [void](Wait-For ('painted reply for ' + $case.name) { (Copy-Chat ($case.name + '-copied')).Contains('Server received: ' + $case.text) } 30)
+        [void](Wait-For ('painted reply for ' + $case.name) { (Reply-Count (Copy-Chat ($case.name + '-copied')) ('Server received: ' + $case.text)) -eq 1 } 30)
         Shot $case.name
+        $replies += 'Server received: ' + $case.text
         $result.cases += @{ name = $case.name; passed = $true; detail = 'Exactly one provider receipt over real SSH and a copied rendered reply' }
     }
+    $reloadOffset = (Log-Text).Length
+    Press @(0x11, 0x4B) 'Ctrl+K: open command palette'
+    [void](Wait-For 'palette ready before resync' { (Log-Text).Substring($reloadOffset) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
+    Type-Text 'resync chat'
+    [void](Wait-For 'resync command' { (Log-Text).Substring($reloadOffset) -match '\[palette\] ready chars=11 count=1 target=6493(?:\s|$)' })
+    Press @(0x0D) 'Enter: resync the transcript from the server'
+    [void](Wait-For 'resync requested' { (Log-Text).Substring($reloadOffset) -match '\[chat\] resync requested' })
+    [void](Wait-For 'server transcript reloaded' { (Log-Text).Substring($reloadOffset) -match '\[chat\] transcript load shell=\d+ ok' })
+    $reloaded = Copy-Chat 'reloaded-copied'
+    foreach ($reply in $replies) {
+        $count = Reply-Count $reloaded $reply
+        if ($count -ne 1) { throw ('Reloaded Chat View showed ' + $reply + ' ' + $count + ' times') }
+    }
+    Shot 'reloaded'
+    $result.cases += @{ name = 'reload'; passed = $true; detail = 'Resyncing the transcript from the server shows every server reply once' }
     Save @{ pid = $app.Id; hwnd = $main.ToInt64(); exe = $app.Path; sha256 = $ExpectedHash; visible = $true } "$Evidence/doctor.json"
     $result.status = 'passed'
 } catch {
@@ -134,14 +145,6 @@ try {
     throw
 } finally {
     if ($null -ne $job) { $cleanup = $job.Stop(); $result.cleanup = @{ activeAfterStop = $cleanup.ActiveProcesses }; $job.Dispose() }
-    if ($null -ne $recorder) {
-        $writer.WriteLine('q')
-        if (-not $recorder.WaitForExit(15000)) { $recorder.Kill(); $recorder.WaitForExit() }
-        [IO.File]::WriteAllText("$Evidence/video.log", $videoLog.GetAwaiter().GetResult())
-        $result.videoExit = $recorder.ExitCode
-        if ($recorder.ExitCode -ne 0 -or -not (Test-Path "$Evidence/journey.mp4") -or (Get-Item "$Evidence/journey.mp4").Length -lt 1024) { $result.status = 'failed'; $result.error = 'Video recording failed' }
-        $recorder.Dispose()
-    }
     if (Test-Path "$settings/debug.log") { Copy-Item "$settings/debug.log" "$Evidence/debug.log" }
     try {
         $linuxEvidence = (Invoke-ServerNative -FilePath wsl.exe -Arguments @('-d', 'Ubuntu-24.04', '-u', 'root', '--exec', 'wslpath', '-a', $Evidence) -Evidence $Evidence -Name 'evidence-path').Trim()

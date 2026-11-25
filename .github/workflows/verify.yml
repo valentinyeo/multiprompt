@@ -136,6 +136,10 @@ on:
       revision:
         required: false
         type: string
+      video_label:
+        description: Name the PR comparison clip before or after
+        required: false
+        type: string
       app_revision:
         required: false
         type: string
@@ -293,17 +297,7 @@ jobs:
           key: ${{ runner.os }}-zig-toolchain-0.16.0
       - name: Install Zig 0.16.0
         if: inputs.tag == ''
-        shell: pwsh
-        run: |
-          if (-not (Test-Path "$env:RUNNER_TEMP\zig-x86_64-windows-0.16.0\zig.exe")) {
-            $zip = "$env:RUNNER_TEMP\zig.zip"
-            Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $zip
-            $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
-            if ($hash -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw "zig checksum mismatch: $hash" }
-            tar -xf $zip -C $env:RUNNER_TEMP
-            if ($LASTEXITCODE -ne 0) { throw 'zig extraction failed' }
-          }
-          "$env:RUNNER_TEMP\zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+        uses: ./.github/actions/setup-zig
       - name: Cache Zig compilation
         if: inputs.tag == ''
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
@@ -391,11 +385,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install Zig 0.16.0
-        run: |
-          curl -fsSL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o "$RUNNER_TEMP/zig.tar.xz"
-          echo "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  $RUNNER_TEMP/zig.tar.xz" | sha256sum -c -
-          tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
-          echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
+        uses: ./.github/actions/setup-zig
       - name: Build the real audit renderer
         run: zig build chat-audit
       - name: Record renderer file evidence
@@ -501,7 +491,7 @@ jobs:
           if-no-files-found: error
       - name: Check verification contracts
         continue-on-error: true
-        run: node --test --test-concurrency=1 tools/verify-multiprompt.test.js tools/live-chat-pane.test.js tools/live-chat-pane-relay.test.js tools/chat-shape-switch.test.js tools/chat-width-proof.test.mjs tools/title-bar.test.js tools/window-controls.test.js tools/chat-view-everywhere.test.js tools/chat-focus.test.js tools/chat-dictation.test.js tools/grok-chat.test.js tools/chat-view-everywhere-policy.test.js tools/verify-chat-delivery.test.js tools/favorites-groups.test.js tools/check-browser-pane-locked.test.js tools/start-maximized.test.js tools/browser-switch-speed.test.js tools/frozen-wake.test.js tools/session-caret.test.js tools/browser-pane-hibernation.test.js tools/browser-own-profile.test.js tools/screenshot-upload-receiver.test.js tools/chat-code-font-proof.test.js tools/chat-composer-text-proof.test.js tools/chat-messages-only-proof.test.mjs tools/chat-messages-only-proof.test.js tools/chat-history-retention-proof.test.mjs tools/chat-retention-arrival-order.test.js tools/capture-usage-pace.test.js tools/usage-pace-ink.test.js
+        run: node --test --test-concurrency=1 tools/verify-multiprompt.test.js tools/live-chat-pane.test.js tools/live-chat-pane-relay.test.js tools/chat-shape-switch.test.js tools/chat-width-proof.test.mjs tools/title-bar.test.js tools/window-controls.test.js tools/chat-view-everywhere.test.js tools/chat-focus.test.js tools/chat-dictation.test.js tools/chat-dictation-switch.test.js tools/grok-chat.test.js tools/chat-view-everywhere-policy.test.js tools/verify-chat-delivery.test.js tools/favorites-groups.test.js tools/check-browser-pane-locked.test.js tools/start-maximized.test.js tools/browser-switch-speed.test.js tools/frozen-wake.test.js tools/session-caret.test.js tools/browser-pane-hibernation.test.js tools/browser-own-profile.test.js tools/screenshot-upload-receiver.test.js tools/chat-code-font-proof.test.js tools/chat-composer-text-proof.test.js tools/chat-messages-only-proof.test.mjs tools/chat-messages-only-proof.test.js tools/chat-history-retention-proof.test.mjs tools/chat-retention-arrival-order.test.js tools/capture-usage-pace.test.js tools/usage-pace-ink.test.js
       - name: Check remote sync proof oracle
         continue-on-error: true
         run: node --test tools/chat-remote-sync-proof.test.mjs tools/remote-switch-proof.test.mjs tools/chat-missing-note-proof.test.mjs
@@ -530,8 +520,7 @@ jobs:
           distribution: Ubuntu-24.04
           wsl-version: '2'
           additional-packages: openssh-server tmux python3
-      - name: Install browser toggle recorder
-        if: env.FEATURE == 'browser-pane-stuck' || env.FEATURE == 'appearance' || env.FEATURE == 'command-palette' || env.FEATURE == 'server-chat' || inputs.candidate_artifact != ''
+      - name: Install journey video recorder
         uses: ./.github/actions/install-ffmpeg
         with:
           version: '7.1.1'
@@ -550,7 +539,7 @@ jobs:
           node tools/verify-features.cjs $env:FEATURE
           if ($LASTEXITCODE -ne 0) { throw 'Unsupported desktop journey' }
           if ($env:FEATURE -eq 'appearance' -and $env:GITHUB_EVENT_NAME -eq 'push' -and $env:GITHUB_REF -eq 'refs/heads/master' -and $env:HEAD_COMMIT_MESSAGE.Split([char]10)[0].Contains('IGSH-837 red proof') -and -not $env:HEAD_COMMIT_MESSAGE.StartsWith('Revert')) { throw 'IGSH-837 deliberate red master proof' }
-          if ($env:FEATURE -eq 'chat-dictation' -and $env:RELEASE_TAG) { throw 'Chat dictation requires the branch offline fixture boundary' }
+          if ($env:FEATURE -in @('chat-dictation', 'chat-dictation-switch') -and $env:RELEASE_TAG) { throw 'Chat dictation requires the branch offline fixture boundary' }
           if ($env:CHAT_MODEL_PROOF -eq '1' -and $env:RELEASE_TAG) { throw 'Chat model proof requires the branch build' }
           if ($env:CHAT_SHAPE_PROOF -eq '1' -and $env:FEATURE -ne 'chat-switch-speed') { throw 'Shape proof requires chat-switch-speed' }
           if ($env:CHAT_SWITCH_PROFILE -eq '1' -and $env:CHAT_SHAPE_PROOF -ne '1' -and $env:CHAT_SWITCH_PROOF -ne '1') { throw 'Switch profile requires a native switching journey' }
@@ -597,15 +586,7 @@ jobs:
           key: ${{ runner.os }}-zig-toolchain-0.16.0
       - name: Install Zig 0.16.0
         if: env.RELEASE_TAG == '' || env.FEATURE == 'session-actions' || env.FEATURE == 'chat-delivery' || env.FEATURE == 'chat-startup-failure' || env.FEATURE == 'composer-buttons' || env.FEATURE == 'chat-working' || env.FEATURE == 'chat-view' || env.FEATURE == 'chat-messages-only' || env.FEATURE == 'chat-full-history' || env.FEATURE == 'chat-newest' || env.FEATURE == 'tmux-binding' || env.CHAT_SHAPE_PROOF == '1' || env.FEATURE == 'chat-options' || env.FEATURE == 'chat-slash' || env.FEATURE == 'permission-rows' || env.USAGE_PACE_PROOF == '1'
-        shell: pwsh
-        run: |
-          if (-not (Test-Path "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0/zig.exe")) {
-            $zip = "$env:RUNNER_TEMP/zig.zip"
-            Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $zip
-            if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
-            Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP
-          }
-          "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+        uses: ./.github/actions/setup-zig
       - name: Test maximized startup decision
         if: env.FEATURE == 'appearance' && env.RELEASE_TAG == ''
         run: zig test src/launch_plan.zig --test-filter IGSH-587
@@ -1031,12 +1012,10 @@ jobs:
           }
           if ($env:FEATURE -eq 'status-card' -and $env:USAGE_PACE_PROOF -eq '1') { $env:VERIFY_USAGE_PACE_FILE = "$pwd/tools/fixtures/IGSH-1190/normal.json" }
           $mapped = @{ appearance = 'settings-appearance'; 'command-palette' = 'palette' }
-          if ($env:VERIFY_CANDIDATE_ARTIFACT) {
-            & .claude/skills/verify-multiprompt/drive.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
-          } elseif ($mapped.ContainsKey($env:FEATURE)) {
+          if ($mapped.ContainsKey($env:FEATURE)) {
             & .claude/skills/verify-multiprompt/drive.ps1 -Feature $mapped[$env:FEATURE] -Journey $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
           } else {
-            & .claude/skills/verify-multiprompt/control.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
+            & .claude/skills/verify-multiprompt/drive.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
           }
           if ($env:FEATURE -eq 'status-card' -and $env:USAGE_PACE_PROOF -eq '1') {
             $env:VERIFY_USAGE_PACE_FILE = "$pwd/tools/fixtures/IGSH-1190/full.json"
@@ -1156,8 +1135,7 @@ jobs:
         timeout-minutes: ${{ env.FEATURE == 'live-chat-pane' && 60 || 30 }}
         shell: powershell
         run: |
-          $driver = if ($env:VERIFY_CANDIDATE_ARTIFACT) { '.claude/skills/verify-multiprompt/drive.ps1' } else { '.claude/skills/verify-multiprompt/control.ps1' }
-          & $driver -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
+          & .claude/skills/verify-multiprompt/drive.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
       - name: Check real-shape observations after owned cleanup
         if: always() && env.CHAT_SHAPE_PROOF == '1'
         run: |
@@ -1188,6 +1166,15 @@ jobs:
             }
             $failure | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 evidence/result.json
           }
+      - name: Preserve the comparison video
+        if: always() && inputs.video_label != ''
+        shell: pwsh
+        env:
+          VIDEO_LABEL: ${{ inputs.video_label }}
+        run: |
+          if ($env:VIDEO_LABEL -notin @('before', 'after')) { throw 'Unknown comparison video label' }
+          if (-not (Test-Path evidence/journey.mp4) -or (Get-Item evidence/journey.mp4).Length -eq 0) { throw 'Journey video is missing' }
+          Copy-Item evidence/journey.mp4 "evidence/$env:VIDEO_LABEL.mp4"
       - name: Upload durable verification evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

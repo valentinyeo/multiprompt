@@ -66,7 +66,7 @@ if ($Feature -eq 'antigravity-chats') {
     $env:CHAT_ANTIGRAVITY_PROOF = '1'
     $plans = @(@{name='antigravity-chats'; mode='idle'; text='antigravity switch draft'})
 }
-if ($env:CHAT_WORKING_LIVE_PROOF -eq '1') { $plans = @(@{name='working-live'; mode='busy'; text='Show the hosted working indicator'}, @{name='steady-live'; mode='idle'; text='Read while a reply streams'}) }
+if ($env:CHAT_WORKING_LIVE_PROOF -eq '1') { $plans = @(@{name='working-live'; mode='busy'; text='/teach Show the hosted working indicator'}, @{name='steady-live'; mode='idle'; text='Read while a reply streams'}) }
 $queueTexts = @{a='shell queued alpha'; b='chat queued beta'; a2='shell queued alpha edited'; shellDraft='shell draft gamma'; chatDraft='chat draft delta'; agentPaste="agent report line one`nagent report line two"; suggestion='Try asking about the next step'}
 if ($env:CHAT_CANCEL_PROOF -eq '1') { $plans = @(@{name='cancel-held'; mode='busy'; text='cancel keep one'}) }
 if ($env:CHAT_RECALL_PROOF -eq '1') { $plans = @(@{name='recall-handed'; mode='idle'; text='recall keep one'}) }

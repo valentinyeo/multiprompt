@@ -78,7 +78,7 @@ const chatMention = `pub const Chat = struct { name: []const u8 = "", session: [
 pub const Span = struct { start: usize = 0, visible_end: usize = 0, end: usize = 0 };
 pub const DeliveryKind = enum { address, fyi };
 pub const Delivery = struct { chat: Chat = .{}, kind: DeliveryKind = .address };
-pub fn currentLive(_: ?u32) []const Chat {
+pub fn currentLive() []const Chat {
     return &.{};
 }
 pub fn spanAt(_: []const u16, _: usize, _: []const Chat) ?Span {

@@ -75,7 +75,7 @@ test('the sign-in page check is service-filtered, bounded and Linux-only', () =>
 });
 
 test('heavy workflows run nightly and manually, not on pull requests', () => {
-  const allowed = new Set(['test.yml', 'gitleaks.yml', 'no-comments.yml', 'pr-verifier.yml', 'emergency-lane.yml', 'chat-delivery-formal.yml', 'chat-switch-ai-formal.yml', 'chat-auto-switch.yml', 'ci-repair-receipt.yml', 'verify-cli.yml', 'service-route-receipt.yml', 'signin-page.yml', 'mp-sessions-slots.yml']);
+  const allowed = new Set(['test.yml', 'gitleaks.yml', 'no-comments.yml', 'pr-verifier.yml', 'emergency-lane.yml', 'chat-delivery-formal.yml', 'chat-switch-ai-formal.yml', 'chat-auto-switch.yml', 'ci-repair-receipt.yml', 'verify-cli.yml', 'service-route-receipt.yml', 'signin-page.yml', 'mp-sessions-slots.yml', 'agent-feedback.yml']);
   for (const file of fs.readdirSync(path.join(root, '.github/workflows')).filter(file => file.endsWith('.yml'))) {
     const source = fs.readFileSync(path.join(root, '.github/workflows', file), 'utf8');
     if (/^  pull_request:/m.test(source)) assert.ok(allowed.has(file), file);
@@ -102,6 +102,11 @@ test('formal delivery PR checks stay bounded, source-filtered and Linux-only', (
   assert.match(formal, /check\.py --self-test --inherit-from/);
   assert.doesNotMatch(workflow, /windows-latest|uses: .*verify\.yml/);
   assert.match(workflow.split('\n  comment-review:\n')[1], /if: github.event_name == 'workflow_dispatch'/);
+  const review = workflow.split('\n  comment-review:\n')[1];
+  assert.match(review, /uses: valentinyeo\/token-ladder\/\.github\/actions\/ladder-agent@[0-9a-f]{40}\n/, 'the comment review runs through the token ladder');
+  assert.match(review, /python3 token-ladder\/ci\/model_families\.py/, 'the excluded family is read from the pull request body');
+  assert.match(review, /exclude-families: \$\{\{ steps\.author\.outputs\.families \}\}/, 'the comment review excludes the author model family');
+  assert.doesNotMatch(workflow, /claude-code-action|CLAUDE_CODE_OAUTH_TOKEN/, 'the comment review keeps no direct AI tool');
 });
 
 test('PR performance probes are nightly and do not block the cheap aggregate', () => {

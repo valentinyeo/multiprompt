@@ -789,7 +789,7 @@ test('browser emulation map drives the real native CLI and extension only on Git
   const map = read(skill + 'features/browser-emulation.md');
   assert.match(workflow, /node tools\/verify-features.cjs \$env:FEATURE/);
   assert.ok(featureMatrix(workflow).available.includes('browser-emulation'));
-  assert.match(workflow, /control\.ps1 -Feature \$env:FEATURE/);
+  assert.match(workflow, /drive\.ps1 -Feature \$env:FEATURE/);
   assert.match(control, /browserJob\.Start\(\$node/);
   assert.match(control, /activeAfterStop = \$stopped\.ActiveProcesses/);
   assert.match(driver, /assert\.equal\(process\.env\.GITHUB_ACTIONS, 'true'/);
@@ -2790,6 +2790,15 @@ test('SOFT-2762 a failed server-open-group run reports the real error and step',
   const early = physical.slice(physical.indexOf("        'server-open-group' {"), physical.indexOf("Write-Host 'Launch: loading native verification helpers'"));
   assert.match(early, /'control-feature-server-open-group\.ps1'\)\r?\n\s*\}/, 'the dispatcher body stays a plain route');
   assert.match(early, /if \(\$Feature -eq 'server-open-group'\) \{ return \}/, 'this journey owns launch and must not fall through to the generic launch');
+});
+
+test('a transient session-file lock is retried instead of failing the server-open-group journey', () => {
+  const driver = read(skill + 'control-feature-server-open-group.ps1');
+  const reader = driver.slice(driver.indexOf('function Read-ServerGroupText('), driver.indexOf('function Get-ServerGroupSession('));
+  assert.match(reader, /\[IO\.FileShare\]::Delete/, 'the reader must not block the app replacing the session file');
+  assert.match(reader, /catch \[IO\.IOException\]/, 'a sharing violation must be retried, not raised as a journey failure');
+  assert.match(reader, /AddSeconds\(3\)/, 'the retry must be bounded');
+  assert.match(reader, /if \(\[DateTime\]::UtcNow -ge \$deadline\) \{ throw \}/, 'a lock that outlasts the wait still fails the journey');
 });
 
 test('SOFT-2713 bot-photo closes its tab with the id the app routes "close tab" to', () => {
