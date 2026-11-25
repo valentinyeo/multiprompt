@@ -582,7 +582,10 @@ test "cache-first switch-back pushed persistence" {
     defer captured_cache.deinit(a);
     try one.history.apply(a, "@mp\t1\thistory\tok\tsid\t0\t100\t9\t0\tclaude\tterm-1\n{\"role\":\"assistant\",\"id\":\"old\",\"text\":\"First reply\",\"offset\":0,\"end\":100}\n@@MP_END@@\n", 1, one.key);
     one.cache_written = 500;
-    ticks = 600;
+    // A pushed reply persists on its own within two seconds. An immediate push
+    // waits for that floor, so a reply arriving twice a second does not rewrite
+    // the whole parsed cache twice a second.
+    ticks = 2_600;
     var wire: std.ArrayList(u8) = .empty;
     try wire.appendSlice(a, "@mp\t2\thistory\tok\tsid\t100\t200\t9\t0\tclaude\tterm-1\t0\t" ++ ("a" ** 64) ++ "\tdelta\t0\n{\"role\":\"assistant\",\"id\":\"new\",\"text\":\"Pushed second reply\",\"offset\":100,\"end\":200}\n@@MP_END@@\n");
     chatFileFetchThread(&one, one.key, 2, false, .{ .wire = wire, .id = 2, .read_us = 0 });

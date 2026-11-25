@@ -1268,20 +1268,21 @@ pub fn chatHistoryFetchOnce(identity: @import("session_identity.zig").Session, q
 
 pub const PUSH_CACHE_WRITE_MS: u64 = 2_000;
 
-pub fn cacheWriteDue(staged: bool, dirty: bool, pushed: bool, written: u64, now: u64) bool {
+pub fn cacheWriteDue(staged: bool, dirty: bool, pushed: bool, written: u64, poll_ms: u64, now: u64) bool {
     if (staged or !dirty) return false;
-    if (written == 0 or now -| written >= chat_history.CACHE_WRITE_MS) return true;
+    if (written == 0 or now -| written >= poll_ms) return true;
     return pushed and now -| written >= PUSH_CACHE_WRITE_MS;
 }
 
 test "MUBO-17 a streamed reply persists its cache at most every two seconds" {
-    try std.testing.expect(!cacheWriteDue(false, true, true, 1_000, 1_500));
-    try std.testing.expect(cacheWriteDue(false, true, true, 1_000, 3_000));
-    try std.testing.expect(!cacheWriteDue(false, true, false, 1_000, 1_500));
-    try std.testing.expect(cacheWriteDue(false, true, false, 0, 10));
-    try std.testing.expect(cacheWriteDue(false, true, false, 1_000, 1_000 + chat_history.CACHE_WRITE_MS));
-    try std.testing.expect(!cacheWriteDue(true, true, true, 0, 10));
-    try std.testing.expect(!cacheWriteDue(false, false, true, 0, 10));
+    const poll = chat_history.CACHE_WRITE_MS;
+    try std.testing.expect(!cacheWriteDue(false, true, true, 1_000, poll, 1_500));
+    try std.testing.expect(cacheWriteDue(false, true, true, 1_000, poll, 3_000));
+    try std.testing.expect(!cacheWriteDue(false, true, false, 1_000, poll, 1_500));
+    try std.testing.expect(cacheWriteDue(false, true, false, 0, poll, 10));
+    try std.testing.expect(cacheWriteDue(false, true, false, 1_000, poll, 1_000 + chat_history.CACHE_WRITE_MS));
+    try std.testing.expect(!cacheWriteDue(true, true, true, 0, poll, 10));
+    try std.testing.expect(!cacheWriteDue(false, false, true, 0, poll, 10));
 }
 
 fn chatFileFetchThread(entry: *ChatHistoryEntry, key: chat_transcript.Identity, id: u32, load_disk: bool, pushed: ?ChatHistoryPush) void {
@@ -1405,7 +1406,7 @@ fn chatFileFetchThread(entry: *ChatHistoryEntry, key: chat_transcript.Identity, 
         const changed = !entry.staged and history.revision != entry.history.revision;
         entry.cache_dirty = entry.cache_dirty or changed;
         var path_buf: [560]u8 = undefined;
-        if (if (cacheWriteDue(entry.staged, entry.cache_dirty, pushed != null, entry.cache_written, GetTickCount64())) chatHistoryPath(key, &path_buf) else null) |path| {
+        if (if (cacheWriteDue(entry.staged, entry.cache_dirty, pushed != null, entry.cache_written, chat_history.CACHE_WRITE_MS, GetTickCount64())) chatHistoryPath(key, &path_buf) else null) |path| {
             var snapshot = history.cursor();
             defer snapshot.deinit(a);
             var snapshot_ok = true;
