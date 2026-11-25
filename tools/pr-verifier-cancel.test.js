@@ -97,13 +97,16 @@ else if (route.endsWith('/runs?per_page=100')) console.log(JSON.stringify([{ id:
   }
 });
 
-test('the verifier runs one head journey set and never schedules a base build', () => {
+test('the verifier records the same journeys on base and head with the head harness', () => {
   const workflow = fs.readFileSync(path.join(__dirname, '../.github/workflows/pr-verifier.yml'), 'utf8');
   assert.match(workflow, /tests:\n    needs: \[resolve, select, head\]/);
-  assert.match(workflow, /needs: \[tests, resolve, select, head\]/);
+  assert.match(workflow, /needs: \[tests, resolve, select, head, before\]/);
   assert.match(workflow, /head:\n    needs: \[resolve, select\]/);
   assert.doesNotMatch(workflow, /failed-head|base_features|base-journey-cache|base_cache/);
-  assert.equal([...workflow.matchAll(/uses: \.\/\.github\/workflows\/verify\.yml/g)].length, 1);
+  assert.equal([...workflow.matchAll(/uses: \.\/\.github\/workflows\/verify\.yml/g)].length, 2);
+  assert.match(workflow, /app_revision: \$\{\{ needs.resolve.outputs.base_tip_sha \}\}/);
+  assert.match(workflow, /video_label: before/);
+  assert.match(workflow, /video_label: after/);
 });
 
 const oldHead = 'a'.repeat(40);

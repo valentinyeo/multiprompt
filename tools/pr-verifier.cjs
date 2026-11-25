@@ -136,6 +136,7 @@ function describeRun(directory, name) {
       .map(item => JSON.stringify([item.name, item.detail])))].sort() : [],
     screenshots: files.filter(file => /\.png$/i.test(file)),
     videos: files.filter(file => /(?:^|\/)journey\.mp4$/i.test(file) && fs.statSync(path.join(directory, file)).size > 0),
+    comparisonVideos: files.filter(file => /(?:^|\/)(before|after)\.mp4$/i.test(file) && fs.statSync(path.join(directory, file)).size > 0),
     files: files.slice(0, 60),
   };
 }
@@ -202,14 +203,16 @@ function downloadFailures(evidenceDir) {
 
 function summarize(evidenceDir, features) {
   const names = fs.existsSync(evidenceDir) ? fs.readdirSync(evidenceDir, { withFileTypes: true }).filter(e => e.isDirectory()).map(e => e.name) : [];
-  const summary = { head: {} };
+  const summary = { head: {}, before: {} };
   for (const feature of features) {
     const pattern = featureDirPattern(feature);
     summary.head[feature] = [];
+    summary.before[feature] = [];
     for (const name of names.sort()) {
       const match = name.match(pattern);
-      if (!match || match[1]) continue;
-      summary.head[feature].push(describeRun(path.join(evidenceDir, name), name));
+      if (!match) continue;
+      const side = match[1] ? summary.before : summary.head;
+      side[feature].push(describeRun(path.join(evidenceDir, name), name));
     }
   }
   summary.downloadFailures = downloadFailures(evidenceDir);
@@ -374,9 +377,16 @@ function finalize({ verdict, headSha, summary, selection, runUrl, engine = 'clau
       (rows.every(row => row.head === 'passed') || rows.some(row => row.head !== 'passed' && !row.inherited))));
   const lostEvidence = Array.isArray(summary.downloadFailures) ? summary.downloadFailures : [];
   const missingVideos = selection.features.flatMap(feature => (summary.head?.[feature] || []).filter(run => run.videos?.length === 0).map(run => run.artifact || feature));
-  if (blocked.length || prerequisites.length || infrastructure.length || lostEvidence.length) {
+  const missingComparison = jobs.before ? selection.features.filter(feature => {
+    const heads = summary.head?.[feature] || [];
+    const befores = summary.before?.[feature] || [];
+    return !heads.length || heads.some(run => !run.comparisonVideos?.includes('after.mp4') || !befores.some(before =>
+      before.artifact.replace(/-[0-9a-f]{40}/, '') === run.artifact && before.comparisonVideos?.includes('before.mp4')));
+  }) : [];
+  if (blocked.length || prerequisites.length || infrastructure.length || lostEvidence.length || missingComparison.length) {
     final = 'BLOCKED';
     notes.push(...infrastructure);
+    if (missingComparison.length) notes.push(`Missing before.mp4 or after.mp4 for the same journey: ${missingComparison.join(', ')}.`);
     for (const item of lostEvidence) notes.push(`Evidence artifact ${item.artifact} could not be downloaded: ${item.error}.`);
     if (missingVideos.length) notes.push(`Missing journey.mp4 in evidence: ${missingVideos.join(', ')}.`);
     if (blocked.length) notes.push(`Journey verification blocked: ${blocked.map(row => `${row.feature} (head ${row.head})`).join(', ')}.`);
@@ -589,7 +599,8 @@ function resolve(env) {
     : gh(['api', `repos/${repo}/compare/${pr.baseRefName}...${pr.headRefOid}`, '--jq', '.merge_base_commit.sha']).trim();
   if (!/^[0-9a-f]{40}$/.test(baseSha)) throw new Error('Merge base not found');
   const { engine = '', problem = '' } = pickVerifier(pr.body);
-  setOutputs({ eligible: String(eligible), number: String(pr.number), head_sha: pr.headRefOid, base_sha: baseSha, base_ref: pr.baseRefName, engine, author_model_problem: problem });
+  const baseTipSha = gh(['api', `repos/${repo}/commits/${pr.baseRefName}`, '--jq', '.sha']).trim();
+  setOutputs({ eligible: String(eligible), number: String(pr.number), head_sha: pr.headRefOid, base_tip_sha: baseTipSha, base_sha: baseSha, base_ref: pr.baseRefName, engine, author_model_problem: problem });
 }
 
 function availableFeatures(env) {
@@ -630,7 +641,7 @@ function latestArtifacts(artifacts, selection) {
   for (const artifact of artifacts) {
     if (!selection.features.some(feature => {
       const match = artifact.name.match(featureDirPattern(feature));
-      return match && !match[1];
+      return match;
     })) continue;
     const previous = latest.get(artifact.name);
     if (!previous || artifact.created_at > previous.created_at ||

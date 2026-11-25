@@ -136,6 +136,10 @@ on:
       revision:
         required: false
         type: string
+      video_label:
+        description: Name the PR comparison clip before or after
+        required: false
+        type: string
       app_revision:
         required: false
         type: string
@@ -293,17 +297,7 @@ jobs:
           key: ${{ runner.os }}-zig-toolchain-0.16.0
       - name: Install Zig 0.16.0
         if: inputs.tag == ''
-        shell: pwsh
-        run: |
-          if (-not (Test-Path "$env:RUNNER_TEMP\zig-x86_64-windows-0.16.0\zig.exe")) {
-            $zip = "$env:RUNNER_TEMP\zig.zip"
-            Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $zip
-            $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
-            if ($hash -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw "zig checksum mismatch: $hash" }
-            tar -xf $zip -C $env:RUNNER_TEMP
-            if ($LASTEXITCODE -ne 0) { throw 'zig extraction failed' }
-          }
-          "$env:RUNNER_TEMP\zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+        uses: ./.github/actions/setup-zig
       - name: Cache Zig compilation
         if: inputs.tag == ''
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
@@ -391,11 +385,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install Zig 0.16.0
-        run: |
-          curl -fsSL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o "$RUNNER_TEMP/zig.tar.xz"
-          echo "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  $RUNNER_TEMP/zig.tar.xz" | sha256sum -c -
-          tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
-          echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
+        uses: ./.github/actions/setup-zig
       - name: Build the real audit renderer
         run: zig build chat-audit
       - name: Record renderer file evidence
@@ -596,15 +586,7 @@ jobs:
           key: ${{ runner.os }}-zig-toolchain-0.16.0
       - name: Install Zig 0.16.0
         if: env.RELEASE_TAG == '' || env.FEATURE == 'session-actions' || env.FEATURE == 'chat-delivery' || env.FEATURE == 'chat-startup-failure' || env.FEATURE == 'composer-buttons' || env.FEATURE == 'chat-working' || env.FEATURE == 'chat-view' || env.FEATURE == 'chat-messages-only' || env.FEATURE == 'chat-full-history' || env.FEATURE == 'chat-newest' || env.FEATURE == 'tmux-binding' || env.CHAT_SHAPE_PROOF == '1' || env.FEATURE == 'chat-options' || env.FEATURE == 'chat-slash' || env.FEATURE == 'permission-rows' || env.USAGE_PACE_PROOF == '1'
-        shell: pwsh
-        run: |
-          if (-not (Test-Path "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0/zig.exe")) {
-            $zip = "$env:RUNNER_TEMP/zig.zip"
-            Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $zip
-            if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
-            Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP
-          }
-          "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+        uses: ./.github/actions/setup-zig
       - name: Test maximized startup decision
         if: env.FEATURE == 'appearance' && env.RELEASE_TAG == ''
         run: zig test src/launch_plan.zig --test-filter IGSH-587
@@ -1179,6 +1161,15 @@ jobs:
             }
             $failure | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 evidence/result.json
           }
+      - name: Preserve the comparison video
+        if: always() && inputs.video_label != ''
+        shell: pwsh
+        env:
+          VIDEO_LABEL: ${{ inputs.video_label }}
+        run: |
+          if ($env:VIDEO_LABEL -notin @('before', 'after')) { throw 'Unknown comparison video label' }
+          if (-not (Test-Path evidence/journey.mp4) -or (Get-Item evidence/journey.mp4).Length -eq 0) { throw 'Journey video is missing' }
+          Copy-Item evidence/journey.mp4 "evidence/$env:VIDEO_LABEL.mp4"
       - name: Upload durable verification evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

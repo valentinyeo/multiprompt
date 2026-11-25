@@ -59,6 +59,7 @@ Full procedure and toolchain notes: [openwiki/operations/build-and-install.md](o
 | Keep code comment-free. | `tools/strip-comments.mjs --check` |
 | Cap Zig source files at 6000 lines; existing over-cap files may only shrink. | `tools/check-file-size.mjs`, `tools/file-size-baseline.json`; `--write` lowers limits after splits |
 | Journey evidence uploads run even when a run fails or is cancelled, and no step deletes them before the upload. | `tools/check-journey-evidence.mjs` runs `tools/check-journey-evidence.test.js` in `test.yml` |
+| Install Zig only through the cached, time-limited setup-zig action. | `tools/check-zig-download.mjs` |
 | Do not add Sleep, std.Thread.sleep or SetTimer quick fixes; use events or messages. | `tools/check-timer-ratchet.mjs`; `--write` lowers per-file limits after removals, never raises them |
 | A chat owned by another OS user starts with its own agent binary, retries a missing agent a few times, and never rotates the nightly restart inside an auto-update window. | `tools/chat-host-owner-binary.test.js` |
 | Bump the extension version when shipped extension files change. | `tools/check-extension-version.mjs` |
@@ -67,4 +68,4 @@ Full procedure and toolchain notes: [openwiki/operations/build-and-install.md](o
 | Merge titles come from the PR's changelog fragments, never from a typed squash title; a key mismatch warns and publishes. | `tools/merge-title.js` builds the squash title in `tools/automerge-admit-run.js`; `tools/check-pr-title.mjs` refuses a PR title whose keys disagree with its fragments; `tools/version-stamp.mjs` and `tools/release-notes.mjs` publish with a `Release notes warning` line |
 | A second OS user's hosted chat reaches its own browser pane through the current runtime CLI and the owner relay, and a stale process on the pane port is named. | `tools/owner-chat-browser.test.py` creates the second user on an Ubuntu runner and drives the delegated chat; `tools/chat-shared-runtime.test.py` proves `zsb` ships in the runtime |
 | No status elements around Chat View messages. | Chat View status-free journey (IGSH-931); fails on any status text or icon under a message |
-| Every verifier journey records a non-empty `journey.mp4` in its evidence artifact. | `.claude/skills/verify-multiprompt/drive.ps1`, `tools/check-journey-evidence.mjs`, `tools/pr-verifier.cjs` |
+| Every verifier journey records a non-empty `journey.mp4`; screen changes keep matching BEFORE and AFTER clips on the ticket and PR. | `.claude/skills/verify-multiprompt/drive.ps1`, `tools/check-journey-evidence.mjs`, `tools/pr-verifier.cjs` |

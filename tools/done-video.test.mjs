@@ -10,6 +10,7 @@ import {
   main,
   parseArgs,
   selectEvidenceArtifact,
+  selectBeforeArtifact,
   selectVerifierRuns,
 } from './done-video.mjs';
 
@@ -84,7 +85,7 @@ test('findJourneyVideo prefers root journey.mp4 and rejects missing or empty vid
   assert.equal(findJourneyVideo(dir), path.resolve(dir, 'journey.mp4'));
 });
 
-test('main downloads the latest verifier evidence artifact and prints the journey.mp4 path', t => {
+test('main downloads matching base and head evidence and prints both video paths', t => {
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'done-video-main-'));
   t.after(() => fs.rmSync(out, { recursive: true, force: true }));
   const written = [];
@@ -104,6 +105,7 @@ test('main downloads the latest verifier evidence artifact and prints the journe
           { id: 20, name: 'pr-verifier-selection', expired: false, created_at: '2026-11-24T10:00:00Z' },
           { id: 21, name: 'verify-appearance', expired: false, created_at: '2026-11-24T10:01:00Z' },
           { id: 22, name: 'verify-server-chat', expired: false, created_at: '2026-11-24T10:02:00Z' },
+          { id: 23, name: `verify-server-chat-${'b'.repeat(40)}`, expired: false },
         ] }]) };
       }
       return { status: 1, stderr: 'unexpected endpoint' };
@@ -115,7 +117,7 @@ test('main downloads the latest verifier evidence artifact and prints the journe
       fs.mkdirSync(targetDir, { recursive: true });
       const id = fs.readFileSync(archivePath, 'utf8');
       if (id === '20') fs.writeFileSync(path.join(targetDir, 'selection.json'), JSON.stringify({ features: ['server-chat', 'appearance'] }));
-      else fs.writeFileSync(path.join(targetDir, 'journey.mp4'), 'video-bytes');
+      else fs.writeFileSync(path.join(targetDir, id === '23' ? 'before.mp4' : 'after.mp4'), 'video-bytes');
     },
     tempDir: () => out,
     write: text => written.push(text),
@@ -123,5 +125,28 @@ test('main downloads the latest verifier evidence artifact and prints the journe
   };
   const code = main(['521', '--out', out], io);
   assert.equal(code, 0, errors.join(''));
-  assert.equal(written.join(''), `${path.join(out, 'verify-server-chat', 'journey.mp4')}\n`);
+  assert.equal(written.join(''), `${path.join(out, `verify-server-chat-${'b'.repeat(40)}`, 'before.mp4')}\n${path.join(out, 'verify-server-chat', 'after.mp4')}\n`);
+});
+
+
+test('before clips match the head journey, DPI and theme, never another journey', () => {
+  const artifacts = [
+    { id: 1, name: `verify-title-bar-${'b'.repeat(40)}-96-dark` },
+    { id: 2, name: `verify-title-bar-${'b'.repeat(40)}-96-light` },
+    { id: 3, name: `verify-appearance-${'b'.repeat(40)}` },
+    { id: 4, name: 'verify-title-bar-96-light' },
+  ];
+  assert.equal(selectBeforeArtifact(artifacts, artifacts[3]).id, 2);
+  assert.deepEqual(listJourneyArtifacts(artifacts).map(item => item.id), [4]);
+  assert.throws(() => selectBeforeArtifact(artifacts, { name: 'verify-chat-view' }), /no matching before/);
+});
+
+test('a missing or empty comparison clip cannot be replaced by journey.mp4', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'done-video-pair-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(dir, 'journey.mp4'), 'video');
+  fs.writeFileSync(path.join(dir, 'after.mp4'), '');
+  assert.throws(() => findJourneyVideo(dir, 'after.mp4'), /no non-empty after.mp4/);
+  fs.writeFileSync(path.join(dir, 'after.mp4'), 'video');
+  assert.equal(findJourneyVideo(dir, 'after.mp4'), path.join(dir, 'after.mp4'));
 });

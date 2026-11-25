@@ -94,9 +94,8 @@ test('red regression job installs the Zig compiler before running changed suites
   const install = red.indexOf('      - name: Install Zig 0.16.0');
   const execute = red.indexOf('      - name: Require changed tests to fail on merge-base source');
   assert.ok(install >= 0 && execute > install);
-  assert.match(red.slice(install, execute), /curl -fsSL https:\/\/ziglang\.org\/download\/0\.16\.0\/zig-x86_64-linux-0\.16\.0\.tar\.xz/);
-  assert.match(red.slice(install, execute), /tar -xf/);
-  assert.match(red.slice(install, execute), /zig-x86_64-linux-0\.16\.0.*GITHUB_PATH/);
+  assert.match(red.slice(install, execute), /uses: \.\/\.github\/actions\/setup-zig/);
+  assert.match(red.slice(install, execute), /ZIG=\$RUNNER_TEMP\/zig-x86_64-linux-0\.16\.0\/zig/);
 });
 
 test('manual and nightly reaction proof uses the shared journey', () => {

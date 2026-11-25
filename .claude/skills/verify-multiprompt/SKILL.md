@@ -48,7 +48,7 @@ Artifact `verify-<feature>` holds `journey.mp4`, `video.json`, screenshots, `.ui
 
 ## Done video
 
-Every journey run records `journey.mp4` in its evidence artifact. For every screen change or urgent fix, fetch the PR's video with `node tools/done-video.mjs <pr-number> [journey]` and post the ticket's Done comment with the board CLI's `comment-add` command using `--kind done`, 2-3 plain sentences, and `--attach <path printed by tools/done-video.mjs>`.
+Every journey records `journey.mp4`. The PR verifier runs the same journey with the head's driver on pinned master and head builds, preserving `before.mp4` and `after.mp4` in their evidence artifacts. For every screen change or urgent fix, run `node tools/done-video.mjs <pr-number> [journey]`; it prints the before and after paths, one per line. Post the ticket's Done comment with the board CLI's `comment-add` command using `--kind done`, 2-3 plain sentences, and `--attach <before-path> --attach <after-path>`. Attach both video files so they play on the ticket, and link both in the PR, labelled BEFORE and AFTER. Never mark Done with only one clip.
 
 ## Cleanup
 

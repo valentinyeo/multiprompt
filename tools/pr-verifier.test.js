@@ -78,7 +78,7 @@ test('evidence folders keep one head run per journey without mixing similar feat
   const summary = verifier.summarize(dir, ['chat-view', 'title-bar']);
   assert.deepEqual(summary.head['chat-view'].map(run => run.artifact), ['verify-chat-view']);
   assert.equal(summary.head['chat-view'][0].checks, 2);
-  assert.deepEqual(Object.keys(summary), ['head', 'downloadFailures']);
+  assert.deepEqual(Object.keys(summary), ['head', 'before', 'downloadFailures']);
   assert.deepEqual(summary.head['title-bar'].map(run => run.artifact), ['verify-title-bar-96-light']);
   assert.deepEqual(summary.head['chat-view'][0].screenshots, ['after.png']);
 });
@@ -158,7 +158,7 @@ test('the verifier waits until Tests passes for that head and still posts the ch
   assert.match(workflow, /node tools\/pr-verifier\.cjs wait-for-tests/);
   assert.match(workflow, /select:\n    needs: resolve/);
   assert.match(workflow, /tests:\n    needs: \[resolve, select, head\]/);
-  assert.match(workflow, /needs: \[tests, resolve, select, head\]/);
+  assert.match(workflow, /needs: \[tests, resolve, select, head, before\]/);
   assert.doesNotMatch(workflow, /failed-head|base_features|base-journey-cache/);
   assert.match(workflow, /head_sha="\$HEAD_SHA"/);
   assert.match(workflow, /repos\/\$REPO\/check-runs/);
@@ -429,7 +429,7 @@ test('selection is deterministic and ladder keys are always available to the fir
   assert.equal([...workflow.matchAll(/secrets\.CODEX_AUTH_JSON/g)].length, 1);
   assert.match(workflow, /engine: \$\{\{ steps\.pr\.outputs\.engine \}\}\n      author_model_problem: \$\{\{ steps\.pr\.outputs\.author_model_problem \}\}/);
   assert.match(workflow, /AUTHOR_MODEL_PROBLEM: \$\{\{ needs\.resolve\.outputs\.author_model_problem \}\}/);
-  assert.match(workflow, /name: pstack-verifier report[\s\S]*?needs: \[tests, resolve, select, head\]/);
+  assert.match(workflow, /name: pstack-verifier report[\s\S]*?needs: \[tests, resolve, select, head, before\]/);
 });
 
 for (const problem of ['Evidence lost during cleanup: action.png', 'The journey timed out', 'Harness error: driver crashed', 'Runner queue timeout', 'Job cancelled']) {
@@ -797,4 +797,24 @@ test('MUBO-247 an unmapped Zig test fixture under src/testdata is not a user-fac
   assert.equal(final, 'PASS');
   assert.doesNotMatch(body, /Changed user-facing files have no journey/);
   assert.deepEqual(verifier.userFacingUnmapped(['src/testdata/mubo-247-cases.json', 'src/chat_mention.zig']), ['src/chat_mention.zig']);
+});
+
+
+test('comparison evidence needs paired non-empty base and head clips without judging base failures as regressions', () => {
+  const dir = evidenceDir({
+    'verify-appearance': { status: 'passed' },
+    [`verify-appearance-${base}`]: { status: 'failed', error: 'old behavior' },
+  });
+  const evaluate = () => verifier.finalize({
+    verdict: { verdict: 'PASS', evidence: [] }, headSha: head,
+    summary: verifier.summarize(dir, ['appearance']), selection: selection(['appearance']),
+    jobs: { before: { result: 'success' } }, runUrl: 'u',
+  });
+  assert.equal(evaluate().final, 'BLOCKED');
+  fs.writeFileSync(path.join(dir, 'verify-appearance', 'after.mp4'), 'video');
+  fs.writeFileSync(path.join(dir, `verify-appearance-${base}`, 'before.mp4'), 'video');
+  assert.equal(evaluate().final, 'PASS');
+  fs.writeFileSync(path.join(dir, `verify-appearance-${base}`, 'before.mp4'), '');
+  assert.equal(evaluate().final, 'BLOCKED');
+  fs.rmSync(dir, { recursive: true, force: true });
 });

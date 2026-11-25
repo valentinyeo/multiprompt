@@ -82,7 +82,7 @@ function newestByName(artifacts) {
 }
 
 export function listJourneyArtifacts(artifacts) {
-  return newestByName(artifacts).filter(artifact => /^verify-/.test(artifact.name) && !/^verify-app(?:-|$)/.test(artifact.name));
+  return newestByName(artifacts).filter(artifact => /^verify-/.test(artifact.name) && !/^verify-app(?:-|$)/.test(artifact.name) && !/-[0-9a-f]{40}(?:-|$)/.test(artifact.name));
 }
 
 export function selectEvidenceArtifact(artifacts, journey = '', preferredJourneys = []) {
@@ -104,13 +104,21 @@ export function selectEvidenceArtifact(artifacts, journey = '', preferredJourney
   return candidates[0];
 }
 
-export function findJourneyVideo(directory) {
+export function selectBeforeArtifact(artifacts, headArtifact) {
+  const match = headArtifact.name.match(/^(verify-.+?)(-\d+-(?:light|dark))?$/);
+  const pattern = new RegExp(`^${escapeRegex(match[1])}-[0-9a-f]{40}${escapeRegex(match[2] || '')}$`);
+  const before = newestByName(artifacts).find(artifact => pattern.test(artifact.name));
+  if (!before) throw new CliError(`no matching before video artifact for ${headArtifact.name}`);
+  return before;
+}
+
+export function findJourneyVideo(directory, filename = 'journey.mp4') {
   const found = [];
   const walk = current => {
     for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
       const full = path.join(current, entry.name);
       if (entry.isDirectory()) walk(full);
-      else if (entry.isFile() && /^journey\.mp4$/i.test(entry.name) && fs.statSync(full).size > 0) {
+      else if (entry.isFile() && entry.name.toLowerCase() === filename.toLowerCase() && fs.statSync(full).size > 0) {
         found.push(path.relative(directory, full).split(path.sep).join('/'));
       }
     }
@@ -119,7 +127,7 @@ export function findJourneyVideo(directory) {
   found.sort();
   const rootVideo = found.find(file => !file.includes('/'));
   const chosen = rootVideo || found[0];
-  if (!chosen) throw new CliError(`no non-empty journey.mp4 found in ${directory}`);
+  if (!chosen) throw new CliError(`no non-empty ${filename} found in ${directory}`);
   return path.resolve(directory, chosen);
 }
 
@@ -204,13 +212,17 @@ export function run(parsed, io = defaultIo()) {
       ? readSelectionFeatures(io, parsed.repo, runArtifacts, scratchDir)
       : [];
     const artifact = selectEvidenceArtifact(runArtifacts, parsed.journey, preferred);
-    const archive = path.join(scratchDir, 'evidence.zip');
-    const target = path.join(baseDir, artifact.name);
-    fs.rmSync(target, { recursive: true, force: true });
-    io.downloadZip(parsed.repo, artifact.id, archive);
-    io.extractZip(archive, target);
-    const videoPath = findJourneyVideo(target);
-    return { pr: parsed.pr, runId: Number(chosenRun.id), artifact: artifact.name, videoPath };
+    const before = selectBeforeArtifact(runArtifacts, artifact);
+    const videoPaths = [];
+    for (const [item, filename] of [[before, 'before.mp4'], [artifact, 'after.mp4']]) {
+      const archive = path.join(scratchDir, `${filename}.zip`);
+      const target = path.join(baseDir, item.name);
+      fs.rmSync(target, { recursive: true, force: true });
+      io.downloadZip(parsed.repo, item.id, archive);
+      io.extractZip(archive, target);
+      videoPaths.push(findJourneyVideo(target, filename));
+    }
+    return { pr: parsed.pr, runId: Number(chosenRun.id), artifact: artifact.name, videoPaths };
   } finally {
     fs.rmSync(scratchDir, { recursive: true, force: true });
   }
@@ -218,8 +230,8 @@ export function run(parsed, io = defaultIo()) {
 
 const helpText = `Usage: node tools/done-video.mjs <pr-number> [journey] [--repo owner/name] [--out dir]
 
-Downloads the PR's latest PR verifier evidence artifact and prints the local
-path to its journey.mp4 file for attaching to a Done comment.
+Downloads the same journey's base and head evidence from the PR verifier.
+Prints before.mp4 then after.mp4, one local path per line, for the ticket and PR.
 `;
 
 export function main(argv, io = defaultIo()) {
@@ -230,7 +242,7 @@ export function main(argv, io = defaultIo()) {
       return 0;
     }
     const outcome = run(parsed, io);
-    io.write(`${outcome.videoPath}\n`);
+    io.write(`${outcome.videoPaths.join('\n')}\n`);
     return 0;
   } catch (error) {
     if (!(error instanceof CliError)) throw error;
