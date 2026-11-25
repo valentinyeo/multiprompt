@@ -14,6 +14,7 @@ function evidence(t, result) {
   fs.mkdirSync(path.join(dir, 'verify-appearance'));
   fs.writeFileSync(path.join(dir, 'verify-appearance', 'result.json'), JSON.stringify(result));
   fs.writeFileSync(path.join(dir, 'verify-appearance', 'after.png'), 'png');
+  fs.writeFileSync(path.join(dir, 'verify-appearance', 'journey.mp4'), 'mp4');
   return dir;
 }
 

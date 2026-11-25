@@ -13,7 +13,7 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   reader-tests:
@@ -94,6 +94,8 @@ jobs:
         run: node --test tools/check-journey-evidence.test.js
       - name: Require journey evidence to survive every run
         run: node tools/check-journey-evidence.mjs
+      - name: Test the done-video evidence fetcher
+        run: node --test tools/done-video.test.mjs
       - name: Test the FFmpeg install guard
         run: node --test tools/check-ffmpeg-install.test.js
       - name: Require a cached, retried FFmpeg install

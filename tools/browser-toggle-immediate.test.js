@@ -61,7 +61,7 @@ test('IGSH-1126 pane loading never blocks a released shortcut', () => {
 test('IGSH-1126 GitHub journey measures actual keys and unfinished navigation', () => {
   const journey = read('.claude/skills/verify-multiprompt/control-feature-browser-pane-stuck.ps1');
   for (const token of ['$i -lt 20', 'ImmediateBrowserTogglePair(50)', "$before + 2", 'SLOW_LOADING', 'SLOW_FINISHED', "'toggle-keys.log'", 'immediate-toggle.mp4', "Assert-ImmediateBrowserPairs 'blank'", "Assert-ImmediateBrowserPairs 'slow'"]) assert.ok(journey.includes(token), token);
-  assert.match(read('.github/workflows/verify.yml'), /name: Install browser toggle recorder\n\s+if: env\.FEATURE == 'browser-pane-stuck'[\s\S]*uses: \.\/\.github\/actions\/install-ffmpeg\n\s+with:\n\s+version: '7\.1\.1'/);
+  assert.match(read('.github/workflows/verify.yml'), /name: Install journey video recorder\n\s+uses: \.\/\.github\/actions\/install-ffmpeg\n\s+with:\n\s+version: '7\.1\.1'/);
   assert.doesNotMatch(journey, /\$job\.Start\(/);
   const recordingSeconds = Number(journey.match(/-t (\d+) -vf/)[1]);
   const settleMilliseconds = Number(journey.match(/\$recorder\.WaitForExit\((\d+)\)/)[1]);

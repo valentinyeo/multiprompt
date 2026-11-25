@@ -29,10 +29,12 @@ HOME = Path.home()
 SESSION_ID = re.compile(r"[A-Za-z0-9_-]{1,80}\Z")
 TMUX_NAME = re.compile(r"[A-Za-z0-9_.:-]{1,80}\Z")
 _COMMAND_NAME = re.compile(r"<command-name>\s*(.*?)\s*</command-name>", re.S)
+_COMMAND_MESSAGE = re.compile(r"<command-message>\s*(.*?)\s*</command-message>", re.S)
 _COMMAND_ARGS = re.compile(r"<command-args>(.*?)</command-args>", re.S)
 _MENTION_WIRE_NOTE = re.compile(r"\n\n\((?:This line is addressed to .*? or relay it unless you are also asked|Valentin wrote this to you\. It also mentions .*? or relay it)\.\)\s*\Z", re.S)
 _INTERRUPT_MARKERS = ("[Request interrupted by user]", "[Request interrupted by user for tool use]")
 _LOCAL_COMMAND = re.compile(r"<(local-command-stdout|local-command-stderr|local-command-caveat)>.*?</\1>", re.S)
+_LOCAL_COMMAND_OUTPUT = re.compile(r"<local-command-(stdout|stderr)>(.*?)</local-command-\1>", re.S)
 _SYSTEM_REMINDER = re.compile(r"^[ \t]*<system-reminder>.*?</system-reminder>[ \t]*(?:\r?\n|$)", re.S | re.M)
 SEARCH_ASCII_FOLDS = "ßİŉſǰẖẗẘẙẚẞKﬀﬁﬂﬃﬄﬅﬆ"
 END = "@@MP_END@@"
@@ -224,18 +226,17 @@ def clean_command_markup(text):
     if re.search(r"</?pasted_content\b", text, re.I):
         text = re.sub(r"^[ \t]*</?pasted_content\b[^>]*>[ \t]*\r?\n?", "", text, flags=re.I | re.M)
         text = re.sub(r"</?pasted_content\b[^>]*>", " ", text, flags=re.I).strip()
-    if "<command-name>" in text:
-        name = _COMMAND_NAME.search(text)
-        if name:
-            args = _COMMAND_ARGS.search(text)
-            command = name.group(1).strip()
-            if command and not command.startswith("/"):
-                command = "/" + command
-            arguments = args.group(1).strip() if args else ""
-            arguments = _MENTION_WIRE_NOTE.sub("", arguments).strip()
-            if not command:
-                return arguments
-            return command_reply(command, arguments)
+    name = _COMMAND_NAME.search(text) if "<command-name>" in text else _COMMAND_MESSAGE.search(text) if "<command-message>" in text else None
+    if name:
+        args = _COMMAND_ARGS.search(text)
+        command = name.group(1).strip()
+        if command and not command.startswith("/"):
+            command = "/" + command
+        arguments = args.group(1).strip() if args else ""
+        arguments = _MENTION_WIRE_NOTE.sub("", arguments).strip()
+        if not command:
+            return arguments
+        return command_reply(command, arguments)
     if "<local-command-" in text:
         text = _LOCAL_COMMAND.sub("", text)
     return text
@@ -1097,6 +1098,31 @@ def blocked_prompt(event):
     return text or None
 
 
+def unknown_command(event):
+    if not isinstance(event, dict) or event.get("isSidechain"):
+        return None
+    kind = event.get("type")
+    content = event.get("content")
+    if (kind == "system" and event.get("subtype") == "informational" and
+            event.get("level") in ("warning", "error") and isinstance(content, str) and
+            content.startswith(("Unknown command: /", "Args from unknown skill: "))):
+        return content.splitlines()[0].strip()
+    if kind != "user" or event.get("isMeta"):
+        return None
+    message = event.get("message")
+    text = message.get("content") if isinstance(message, dict) else None
+    if isinstance(text, list):
+        text = "\n".join(part.get("text", "") for part in text
+                         if isinstance(part, dict) and isinstance(part.get("text"), str))
+    if not isinstance(text, str):
+        return None
+    for match in _LOCAL_COMMAND_OUTPUT.finditer(text):
+        output = html.unescape(match.group(2)).strip()
+        if output.startswith(("Unknown command: /", "Args from unknown skill: ")):
+            return output
+    return None
+
+
 def settlement_event(event, agent, blocked_settlement=False):
     if agent != "claude" or not isinstance(event, dict) or event.get("isSidechain"):
         return None
@@ -1104,14 +1130,13 @@ def settlement_event(event, agent, blocked_settlement=False):
     operation = event.get("operation")
     content = event.get("content", "")
     blocked = blocked_prompt(event) if blocked_settlement else None
+    rejected = unknown_command(event)
     if blocked is not None:
         fact = dict(operation="blocked", content=blocked)
+    elif rejected is not None:
+        fact = dict(operation="rejected", content=rejected)
     elif kind == "queue-operation" and operation in ("enqueue", "remove", "dequeue", "popAll"):
         fact = dict(operation=operation, content=content if isinstance(content, str) else "")
-    elif (kind == "system" and event.get("subtype") == "informational" and
-          event.get("level") in ("warning", "error") and isinstance(content, str) and
-          content.startswith(("Unknown command: /", "Args from unknown skill: "))):
-        fact = dict(operation="rejected", content=content)
     else:
         return None
     timestamp = event.get("timestamp", "")
@@ -5182,6 +5207,20 @@ def host_turn_started(provider, sid, tmux, session, entry):
                turn=entry["turn"])
 
 
+def host_rejected_command(provider, sid, tmux, session, event):
+    output = unknown_command(event)
+    if output is None or not output.startswith("Unknown command: /"):
+        return
+    wanted = " ".join(output.split(":", 1)[1].split())
+    for item in session.get("sends") or []:
+        if item.get("accepted") or not item.get("text"):
+            continue
+        sent = " ".join(item["text"].split())
+        if sent == wanted or sent.startswith(wanted + " "):
+            host_unsent(provider, sid, tmux, session, item["id"], "unknown_command")
+            return
+
+
 def host_user_event(provider, sid, tmux, session, event):
     message = event.get("message") if isinstance(event.get("message"), dict) else {}
     for block in message.get("content") if isinstance(message.get("content"), list) else []:
@@ -5190,6 +5229,7 @@ def host_user_event(provider, sid, tmux, session, event):
             host_event(provider, sid, tmux, session, "item.done",
                        dict(status="failed" if failed else "completed", output=host_tool_output(block.get("content")),
                             is_error=failed), block["tool_use_id"])
+    host_rejected_command(provider, sid, tmux, session, event)
     host_bind_uuid(provider, sid, tmux, session, event)
 
 
@@ -5724,6 +5764,7 @@ def host_claude_event(provider, sid, tmux, session, event):
     if kind == "system":
         if event.get("subtype") == "informational":
             host_blocked_prompt(provider, sid, tmux, session, event)
+            host_rejected_command(provider, sid, tmux, session, event)
             return
         if event.get("subtype") == "init":
             session["ready"] = True

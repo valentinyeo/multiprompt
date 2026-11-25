@@ -789,7 +789,7 @@ test('browser emulation map drives the real native CLI and extension only on Git
   const map = read(skill + 'features/browser-emulation.md');
   assert.match(workflow, /node tools\/verify-features.cjs \$env:FEATURE/);
   assert.ok(featureMatrix(workflow).available.includes('browser-emulation'));
-  assert.match(workflow, /control\.ps1 -Feature \$env:FEATURE/);
+  assert.match(workflow, /drive\.ps1 -Feature \$env:FEATURE/);
   assert.match(control, /browserJob\.Start\(\$node/);
   assert.match(control, /activeAfterStop = \$stopped\.ActiveProcesses/);
   assert.match(driver, /assert\.equal\(process\.env\.GITHUB_ACTIONS, 'true'/);

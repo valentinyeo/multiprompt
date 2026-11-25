@@ -10,8 +10,8 @@ Full procedure and toolchain notes: [openwiki/operations/build-and-install.md](o
 
 - An outage interrupts the queue. Revert the bad change first, then send the real fix through reproduction, failing repro, PR verification and normal release.
 - Follow the solo-dev skill's work order.
-- Drain existing PRs first. Do not open new PRs.
-- Commit small units directly to `master`. Include a one-line undo. Add it to each commit.
+- Drain existing PRs first; keep at most 10 open PRs in the repo.
+- Every change is a small PR: one small commit with a one-line undo, squash-merged once the pstack-verifier passes at its head.
 - Never build or test on shared servers. This includes lightweight tests. Use GitHub-hosted public CI only.
 - Each master push publishes a release automatically. CI builds x64 and arm64. The built x64 app must launch. Its main window must appear within five minutes. Gitleaks blocks publication on failure. CI signs and publishes the assets.
 - Heavy desktop checks run nightly or manually. The built release must launch. Use `auto-revert-master.yml` for rollback evidence; while automatic revert is disabled, revert manually before attempting a fix.
@@ -55,6 +55,7 @@ Full procedure and toolchain notes: [openwiki/operations/build-and-install.md](o
 | Outages revert the bad change before a repair; the repair follows the normal process. | `auto-revert-master.yml`, `.claude/skills/verify-multiprompt/SKILL.md` |
 | Repair PRs wait only on the journeys their changed files own. | `tools/pr-verifier.cjs`, `tools/pr-verifier-repro.test.js`, `pr-verifier.yml` |
 | Emergency lane: when Valentin cannot reach or see his chats, or cannot work, the fix jumps the merge order, other merges pause, and it waits only on the journeys its files own. | `tools/check-emergency-lane.mjs`, `tools/check-emergency-lane.test.mjs`, `emergency-lane.yml` |
+| Every push to `master` gets a full run; only a superseded pull request run is cancelled. | `tools/ci-concurrency.test.js` reads every workflow in `.github/workflows` |
 | A tab's host is the server its chat runs on: recorded at creation, carried on a reopen, never defaulted. | `tools/mp-layout-host.test.js`, `tools/mp-sessions-test.py` |
 | Every servers file the repo ships names a slot per server. | `tools/check-servers-slots.mjs`, `tools/check-servers-slots.test.js` |
 | Keep code comment-free. | `tools/strip-comments.mjs --check` |
@@ -69,3 +70,4 @@ Full procedure and toolchain notes: [openwiki/operations/build-and-install.md](o
 | Merge titles come from the PR's changelog fragments, never from a typed squash title; a key mismatch warns and publishes. | `tools/merge-title.js` builds the squash title in `tools/automerge-admit-run.js`; `tools/check-pr-title.mjs` refuses a PR title whose keys disagree with its fragments; `tools/version-stamp.mjs` and `tools/release-notes.mjs` publish with a `Release notes warning` line |
 | A second OS user's hosted chat reaches its own browser pane through the current runtime CLI and the owner relay, and a stale process on the pane port is named. | `tools/owner-chat-browser.test.py` creates the second user on an Ubuntu runner and drives the delegated chat; `tools/chat-shared-runtime.test.py` proves `zsb` ships in the runtime |
 | No status elements around Chat View messages. | Chat View status-free journey (IGSH-931); fails on any status text or icon under a message |
+| Every verifier journey records a non-empty `journey.mp4`; screen changes keep matching BEFORE and AFTER clips on the ticket and PR. | `.claude/skills/verify-multiprompt/drive.ps1`, `tools/check-journey-evidence.mjs`, `tools/pr-verifier.cjs` |
