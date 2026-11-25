@@ -69,7 +69,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        round: [1, 2, 3, 4]
+        round: [1, 2, 3, 4, 5]
     steps:
       - name: Keep LF line endings
         run: git config --global core.autocrlf false
