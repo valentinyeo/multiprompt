@@ -2478,18 +2478,30 @@ pub fn chatShellDraftPushDue() void {
     }
 }
 
+fn chatDraftOwnerShell() ?u32 {
+    if (app_state.g_chat_draft_owner_len == 0) return null;
+    const id = app_state.g_chat_draft_owner[0..app_state.g_chat_draft_owner_len];
+    for (0..app_state.shell_count) |idx| {
+        if (app_state.shells[idx].chat_id == 0) continue;
+        var buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+        if (std.mem.eql(u8, chatDraftKeyForShell(@intCast(idx), &buf), id)) return @intCast(idx);
+    }
+    return null;
+}
+
 fn chatDraftNoteEdit() void {
     if (chat_draft_loading or app_state.g_chat_draft_owner_len == 0 or app_state.g_chat_composer_hwnd == null) return;
     var text: [16400]u16 = undefined;
     const n_i = GetWindowTextW(app_state.g_chat_composer_hwnd, &text, @intCast(text.len));
     const n: usize = if (n_i > 0) @intCast(n_i) else 0;
     const id = app_state.g_chat_draft_owner[0..app_state.g_chat_draft_owner_len];
+    const marker_before = chat_drafts.hasDraft(id);
     chat_drafts.set(id, text[0..n], true) catch return;
     app_state.g_chat_draft_dirty = true;
-    if (app_state.g_main_hwnd != null) {
-        _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
-        _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_DRAFT, CHAT_DRAFT_SAVE_MS, null);
+    if (marker_before != chat_drafts.hasDraft(id)) {
+        if (chatDraftOwnerShell()) |idx| @import("sidebar.zig").invalidateDraftMarker(idx);
     }
+    if (app_state.g_main_hwnd != null) _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_DRAFT, CHAT_DRAFT_SAVE_MS, null);
 }
 
 pub fn chatDraftCloseForShell(idx: u32) void {
