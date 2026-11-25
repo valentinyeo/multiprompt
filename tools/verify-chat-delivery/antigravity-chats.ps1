@@ -129,7 +129,7 @@ Remove-Item -LiteralPath "$state/hold-reply" -Force -ErrorAction SilentlyContinu
 [void](Wait-For 'antigravity stand-in released the held reply' { (Read-Shared "$state/antigravity-hold.jsonl").Contains('"stage": "released"') } 30)
 $releaseEvent.Dispose()
 [void](Wait-For 'antigravity stand-in received the new message' {
-    (Test-Path "$state/antigravity-deliver.jsonl") -and (Read-Shared "$state/antigravity-deliver.jsonl").Contains($afterText)
+    (Test-Path "$state/agy-received.jsonl") -and (Read-Shared "$state/agy-received.jsonl").Contains($afterText)
 } 60)
 [void](Wait-For 'antigravity reply reached the switched chat' {
     (Read-Shared $antigravityHistory[0].FullName).Contains($heldReply)

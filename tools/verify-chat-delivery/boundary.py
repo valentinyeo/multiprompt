@@ -1660,25 +1660,6 @@ def transport_reader():
 
 AGY_PANE_SESSION = "agy-pane|1700000000|0|/verify/work|agy|Antigravity\n"
 
-ANTIGRAVITY_RELEASE_EVENT = "Local\\multiprompt-verify-antigravity-release"
-
-
-def wait_for_antigravity_release(seconds):
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel.OpenEventW.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR]
-    kernel.OpenEventW.restype = wintypes.HANDLE
-    kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
-    kernel.WaitForSingleObject.restype = wintypes.DWORD
-    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
-    kernel.CloseHandle.restype = wintypes.BOOL
-    handle = kernel.OpenEventW(0x00100000, False, ANTIGRAVITY_RELEASE_EVENT)
-    if not handle:
-        raise RuntimeError("The journey never created the Antigravity release event")
-    try:
-        return kernel.WaitForSingleObject(handle, int(seconds * 1000)) == 0
-    finally:
-        kernel.CloseHandle(handle)
-
 
 def install_antigravity_host(namespace):
     sid = state()["sid"]
@@ -1696,14 +1677,10 @@ def install_antigravity_host(namespace):
         moved = namespace["host_switch_follow"](candidate)
         if moved is not None:
             provider, candidate = moved
-        if candidate == sid or provider == "antigravity":
-            return provider, candidate, True
-        switched = namespace["host_read"](namespace["host_switched_path"]()) or {}
-        targets = [value for value in switched.values() if isinstance(value, list) and len(value) == 2]
-        return provider, candidate, [provider, candidate] in targets
+        return provider, candidate, provider == "claude"
 
     def dispatch_switch(provider, candidate):
-        return mine(provider, candidate)[2] or previous_switch(provider, candidate)
+        return previous_switch(provider, candidate)
 
     def owned(provider, candidate):
         return mine(provider, candidate)[2] or previous_owned(provider, candidate)
@@ -1715,32 +1692,18 @@ def install_antigravity_host(namespace):
         record("antigravity-deliver.jsonl", provider=provider, sid=candidate, text=text)
         paths = namespace["host_paths"](provider, candidate)
         kept = namespace["host_read"](paths["state"]) or {}
-        if provider == "claude" and not kept.get("display_history"):
+        if not kept.get("display_history"):
             kept["display_history"] = True
             namespace["host_state_write"](provider, candidate, kept)
             kept = namespace["host_read"](paths["state"]) or kept
         record("antigravity-deliver.jsonl", provider=provider, sid=candidate, history_claimed=bool(kept.get("display_history")),
-               claim_source=("fixture-hosted Claude chat; no live Claude host process exists to claim it" if provider == "claude"
-                             else "production host loop start; the fixture writes neither the flag nor the archive"))
+               claim_source="fixture-hosted Claude chat; no live Claude host process exists to claim it")
         session = dict(turn=token, state=kept, pending={}, messages={},
                        sends=[dict(id=token, attempt=attempt, accepted=False, text=text)])
         previous_event(provider, candidate, "verify-agent", session, "turn.started", dict(message_id=token, uuids=[token]))
         previous_accept(provider, candidate, "verify-agent", session, dict(type="standin-accepted"), token)
         block = namespace["host_stream_block"](session, "standin-reply", "text", 0)
-        reply = "Antigravity stand-in reply." if provider == "antigravity" else "Claude stand-in answer."
-        if provider == "antigravity" and (ROOT / "hold-reply").exists():
-            held = dict(namespace["host_read"](paths["state"]) or {})
-            held["inflight"] = dict(id=token, attempt=attempt, epoch=epoch, accepted=True, at=time.time())
-            namespace["host_state_write"](provider, candidate, held)
-            record("antigravity-hold.jsonl", stage="replying", provider=provider, sid=candidate, text=text, reply=reply)
-            if not wait_for_antigravity_release(180):
-                record("antigravity-hold.jsonl", stage="timeout", provider=provider, sid=candidate, text=text, reply=reply)
-                raise RuntimeError("The journey never released the held Antigravity reply")
-            released = dict(namespace["host_read"](paths["state"]) or {})
-            released.pop("inflight", None)
-            namespace["host_state_write"](provider, candidate, released)
-            record("antigravity-hold.jsonl", stage="released", provider=provider, sid=candidate, text=text, reply=reply, released=True)
-        namespace["host_delta"](session, block, reply)
+        namespace["host_delta"](session, block, "Claude stand-in answer.")
         namespace["host_complete"](provider, candidate, "verify-agent", session, block)
         previous_event(provider, candidate, "verify-agent", session, "turn.ended", dict(status="completed"))
         if session.get("db") is not None:
@@ -1851,6 +1814,65 @@ def watch_reader():
     return 0
 
 
+def python_commands(text):
+    commands = []
+    start = 0
+    index = 0
+    quote = None
+    while index < len(text):
+        character = text[index]
+        if quote is not None:
+            if character == quote:
+                quote = None
+        elif character in ("'", '"'):
+            quote = character
+        elif text[index:index + 2] == "&&":
+            commands.append(text[start:index].strip())
+            index += 2
+            start = index
+            continue
+        index += 1
+    commands.append(text[start:].strip())
+    return [command for command in commands if command]
+
+
+def python_remote(command):
+    python = re.search(r"\bpython3\s", command)
+    if python is None:
+        return None
+    remote = shlex.split(command[python.start():])
+    if state().get("name") == "antigravity-chats":
+        remote = [os.path.expanduser(part) if part.startswith("~") else part for part in remote]
+    if remote[1].endswith("/mp_complete.py"):
+        return completion(remote)
+    record("invocations.jsonl", kind="reader", argv=remote)
+    if remote[-1:] == ["--watch"]:
+        value = state()
+        if value.get("remoteHome"):
+            os.environ.update(HOME=value["remoteHome"], USERPROFILE=value["remoteHome"])
+        try:
+            return watch_reader()
+        except Exception:
+            import traceback
+            (ROOT / f"reader-{os.getpid()}.stderr.log").write_text(traceback.format_exc(), encoding="utf-8")
+            raise
+    env = os.environ.copy()
+    if os.name == "nt":
+        env["PYTHONPATH"] = str(Path(__file__).resolve().parent) + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+    if state().get("remoteHome"):
+        env.update(HOME=state()["remoteHome"], USERPROFILE=state()["remoteHome"])
+    entry = "serve_reader" if remote[-1:] == ["--serve"] else None
+    if os.name == "nt" and remote[1:] == ["-u", "-c", "import base64,sys;exec(base64.b64decode(sys.stdin.buffer.readline()))"]:
+        entry = "transport_reader"
+        remote.append("--transport")
+    if entry:
+        remote[3] = ("import importlib.util;"
+                     f"s=importlib.util.spec_from_file_location('fixture_boundary',{str(Path(__file__).resolve())!r});"
+                     f"m=importlib.util.module_from_spec(s);s.loader.exec_module(m);m.{entry}()")
+    with (ROOT / f"reader-{os.getpid()}.stderr.log").open("ab", buffering=0) as error:
+        return subprocess.call([sys.executable, *remote[1:]], stdin=sys.stdin.buffer, stdout=sys.stdout.buffer, stderr=error, env=env, creationflags=subprocess.CREATE_NO_WINDOW)
+
+
 def ssh():
     if ARGS == ["-V"]:
         print("OpenSSH_verification")
@@ -1894,37 +1916,14 @@ def ssh():
         return 0
     python = re.search(r"\bpython3\s", command)
     if python:
-        remote = shlex.split(command[python.start():])
-        if state().get("name") == "antigravity-chats":
-            remote = [os.path.expanduser(part) if part.startswith("~") else part for part in remote]
-        if remote[1].endswith("/mp_complete.py"):
-            return completion(remote)
-        record("invocations.jsonl", kind="reader", argv=remote)
-        if remote[-1:] == ["--watch"]:
-            value = state()
-            if value.get("remoteHome"):
-                os.environ.update(HOME=value["remoteHome"], USERPROFILE=value["remoteHome"])
-            try:
-                return watch_reader()
-            except Exception:
-                import traceback
-                (ROOT / f"reader-{os.getpid()}.stderr.log").write_text(traceback.format_exc(), encoding="utf-8")
-                raise
-        env = os.environ.copy()
-        if os.name == "nt":
-            env["PYTHONPATH"] = str(Path(__file__).resolve().parent) + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
-        if state().get("remoteHome"):
-            env.update(HOME=state()["remoteHome"], USERPROFILE=state()["remoteHome"])
-        entry = "serve_reader" if remote[-1:] == ["--serve"] else None
-        if os.name == "nt" and remote[1:] == ["-u", "-c", "import base64,sys;exec(base64.b64decode(sys.stdin.buffer.readline()))"]:
-            entry = "transport_reader"
-            remote.append("--transport")
-        if entry:
-            remote[3] = ("import importlib.util;"
-                         f"s=importlib.util.spec_from_file_location('fixture_boundary',{str(Path(__file__).resolve())!r});"
-                         f"m=importlib.util.module_from_spec(s);s.loader.exec_module(m);m.{entry}()")
-        with (ROOT / f"reader-{os.getpid()}.stderr.log").open("ab", buffering=0) as error:
-            return subprocess.call([sys.executable, *remote[1:]], stdin=sys.stdin.buffer, stdout=sys.stdout.buffer, stderr=error, env=env, creationflags=subprocess.CREATE_NO_WINDOW)
+        for segment in python_commands(command[python.start():]):
+            code = python_remote(segment)
+            if code is None:
+                record("unsupported.jsonl", operation="remote command", hasPython=True, argv=ARGS, command=segment)
+                return 96
+            if code != 0:
+                return code
+        return 0
     if "tmux list-clients" in command:
         record("invocations.jsonl", kind="probe", operation="list-clients/list-sessions")
         names = session_names()

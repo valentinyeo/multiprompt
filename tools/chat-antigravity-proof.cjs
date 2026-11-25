@@ -47,8 +47,7 @@ function verify(root) {
   const afterSwitch = json('session-after-switch.json');
   assert.equal(afterSwitch.tabs.length, seed.tabs.length, 'the switch changed the chat rows');
   assert.equal(afterSwitch.tabs[0].name, seed.tabs[0].name, 'the switch renamed the chat');
-  const received = lines('stand-in/antigravity-deliver.jsonl');
-  assert.ok(received.some(row => String(row.text).includes('after the switch')), 'the Antigravity host never received the new message');
+  assert.ok(read('stand-in/agy-received.jsonl').includes('after the switch'), 'the Antigravity host never received the new message');
   assert.ok(read('claude-history.jsonl').includes('Claude stand-in answer'), 'the earlier message was not answered before the switch');
   const agent = lines('stand-in/agy-agent.jsonl');
   assert.ok(agent.some(row => row.argv.some(part => part.includes('stream-json'))), 'the fixture was not started through the Antigravity argv');
@@ -151,7 +150,7 @@ function verify(root) {
   return {
     feature: 'antigravity-chats',
     status: 'passed',
-    boundary: 'Antigravity is a repository stand-in that speaks the production stream-json protocol; SSH and the remote shell are stand-ins, the app, keyboard input and the production reader host are real. The Claude side of a switch is served by the same fixture host store, with no live Claude process.',
+    boundary: 'Antigravity is a repository stand-in that speaks the production stream-json protocol; SSH and the remote shell are stand-ins, the app, keyboard input, the production reader, the Antigravity host loop and its stream transport are real. The Claude side of a switch is served by the same fixture host store, with no live Claude process.',
     cleanup: `The owned Windows job stopped the app and its children (${totals.remaining_owned_processes} left running); each case's isolated profile, its agent-host home and the socket temp folder were removed (scratchRemoved=${totals.scratch_removed}); the evidence copy was kept (evidencePreserved=${totals.evidence_preserved}).`,
     cases: [
       {

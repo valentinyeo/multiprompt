@@ -62,6 +62,7 @@ test('SOFT-3050 the label and the search words serve singular and plural', () =>
 });
 
 test('SOFT-3050 the journey hands the app the workspace folder the row needs', () => {
-  assert.match(drive, /if \(\$isAntigravity\) \{ \$savedSession\.tabs\[0\]\.ccwd = '\/verify\/work' \}/, 'the Antigravity journey must seed the chat folder the palette and the launch use');
+  assert.match(drive, /if \(\$isAntigravity\) \{\s*\$savedSession\.tabs\[0\]\.ccwd = '\/verify\/work'\s*\$workspace = Join-Path \(Join-Path \(\[IO\.Path\]::GetPathRoot\(\$profile\)\) 'verify'\) 'work'\s*if \(-not \(Test-Path -LiteralPath \$workspace\)\) \{\s*New-Item -ItemType Directory -Force \$workspace/, 'the Antigravity journey must seed and create the chat folder the palette and the launch use');
+  assert.match(drive, /if \(\$workspaceOwned -and \(Test-Path -LiteralPath \$workspaceOwned\)\) \{ Remove-Item -LiteralPath \$workspaceOwned -Recurse -Force \}/, 'the Antigravity journey must remove the workspace folder it created');
   assert.match(journey, new RegExp(`Palette-Choose 'new antigravity sessions' ${offsetOf(ROW)}\\b`), 'the journey picks the Antigravity row by its offset');
 });

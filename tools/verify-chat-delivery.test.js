@@ -415,6 +415,94 @@ test('boundary runs the actual supplied Python bootstrap and logs raw fake tmux 
   assert.match(launcher, /CreateProcessW\(python, command, NULL, NULL, TRUE, flags/);
 });
 
+test('the Antigravity fixture hands ownership and delivery to the production host and serves only Claude chats itself', () => {
+  const boundary = path.join(root, 'tools/verify-chat-delivery/boundary.py');
+  const script = String.raw`
+import importlib.util, json, os, pathlib, sys, tempfile
+root = pathlib.Path(tempfile.mkdtemp())
+(root / 'state.json').write_text(json.dumps(dict(name='antigravity-chats', sid='11111111-1111-4111-8111-111111111111', cwd='/verify/work')))
+os.environ['MP_VERIFY_STATE'] = str(root)
+text = sys.argv[1]
+sys.argv = ['boundary', 'ssh']
+spec = importlib.util.spec_from_file_location('fixture_boundary', text)
+boundary = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(boundary)
+seed = '11111111-1111-4111-8111-111111111111'
+fresh = '22222222-2222-4222-8222-222222222222'
+calls = []
+def host_paths(provider, sid):
+    return dict(config=root / (provider + '-' + sid + '.config.json'), state=root / (provider + '-' + sid + '.state.json'))
+def host_owned(provider, sid):
+    calls.append(['owned', provider, sid])
+    return False
+def host_deliver(provider, sid, token, attempt, epoch, text):
+    calls.append(['deliver', provider, sid, text])
+    return dict(status='sent', host='production')
+namespace = dict(
+    host_write=lambda path, value: None,
+    host_paths=host_paths,
+    host_dispatch_switch=lambda provider, sid: True,
+    host_owned=host_owned,
+    host_deliver=host_deliver,
+    host_event=lambda *args, **kwargs: None,
+    host_accept=lambda *args, **kwargs: None,
+    host_start=lambda provider, sid, source=None: dict(status='started'),
+    host_switch_ai=lambda *args, **kwargs: dict(status='refused'),
+    host_switch_follow=lambda sid: None,
+    host_read=lambda path: {},
+    host_switched_path=lambda: root / 'switched.json',
+    host_stream_block=lambda session, message_id, kind, index=None: dict(id=message_id),
+    host_delta=lambda session, block, text: None,
+    host_complete=lambda *args, **kwargs: None,
+    host_state_write=lambda provider, sid, state: None,
+    message_poll=lambda *args, **kwargs: None,
+    message_store_request=lambda *args, **kwargs: {},
+    message_store_db=lambda *args, **kwargs: None,
+)
+boundary.install_antigravity_host(namespace)
+antigravity_reply = namespace['host_deliver']('antigravity', fresh, 'token', 'attempt', 0, 'fresh text')
+claude_reply = namespace['host_deliver']('claude', seed, 'token', 'attempt', 0, 'seed text')
+print(json.dumps(dict(
+    antigravity_owned=namespace['host_owned']('antigravity', fresh),
+    claude_owned=namespace['host_owned']('claude', seed),
+    antigravity_host=antigravity_reply.get('host'),
+    claude_status=claude_reply.get('status'),
+    calls=calls,
+)))
+`;
+  const result = JSON.parse(execFileSync('python3', ['-I', '-c', script, boundary], { encoding: 'utf8', timeout: 60000 }));
+  assert.equal(result.antigravity_owned, false, 'the fixture claimed a fresh Antigravity chat before any host owned it');
+  assert.equal(result.antigravity_host, 'production', 'the fixture kept Antigravity delivery instead of the production host');
+  assert.ok(result.calls.some(call => call[0] === 'deliver' && call[1] === 'antigravity' && call[3] === 'fresh text'), 'the Antigravity message never reached the production host');
+  assert.equal(result.claude_owned, true, 'the fixture stopped serving its Claude chat');
+  assert.equal(result.claude_status, 'sent');
+  assert.ok(!result.calls.some(call => call[0] === 'deliver' && call[1] === 'claude'), 'the Claude chat has no live host to deliver its message');
+});
+
+test('the remote shell runs an enable && start launch as two commands', () => {
+  const boundary = path.join(root, 'tools/verify-chat-delivery/boundary.py');
+  const script = String.raw`
+import importlib.util, json, os, sys, tempfile
+os.environ['MP_VERIFY_STATE'] = tempfile.mkdtemp()
+text = sys.argv[1]
+sys.argv = ['boundary', 'ssh']
+spec = importlib.util.spec_from_file_location('fixture_boundary', text)
+boundary = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(boundary)
+launch = ('python3 /home/verify/.multiprompt-runtime/3e8089cf.py host enable antigravity 0576beb6-78bf-4ac2-aa8e-4afbf8f284ba --tmux live-4a96b --cwd /verify/work'
+          ' && python3 /home/verify/.multiprompt-runtime/3e8089cf.py host start antigravity 0576beb6-78bf-4ac2-aa8e-4afbf8f284ba')
+print(json.dumps(dict(
+    launch=boundary.python_commands(launch),
+    quoted=boundary.python_commands('python3 /r.py host enable claude x --cwd "/tmp/a && b"'),
+)))
+`;
+  const result = JSON.parse(execFileSync('python3', ['-I', '-c', script, boundary], { encoding: 'utf8', timeout: 60000 }));
+  assert.equal(result.launch.length, 2, 'the launch chain was flattened into one command');
+  assert.match(result.launch[0], /^python3 .*host enable antigravity/);
+  assert.match(result.launch[1], /^python3 .*host start antigravity/);
+  assert.equal(result.quoted.length, 1, 'a quoted && inside an argument was split');
+});
+
 test('background host probes are explicitly declined and unknown remote commands remain diagnostic failures', () => {
   const literals = source => [...source.matchAll(/"(?:\\.|[^"\\])*"/g)].map(match => JSON.parse(match[0]));
   const app = read('src/app_state.zig');
