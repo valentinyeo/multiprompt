@@ -36,6 +36,7 @@ const View = struct {
     mode: Mode,
     pending: ?ActionToken,
     result: ?ActionResult = .pending,
+    start_failed: bool = false,
     generation: u64 = 1,
     selected_count: usize = 0,
     scroll: i32 = 0,

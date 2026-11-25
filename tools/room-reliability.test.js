@@ -134,7 +134,7 @@ test('creation uses account display names for unopened server chats and retains 
   run(harness, files);
   const before = harness.replace('const name = memberDisplayName(member, host_name);', 'const name = host_name;');
   assert.notEqual(before, harness);
-  assert.match(run(before, files, 1), /creation lists an unopened server chat by the account name instead of its tmux name\.\.\.FAIL \(TestExpectedEqual\)/);
+  assert.match(run(before, files, 1), /creation lists an unopened server chat by the account name instead of its tmux name\.\.\.[\s\S]*Alpha[\s\S]*rooms-alpha[\s\S]*FAIL \(TestExpectedEqual\)/);
 });
 
 test('fresh-profile room discovery probes configured hosts without local pins or tabs', () => {
