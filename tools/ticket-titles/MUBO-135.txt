@@ -1,0 +1,1 @@
+Server chat shows every AI reply twice
