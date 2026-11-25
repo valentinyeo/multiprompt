@@ -350,10 +350,14 @@ function modelFamily(model) {
   return '';
 }
 
-function pickVerifier(body) {
+function authorFamilies(body) {
   const authors = [...String(body || '').matchAll(/^Author model:\s*(\S+)\s*$/gim)].map(match => match[1]);
+  return { authors, families: authors.map(modelFamily) };
+}
+
+function pickVerifier(body) {
+  const { authors, families } = authorFamilies(body);
   if (!authors.length) return { problem: 'missing Author model line' };
-  const families = authors.map(modelFamily);
   const unknown = authors[families.indexOf('')];
   if (unknown) return { problem: `unknown model family in Author model line: ${unknown}` };
   const verifier = VERIFIER_MODELS.find(candidate => !families.includes(candidate.family));
@@ -604,8 +608,9 @@ function resolve(env) {
     : gh(['api', `repos/${repo}/compare/${pr.baseRefName}...${pr.headRefOid}`, '--jq', '.merge_base_commit.sha']).trim();
   if (!/^[0-9a-f]{40}$/.test(baseSha)) throw new Error('Merge base not found');
   const { engine = '', problem = '' } = pickVerifier(pr.body);
+  const families = [...new Set(authorFamilies(pr.body).families.filter(Boolean))].sort();
   const baseTipSha = gh(['api', `repos/${repo}/commits/${pr.baseRefName}`, '--jq', '.sha']).trim();
-  setOutputs({ eligible: String(eligible), number: String(pr.number), head_sha: pr.headRefOid, base_tip_sha: baseTipSha, base_sha: baseSha, base_ref: pr.baseRefName, engine, author_model_problem: problem });
+  setOutputs({ eligible: String(eligible), number: String(pr.number), head_sha: pr.headRefOid, base_tip_sha: baseTipSha, base_sha: baseSha, base_ref: pr.baseRefName, engine, author_model_problem: problem, author_families: families.join(','), openai_fallback: String(!families.includes('openai')), claude_fallback: String(!families.includes('anthropic')) });
 }
 
 function availableFeatures(env) {
