@@ -112,26 +112,31 @@ try {
     if (-not $opened.Contains('Server received: server seed')) { throw 'Open did not show the real server reply' }
     Shot 'open'
     $result.cases += @{ name = 'open'; passed = $true; detail = 'Copied the host-persisted seed reply from the real UI' }
-    $lastReply = ''
+    $replies = @('Server received: server seed')
     foreach ($case in @(@{ name = 'send'; text = 'windows send proof' }, @{ name = 'clear'; text = '/clear' }, @{ name = 'after-clear'; text = 'windows after clear' })) {
         Send-Line $case.text
         $wireText = if ($case.name -eq 'clear') { '/clear ' } else { $case.text }
         [void](Wait-For ('server receipt for ' + $case.name) { $snapshot = Server-Snapshot ($case.name + '-server'); @($snapshot.inputs | Where-Object { $_.text -ceq $wireText }).Count -eq 1 })
         [void](Wait-For ('painted reply for ' + $case.name) { (Reply-Count (Copy-Chat ($case.name + '-copied')) ('Server received: ' + $case.text)) -eq 1 } 30)
         Shot $case.name
-        $lastReply = 'Server received: ' + $case.text
+        $replies += 'Server received: ' + $case.text
         $result.cases += @{ name = $case.name; passed = $true; detail = 'Exactly one provider receipt over real SSH and a copied rendered reply' }
     }
-    Start-Sleep -Milliseconds 1600
-    Press @(0x12, 0x43) 'Alt+C: close server Chat View'
-    Start-Sleep -Milliseconds 1600
-    $reopenOffset = (Log-Text).Length
-    Press @(0x12, 0x43) 'Alt+C: reopen server Chat View'
-    [void](Wait-For 'server transcript reloaded' { (Log-Text).Substring($reopenOffset) -match '\[chat\] transcript load shell=\d+ ok' })
-    $reopened = Copy-Chat 'reopened-copied'
-    if ((Reply-Count $reopened $lastReply) -ne 1) { throw ('Reopened Chat View showed the last reply ' + (Reply-Count $reopened $lastReply) + ' times') }
-    Shot 'reopened'
-    $result.cases += @{ name = 'reopen'; passed = $true; detail = 'Reopening the Chat View shows the last server reply once' }
+    $reloadOffset = (Log-Text).Length
+    Press @(0x11, 0x4B) 'Ctrl+K: open command palette'
+    [void](Wait-For 'palette ready before resync' { (Log-Text).Substring($reloadOffset) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
+    Type-Text 'resync chat'
+    [void](Wait-For 'resync command' { (Log-Text).Substring($reloadOffset) -match '\[palette\] ready chars=11 count=1 target=6493(?:\s|$)' })
+    Press @(0x0D) 'Enter: resync the transcript from the server'
+    [void](Wait-For 'resync requested' { (Log-Text).Substring($reloadOffset) -match '\[chat\] resync requested' })
+    [void](Wait-For 'server transcript reloaded' { (Log-Text).Substring($reloadOffset) -match '\[chat\] transcript load shell=\d+ ok' })
+    $reloaded = Copy-Chat 'reloaded-copied'
+    foreach ($reply in $replies) {
+        $count = Reply-Count $reloaded $reply
+        if ($count -ne 1) { throw ('Reloaded Chat View showed ' + $reply + ' ' + $count + ' times') }
+    }
+    Shot 'reloaded'
+    $result.cases += @{ name = 'reload'; passed = $true; detail = 'Resyncing the transcript from the server shows every server reply once' }
     Save @{ pid = $app.Id; hwnd = $main.ToInt64(); exe = $app.Path; sha256 = $ExpectedHash; visible = $true } "$Evidence/doctor.json"
     $result.status = 'passed'
 } catch {
