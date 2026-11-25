@@ -1,6 +1,6 @@
 # Multi Bot session verbs and server slots
 
-Source files: src/mp_sessions.py, src/mp_send.py, src/mp_layout.mjs, tools/mp-sessions, tools/mp-sessions-test.py, tools/mp-layout.mjs, tools/mp-layout-host.test.js, tools/mb.mjs, tools/check-servers-slots.mjs, tools/check-servers-slots.test.js, tools/fixtures/MUBO-194/*, tools/fixtures/MUBO-294/*, tools/fixtures/SOFT-3139/*, .github/workflows/mp-sessions-slots.yml
+Source files: src/mp_sessions.py, src/mp_send.py, src/mp_layout.mjs, tools/mp-sessions, tools/mp-sessions-test.py, tools/mp-layout.mjs, tools/mp-layout-host.test.js, tools/mb.mjs, tools/check-servers-slots.mjs, tools/check-servers-slots.test.js, tools/fixtures/MUBO-194/*, tools/fixtures/MUBO-294/*, tools/fixtures/MUBO-558/*, tools/fixtures/SOFT-3139/*, .github/workflows/mp-sessions-slots.yml
 CI workflow: mp-sessions-slots.yml
 
 ## Sub-features
