@@ -23,6 +23,7 @@ function Measure-SshIdle([string]$Name, [int]$Seconds = 210) {
                     elseif ($command -match 'while IFS= read') { 'capacity-channel' }
                     elseif ($command -match 'tmux list-sessions') { 'capacity-fallback' }
                     elseif ($command -match 'MP_RELAY') { 'reader-relay-bootstrap' }
+                    elseif ($command -match '(?:^|\s)-N(?:\s|$)') { 'notification-forward' }
                     else { 'other' }
                 @{ pid = $_.BaseName; tick = [long]$lines[0]; caller = $caller; command = $command }
             }
@@ -30,7 +31,7 @@ function Measure-SshIdle([string]$Name, [int]$Seconds = 210) {
     })
     $proof = @{ name = $Name; seconds = $timer.Elapsed.TotalSeconds; logins = $after - $before;
         logins_per_hour = ($after - $before) * 3600 / $timer.Elapsed.TotalSeconds;
-        ssh_spawns = $spawns.Count; callers = @($spawns | Group-Object caller | ForEach-Object { @{ caller = $_.Name; count = $_.Count } });
+        ssh_spawns = $spawns.Count; callers = @($spawns | Group-Object { $_.caller } | ForEach-Object { @{ caller = $_.Name; count = $_.Count } });
         spawns = $spawns; passed = ($after - $before -eq 0 -and $spawns.Count -eq 0);
         boundary = 'Real Windows OpenSSH to runner-owned sshd; transparent argv-counting wrapper; no harness SSH during observation' }
     Save $proof "$Evidence/$Name.json"
