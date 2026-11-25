@@ -2478,18 +2478,30 @@ pub fn chatShellDraftPushDue() void {
     }
 }
 
+fn chatDraftOwnerShell() ?u32 {
+    if (app_state.g_chat_draft_owner_len == 0) return null;
+    const id = app_state.g_chat_draft_owner[0..app_state.g_chat_draft_owner_len];
+    for (0..app_state.shell_count) |idx| {
+        if (app_state.shells[idx].chat_id == 0) continue;
+        var buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+        if (std.mem.eql(u8, chatDraftKeyForShell(@intCast(idx), &buf), id)) return @intCast(idx);
+    }
+    return null;
+}
+
 fn chatDraftNoteEdit() void {
     if (chat_draft_loading or app_state.g_chat_draft_owner_len == 0 or app_state.g_chat_composer_hwnd == null) return;
     var text: [16400]u16 = undefined;
     const n_i = GetWindowTextW(app_state.g_chat_composer_hwnd, &text, @intCast(text.len));
     const n: usize = if (n_i > 0) @intCast(n_i) else 0;
     const id = app_state.g_chat_draft_owner[0..app_state.g_chat_draft_owner_len];
+    const marker_before = chat_drafts.hasDraft(id);
     chat_drafts.set(id, text[0..n], true) catch return;
     app_state.g_chat_draft_dirty = true;
-    if (app_state.g_main_hwnd != null) {
-        _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
-        _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_DRAFT, CHAT_DRAFT_SAVE_MS, null);
+    if (marker_before != chat_drafts.hasDraft(id)) {
+        if (chatDraftOwnerShell()) |idx| @import("sidebar.zig").invalidateDraftMarker(idx);
     }
+    if (app_state.g_main_hwnd != null) _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_DRAFT, CHAT_DRAFT_SAVE_MS, null);
 }
 
 pub fn chatDraftCloseForShell(idx: u32) void {
@@ -3712,4 +3724,129 @@ test "SOFT-2489 gg types gg in the composer" {
     _ = chatComposerSubclassProc(edit, 0x0102, 'g', 1);
     try std.testing.expectEqual(@as(i32, 2), GetWindowTextW(edit, &text, text.len));
     try std.testing.expectEqualSlices(u16, &.{ 'g', 'g' }, text[0..2]);
+}
+
+const DraftPaintProbe = struct {
+    var paints: usize = 0;
+
+    fn windowProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
+        if (msg == WM_PAINT) {
+            paints += 1;
+            var ps: PAINTSTRUCT = std.mem.zeroes(PAINTSTRUCT);
+            _ = BeginPaint(hwnd, &ps);
+            _ = EndPaint(hwnd, &ps);
+            return 0;
+        }
+        return DefWindowProcW(hwnd, msg, wp, lp);
+    }
+};
+
+test "SOFT-3163 typing repaints nothing once the sidebar already shows the draft" {
+    const w = @import("win32.zig");
+    const saved = .{
+        .main = app_state.g_main_hwnd,
+        .composer = app_state.g_chat_composer_hwnd,
+        .orig = app_state.g_chat_composer_orig_proc,
+        .owner_len = app_state.g_chat_draft_owner_len,
+        .count = app_state.shell_count,
+        .active = app_state.active_shell,
+        .chat_active = app_state.g_chat_active,
+        .ac = app_state.g_chat_ac,
+        .nav = app_state.g_chat_nav_active,
+        .chord = chat_newest_chord,
+        .loading = chat_draft_loading,
+        .dirty = app_state.g_chat_draft_dirty,
+        .shell0 = app_state.shells[0],
+        .single = app_state.g_single_window,
+        .starred = app_state.g_starred_workspace,
+        .collapsed = app_state.g_sidebar_collapsed,
+        .hidden = app_state.g_hide_sidebar,
+        .inbox = app_state.g_inbox_active,
+        .all_sessions = app_state.g_all_sessions_active,
+        .scroll = app_state.g_sidebar_scroll,
+        .groups = app_state.group_count,
+        .inbox_rows = app_state.g_inbox_row_count,
+        .recents = app_state.g_recents_section_collapsed,
+        .snoozed = app_state.g_ws_snoozed,
+        .view = app_state.g_sidebar_view,
+    };
+    defer {
+        chat_drafts.remove(app_state.g_chat_draft_owner[0..app_state.g_chat_draft_owner_len]);
+        app_state.g_main_hwnd = saved.main;
+        app_state.g_chat_composer_hwnd = saved.composer;
+        app_state.g_chat_composer_orig_proc = saved.orig;
+        app_state.g_chat_draft_owner_len = saved.owner_len;
+        app_state.shell_count = saved.count;
+        app_state.active_shell = saved.active;
+        app_state.g_chat_active = saved.chat_active;
+        app_state.g_chat_ac = saved.ac;
+        app_state.g_chat_nav_active = saved.nav;
+        chat_newest_chord = saved.chord;
+        chat_draft_loading = saved.loading;
+        app_state.g_chat_draft_dirty = saved.dirty;
+        app_state.shells[0] = saved.shell0;
+        app_state.g_single_window = saved.single;
+        app_state.g_starred_workspace = saved.starred;
+        app_state.g_sidebar_collapsed = saved.collapsed;
+        app_state.g_hide_sidebar = saved.hidden;
+        app_state.g_inbox_active = saved.inbox;
+        app_state.g_all_sessions_active = saved.all_sessions;
+        app_state.g_sidebar_scroll = saved.scroll;
+        app_state.group_count = saved.groups;
+        app_state.g_inbox_row_count = saved.inbox_rows;
+        app_state.g_recents_section_collapsed = saved.recents;
+        app_state.g_ws_snoozed = saved.snoozed;
+        app_state.g_sidebar_view = saved.view;
+    }
+    app_state.g_single_window = true;
+    app_state.g_starred_workspace = true;
+    app_state.g_sidebar_collapsed = true;
+    app_state.g_hide_sidebar = false;
+    app_state.g_inbox_active = false;
+    app_state.g_all_sessions_active = false;
+    app_state.g_sidebar_scroll = 0;
+    app_state.group_count = 0;
+    app_state.g_inbox_row_count = 0;
+    app_state.g_recents_section_collapsed = false;
+    app_state.g_ws_snoozed = @splat(false);
+    app_state.g_sidebar_view = null;
+    app_state.shell_count = 1;
+    app_state.active_shell = 0;
+    app_state.shells[0] = app_state.empty_shell;
+    app_state.shells[0].chat_id = 6416;
+    app_state.shells[0].favorite = true;
+    app_state.shells[0].workspace = app_state.g_active_workspace;
+    const owner_id = chatDraftKeyForShell(0, &app_state.g_chat_draft_owner);
+    app_state.g_chat_draft_owner_len = owner_id.len;
+    chat_drafts.remove(owner_id);
+    chat_draft_loading = false;
+    app_state.g_chat_active = false;
+    app_state.g_chat_ac = .{};
+    app_state.g_chat_nav_active = false;
+    chat_newest_chord = .{};
+    const parent = CreateWindowExW(0, L("STATIC"), L(""), 0x80000000, 0, 0, 600, 400, null, null, null, null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(parent);
+    const restore_proc = SetWindowLongPtrW(parent, -4, @bitCast(@intFromPtr(&DraftPaintProbe.windowProc)));
+    defer _ = SetWindowLongPtrW(parent, -4, restore_proc);
+    const edit = CreateWindowExW(0, L("EDIT"), L(""), WS_CHILD | WS_VISIBLE | ES_MULTILINE, 0, 0, 400, 100, parent, null, null, null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(edit);
+    _ = ShowWindow(parent, 4);
+    app_state.g_main_hwnd = parent;
+    app_state.g_chat_composer_hwnd = edit;
+    app_state.g_chat_composer_orig_proc = GetWindowLongPtrW(edit, -4);
+    _ = w.UpdateWindow(parent);
+    DraftPaintProbe.paints = 0;
+    _ = chatComposerSubclassProc(edit, 0x0102, 'a', 1);
+    _ = w.UpdateWindow(parent);
+    try std.testing.expectEqual(@as(usize, 1), DraftPaintProbe.paints);
+    for (0..11) |_| {
+        _ = chatComposerSubclassProc(edit, 0x0102, 'b', 1);
+        _ = w.UpdateWindow(parent);
+    }
+    try std.testing.expectEqual(@as(usize, 1), DraftPaintProbe.paints);
+    for (0..12) |_| {
+        _ = chatComposerSubclassProc(edit, 0x0102, 8, 1);
+        _ = w.UpdateWindow(parent);
+    }
+    try std.testing.expectEqual(@as(usize, 2), DraftPaintProbe.paints);
 }
