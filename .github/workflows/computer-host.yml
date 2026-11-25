@@ -5,9 +5,6 @@ on:
       revision:
         required: false
         type: string
-      public_key:
-        required: true
-        type: string
 
 permissions:
   contents: read
@@ -22,12 +19,10 @@ jobs:
         with:
           ref: ${{ inputs.revision || github.sha }}
           persist-credentials: false
-      - name: Run the disposable desktop host behind the free tunnel
+      - name: Run the disposable desktop host behind the free tunnels
         id: host
         timeout-minutes: 42
-        env:
-          HOST_PUBLIC_KEY: ${{ inputs.public_key }}
-        run: bash tools/verify-computer/host.sh "$RUNNER_TEMP/computer-host" "$GITHUB_OUTPUT" "$HOST_PUBLIC_KEY"
+        run: bash tools/verify-computer/host.sh "$RUNNER_TEMP/computer-host" "$GITHUB_OUTPUT"
       - name: Report the host identity
         if: always()
         run: |

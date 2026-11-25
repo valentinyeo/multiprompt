@@ -228,8 +228,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       full: ${{ steps.features.outputs.available }}
-      host_public_key: ${{ steps.hostkey.outputs.public_key }}
-      host_private_key: ${{ steps.hostkey.outputs.private_key }}
       quarantined: ${{ steps.policy.outputs.quarantined }}
       pr: ${{ steps.features.outputs.pr }}
       matrix: ${{ steps.matrix.outputs.matrix }}
@@ -270,29 +268,12 @@ jobs:
           const policy = require('./tools/journey-policy.json');
           console.log(`quarantined=${JSON.stringify(Object.keys(policy.quarantined))}`);
           NODE
-      - name: Prepare the disposable computer-host key
-        id: hostkey
-        if: contains(fromJSON(steps.matrix.outputs.selected), 'computer-pane')
-        run: |
-          key="$RUNNER_TEMP/computer-host-client"
-          rm -f "$key" "$key.pub"
-          ssh-keygen -q -t ed25519 -N '' -C verify-computer-host -f "$key"
-          while read -r line; do
-            if [ -n "$line" ]; then echo "::add-mask::$line"; fi
-          done <"$key"
-          echo "public_key=$(cat "$key.pub")" >>"$GITHUB_OUTPUT"
-          {
-            echo 'private_key<<VERIFY_COMPUTER_KEY'
-            cat "$key"
-            echo 'VERIFY_COMPUTER_KEY'
-          } >>"$GITHUB_OUTPUT"
   computer-host:
     needs: [journeys]
     if: contains(fromJSON(needs.journeys.outputs.selected), 'computer-pane')
     uses: ./.github/workflows/computer-host.yml
     with:
       revision: ${{ inputs.revision || github.sha }}
-      public_key: ${{ needs.journeys.outputs.host_public_key }}
   build-app:
     strategy:
       fail-fast: false
@@ -488,7 +469,6 @@ jobs:
       FEATURE: ${{ matrix.feature }}
       VERIFY_CANDIDATE_ARTIFACT: ${{ inputs.candidate_artifact }}
       RELEASE_TAG: ${{ inputs.tag || '' }}
-      COMPUTER_HOST_KEY: ${{ needs.journeys.outputs.host_private_key }}
     steps:
       - name: Select instant chat driver
         if: env.CHAT_INSTANT_PROOF == '1' || env.CHAT_MODEL_PROOF == '1' || env.CHAT_WORKING_LIVE_PROOF == '1' || env.CHAT_DOUBLE_CLICK_PROOF == '1'

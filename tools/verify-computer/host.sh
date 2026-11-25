@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
-work="${1:?usage: host.sh <workdir> <github-output-file> <client-public-key>}"
-output="${2:?usage: host.sh <workdir> <github-output-file> <client-public-key>}"
-client_key="${3:?usage: host.sh <workdir> <github-output-file> <client-public-key>}"
+work="${1:?usage: host.sh <workdir> <github-output-file>}"
+output="${2:?usage: host.sh <workdir> <github-output-file>}"
 repo="${GITHUB_WORKSPACE:-$(pwd)}"
 desk=desk
 vnc_port=5900
@@ -100,15 +99,13 @@ printf 'desk ALL=(root) NOPASSWD: /usr/bin/systemctl stop novnc-desktop.service,
 sudo chmod 440 /etc/sudoers.d/desk-verify
 
 sudo install -d -m 700 -o "$desk" -g "$desk" "/home/$desk/.ssh"
-printf '%s\n' "$client_key" | sudo tee "/home/$desk/.ssh/authorized_keys" >/dev/null
-sudo chown "$desk:$desk" "/home/$desk/.ssh/authorized_keys"
-sudo chmod 600 "/home/$desk/.ssh/authorized_keys"
 sudo tee /etc/ssh/sshd_config.d/60-verify-computer.conf >/dev/null <<'CONF'
 PasswordAuthentication no
 KbdInteractiveAuthentication no
 PubkeyAuthentication yes
 PermitRootLogin no
 AllowUsers desk
+AuthorizedKeysFile .ssh/authorized_keys
 CONF
 sudo systemctl reload ssh 2>/dev/null || sudo systemctl restart ssh
 
@@ -145,6 +142,60 @@ tar -C "$work" -xzf "$work/bore.tar.gz"
 chmod 755 "$work/bore"
 
 base=$(( 20000 + GITHUB_RUN_ID % 40000 ))
+enroll_local=29999
+enroll_public=$(( base + 500 ))
+
+setsid "$work/bore" local "$enroll_local" --to bore.pub --port "$enroll_public" >>"$work/enroll.log" 2>&1 &
+echo $! >"$work/enroll.pid"
+enroll_up=0
+for attempt in $(seq 1 20); do
+    sleep 1
+    if grep -qi 'listening at' "$work/enroll.log"; then enroll_up=1; break; fi
+done
+if [ "$enroll_up" -ne 1 ]; then
+    echo 'the enrollment tunnel did not come up'
+    cat "$work/enroll.log"
+    exit 1
+fi
+echo "enrollment tunnel port ${enroll_public}"
+
+sudo python3 - "$work/enrolled_keys" <<'ENROLL' &
+import socket, sys
+path = sys.argv[1]
+server = socket.socket()
+server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+server.bind(('127.0.0.1', 29999))
+server.listen(4)
+server.settimeout(1500)
+while True:
+    try:
+        conn, _ = server.accept()
+    except socket.timeout:
+        sys.exit(1)
+    conn.settimeout(10)
+    data = b''
+    try:
+        while len(data) < 8192:
+            piece = conn.recv(4096)
+            if not piece:
+                break
+            data += piece
+            if b'\n' in data:
+                break
+    except socket.timeout:
+        pass
+    keys = [line.strip() for line in data.decode('utf-8', 'replace').splitlines() if line.strip().startswith('ssh-ed25519 ')]
+    if not keys:
+        conn.close()
+        continue
+    with open(path, 'w', encoding='ascii') as handle:
+        for key in keys:
+            handle.write(key + '\n')
+    conn.sendall(b'ok\n')
+    conn.close()
+    sys.exit(0)
+ENROLL
+
 tunnel_port=0
 for offset in $(seq 0 15); do
     candidate=$(( base + offset ))
@@ -164,6 +215,19 @@ if [ "$tunnel_port" -eq 0 ]; then
     exit 1
 fi
 echo "public tunnel port ${tunnel_port}"
+
+enroll_deadline=$(( $(date +%s) + 1500 ))
+while [ "$(date +%s)" -lt "$enroll_deadline" ]; do
+    if [ -s "$work/enrolled_keys" ]; then break; fi
+    sleep 5
+done
+if [ ! -s "$work/enrolled_keys" ]; then
+    echo 'the client never published its public key to the enrollment tunnel'
+    exit 1
+fi
+sudo install -m 600 -o "$desk" -g "$desk" "$work/enrolled_keys" "/home/$desk/.ssh/authorized_keys"
+kill "$(cat "$work/enroll.pid")" 2>/dev/null || true
+echo 'client public key enrolled; the enrollment tunnel is closed'
 
 ss -ltnp >"$work/host-listeners.txt" 2>&1 || true
 grep -E ':(5900|6080)[[:space:]]' "$work/host-listeners.txt" >"$work/desktop-listeners.txt" || true

@@ -65,8 +65,11 @@ Each ticket item is recorded as proven, failed or unreachable in `computer-pane-
    listener answers SSH, never RFB.
 
 The host is told to stop when the driver writes `/tmp/verify-computer-done`, so it never outlives the
-journey. Every credential is created inside the run, masked with `::add-mask::`, and the private key
-lives only in `RUNNER_TEMP`, never in the evidence artifact.
+journey. Nothing secret crosses a job boundary: the Windows job generates a throwaway key pair in
+`RUNNER_TEMP` and posts only its public half to a second free tunnel port derived from the run id, the
+host installs that half in `authorized_keys` and closes the enrollment tunnel, and the VNC password is
+generated on the host and only ever handed back over SSH. No private key reaches a log, and the evidence
+artifact holds paths and public fingerprints, never credentials.
 
 A red run is a product symptom, not a driver gap: read `computer-pane.png`, the `[computer]` lines in
 `data/roaming/ZigShell/debug.log`, and the item table. The known released symptom is

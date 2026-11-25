@@ -1237,9 +1237,6 @@ function Invoke-ComputerSsh([string]$Exe, [string[]]$Arguments, [string]$InputTe
 }
 
 function Resolve-ComputerHost {
-    $key = $env:COMPUTER_HOST_KEY
-    if ([string]::IsNullOrWhiteSpace($key)) { throw 'The computer-pane journey needs the disposable host key from the journeys job' }
-    foreach ($line in ($key -split "`r?`n")) { if ($line.Trim()) { Write-Output ('::add-mask::' + $line.Trim()) } }
     $address = 'bore.pub'
     $user = 'desk'
     $vncPort = 5900
@@ -1248,13 +1245,46 @@ function Resolve-ComputerHost {
     $scanExe = Join-Path $env:SystemRoot 'System32/OpenSSH/ssh-keyscan.exe'
     if (-not (Test-Path -LiteralPath $ssh) -or -not (Test-Path -LiteralPath $scanExe)) { throw 'The computer-pane journey needs the Windows OpenSSH client tools' }
     $keyPath = Join-Path $env:RUNNER_TEMP 'computer-host-key'
-    [IO.File]::WriteAllText($keyPath, (($key -replace "`r", '') + "`n"), (New-Object Text.UTF8Encoding($false)))
-    & icacls $keyPath /inheritance:r /grant:r ('{0}:(R)' -f $env:USERNAME) | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw 'The disposable host key file could not be restricted to this runner user' }
+    $keygen = Join-Path $env:SystemRoot 'System32/OpenSSH/ssh-keygen.exe'
+    Remove-Item -LiteralPath $keyPath, ($keyPath + '.pub') -Force -ErrorAction SilentlyContinue
+    $keygenRun = Start-Process -FilePath $keygen -ArgumentList @('-q', '-t', 'ed25519', '-N', '""', '-C', 'verify-computer-client', '-f', $keyPath) -Wait -PassThru -NoNewWindow
+    if ($keygenRun.ExitCode -ne 0 -or -not (Test-Path -LiteralPath ($keyPath + '.pub'))) { throw 'The disposable client key pair was not generated' }
+    $checkOut = Join-Path $env:RUNNER_TEMP 'computer-host-key.derived'
+    $checkErr = Join-Path $env:RUNNER_TEMP 'computer-host-key.derived.err'
+    try {
+        $derive = Start-Process -FilePath $keygen -ArgumentList @('-y', '-f', $keyPath) -Wait -PassThru -NoNewWindow -RedirectStandardOutput $checkOut -RedirectStandardError $checkErr
+        $derived = ''
+        if (Test-Path -LiteralPath $checkOut) { $derived = (Get-Content -LiteralPath $checkOut -Raw).Trim() }
+        if ($derive.ExitCode -ne 0 -or $derived -notmatch '^ssh-ed25519 ') { throw 'The disposable client key needs no passphrase for BatchMode ssh' }
+    } finally {
+        Remove-Item -LiteralPath $checkOut, $checkErr -Force -ErrorAction SilentlyContinue
+    }
+    $publicKey = (Get-Content -LiteralPath ($keyPath + '.pub') -Raw).Trim()
     $runId = 0
     if (-not [int64]::TryParse([string]$env:GITHUB_RUN_ID, [ref]$runId) -or $runId -le 0) { throw 'The computer-pane journey needs the workflow run id for the tunnel port range' }
     $base = 20000 + ($runId % 40000)
     $candidates = @(0..15 | ForEach-Object { $base + $_ })
+    $enrollPort = $base + 500
+    $enrolled = $false
+    $enrollDeadline = [DateTime]::UtcNow.AddSeconds(900)
+    Write-Host ('Computer host: enrolling the disposable client key through the free tunnel port ' + $enrollPort)
+    do {
+        $client = New-Object Net.Sockets.TcpClient
+        try {
+            $connecting = $client.ConnectAsync($address, $enrollPort)
+            if ($connecting.Wait(8000)) {
+                $stream = $client.GetStream()
+                $stream.ReadTimeout = 8000
+                $wire = [Text.Encoding]::ASCII.GetBytes(($publicKey + "`n"))
+                $stream.Write($wire, 0, $wire.Length)
+                $buffer = New-Object byte[] 8
+                $size = $stream.Read($buffer, 0, 8)
+                if ($size -ge 2 -and [Text.Encoding]::ASCII.GetString($buffer, 0, $size).Trim() -ceq 'ok') { $enrolled = $true }
+            }
+        } catch { } finally { $client.Dispose() }
+        if (-not $enrolled) { Start-Sleep -Seconds 15 }
+    } while (-not $enrolled -and [DateTime]::UtcNow -lt $enrollDeadline)
+    if (-not $enrolled) { throw 'The disposable host did not accept the client public key within fifteen minutes' }
     $port = 0
     Write-Host ('Computer host: probing the reserved tunnel ports ' + ($candidates[0]) + ' to ' + ($candidates[-1]))
     $deadline = [DateTime]::UtcNow.AddSeconds(1200)
@@ -1287,7 +1317,7 @@ function Resolve-ComputerHost {
         $configPaths += $configPath
     }
     [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/ssh-path.txt'), $ssh, (New-Object Text.UTF8Encoding($false)))
-    Save-Json @{ address = $address; port = $port; user = $user; vncPort = $vncPort; viewerPort = $viewerPort; candidates = $candidates; ssh = $ssh; keyFile = 'RUNNER_TEMP/computer-host-key'; knownHosts = 'RUNNER_TEMP/computer-host-known_hosts'; hostKey = $fingerprint; appConfigs = $configPaths } 'computer-host.json'
+    Save-Json @{ address = $address; port = $port; enrollPort = $enrollPort; user = $user; vncPort = $vncPort; viewerPort = $viewerPort; candidates = $candidates; ssh = $ssh; keyFile = 'RUNNER_TEMP/computer-host-key'; knownHosts = 'RUNNER_TEMP/computer-host-known_hosts'; hostKey = $fingerprint; appConfigs = $configPaths } 'computer-host.json'
     return @{ address = $address; port = $port; user = $user; vncPort = $vncPort; viewerPort = $viewerPort; ssh = $ssh; key = $keyPath; knownHosts = $knownHosts }
 }
 
