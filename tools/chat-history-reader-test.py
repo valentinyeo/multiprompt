@@ -5434,6 +5434,132 @@ def stop_fixture_host_loop(test, thread, session):
     test.assertFalse(thread.is_alive(), 'fixture host loop outlived its HOME patch')
 
 
+class MUBO_221_AntigravityHistoryRetentionTest(unittest.TestCase):
+    provider = 'antigravity'
+    tmux = 'live-antigravity-retention'
+    text = 'fresh chat question'
+    reply = 'All good'
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name)
+        self.addCleanup(patch.stopall)
+        patch.object(reader, 'HOME', self.home).start()
+        patch.object(reader, 'MESSAGE_WORKER_IDLE_SECONDS', 0.1).start()
+        patch.dict(os.environ, dict(HOME=str(self.home))).start()
+        self.sid = str(uuid.uuid4())
+        self.host_children = []
+        track_fixture_hosts(self)
+        self.agent = self.home / 'agy-stand-in.py'
+        self.agent.write_text((ROOT / 'tools/fixtures/MUBO-221/agy-stand-in.py').read_text(encoding='utf-8'), encoding='utf-8')
+        self.stream = ROOT / 'tools/fixtures/SOFT-3050/agy-stream.ndjson'
+        self.addCleanup(self.stop_hosts)
+
+    def stop_hosts(self):
+        try:
+            reader.host_stop(self.provider, self.sid, force=True)
+        finally:
+            for child in self.host_children:
+                stop_fixture_process(child)
+            reader.host_reap_agent(self.provider, self.sid)
+
+    def paths(self):
+        return reader.host_paths(self.provider, self.sid)
+
+    def enable(self):
+        reply = reader.host_cli(['enable', self.provider, self.sid, '--tmux', self.tmux, '--cwd', str(self.home)])
+        self.assertEqual(reply.get('status'), 'enabled', reply)
+        config = reader.host_read(self.paths()['config'])
+        config['command'] = [sys.executable, str(self.agent), str(self.stream)]
+        reader.host_write(self.paths()['config'], config)
+
+    def events(self):
+        db = reader.message_store_db(self.tmux)
+        try:
+            return [json.loads(body) for (body,) in db.execute('SELECT body FROM message_events WHERE provider=? AND sid=? ORDER BY seq', (self.provider, self.sid))]
+        finally:
+            db.close()
+
+    def evidence(self):
+        errors = self.paths()['errors']
+        log = self.paths()['log']
+        return ('events=%s log=%s stderr=%s' % (json.dumps(self.events())[-1500:],
+                                               log.read_text(encoding='utf-8')[-1000:] if log.exists() else '',
+                                               errors.read_text(encoding='utf-8')[-1000:] if errors.exists() else ''))
+
+    def wait_for(self, predicate, timeout=90):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            value = predicate()
+            if value:
+                return value
+            time.sleep(0.05)
+        self.fail('timed out waiting for the antigravity host; ' + self.evidence())
+
+    def send(self):
+        store = dict(message_protocol=1, provider=self.provider, sid=self.sid, tmux=self.tmux)
+        token = 'mubo221' + uuid.uuid4().hex
+        submitted = reader.message_store_request(dict(store, op='message_submit', message_id=token, text=self.text, origin='human'))
+        self.assertEqual(submitted['message']['state'], 'queued')
+        reader.message_store_request(dict(store, op='message_dispatch'))
+        self.wait_for(lambda: [event for event in self.events() if event.get('kind') == 'text.done'])
+        return token
+
+    def fetch(self):
+        query = dict(id=7, provider=self.provider, sid=self.sid, tmux=self.tmux, cwd=str(self.home),
+                     cached_sid='', inode=0, offset=0, follow=True, source_offsets=True)
+        wire = reader.response(query)
+        lines = wire.splitlines()
+        self.assertEqual(lines[-1], reader.END)
+        fields = lines[0].split('\t')
+        return fields, [json.loads(line) for line in lines[1:-1]], wire
+
+    def read(self):
+        fields, rows, wire = self.fetch()
+        self.assertEqual(fields[:4], ['@mp', '7', 'history', 'ok'], wire)
+        return fields, rows
+
+    def messages(self, rows):
+        return [(row['role'], row['text'], row.get('id')) for row in rows if row.get('role') in ('user', 'assistant')]
+
+    def test_a_fresh_antigravity_chat_keeps_its_reply_across_full_reloads(self):
+        self.enable()
+        token = self.send()
+        fields, rows = self.read()
+        messages = self.messages(rows)
+        self.assertEqual([(role, text) for role, text, _ in messages], [('user', self.text), ('assistant', self.reply)], rows)
+        self.assertEqual(messages[0][2], token)
+        self.assertTrue(messages[1][2])
+        self.assertEqual(len({identity for _, _, identity in messages}), len(messages))
+        self.assertTrue(reader.host_session_state(self.provider, self.sid).get('display_history'))
+        self.assertTrue(self.paths()['history'].is_file())
+        for _ in range(2):
+            self.assertEqual(self.read(), (fields, rows))
+        self.assertEqual(self.messages(self.read()[1]), messages)
+
+    def test_an_existing_unset_antigravity_chat_rebuilds_its_rows_on_host_start(self):
+        self.enable()
+        token = self.send()
+        self.read()
+        reader.host_stop(self.provider, self.sid, force=True)
+        self.wait_for(lambda: not reader.host_owned(self.provider, self.sid))
+        self.paths()['history'].unlink()
+        state = reader.host_read(self.paths()['state']) or {}
+        state.pop('display_history', None)
+        reader.host_write(self.paths()['state'], state)
+        self.assertEqual(self.fetch()[0][3], 'missing')
+        started = reader.host_cli(['start', self.provider, self.sid])
+        self.assertIn(started.get('status'), ('started', 'already'), started)
+        self.wait_for(lambda: self.paths()['history'].is_file() and self.read()[1])
+        messages = self.messages(self.read()[1])
+        self.assertEqual([(role, text) for role, text, _ in messages], [('user', self.text), ('assistant', self.reply)], messages)
+        self.assertEqual(messages[0][2], token)
+        self.assertEqual(len({identity for _, _, identity in messages}), len(messages))
+        self.assertTrue(reader.host_session_state(self.provider, self.sid).get('display_history'))
+        self.assertEqual(len([event for event in self.events() if event.get('kind') == 'text.done']), 1)
+
+
 class FixtureLifecycleTest(unittest.TestCase):
     def test_discovery_does_not_repeat_methods_with_the_same_fixture(self):
         loader = unittest.TestLoader()

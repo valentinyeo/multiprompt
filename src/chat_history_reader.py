@@ -2908,6 +2908,7 @@ def import_legacy_messages(db, sid, transcript, epoch):
 
 
 HOST_PROVIDERS = ('claude', 'codex', 'pi', 'hax', 'cursor', 'antigravity')
+HOST_HISTORY_OWNERS = ('antigravity',)
 MESSAGE_WORKER_IDLE_SECONDS = 120
 MESSAGE_WORKER_STALL_SECONDS = 90
 MESSAGE_WORKER_LOCK_ENV = 'MULTIPROMPT_MESSAGE_WORKER_LOCK_FD'
@@ -4314,6 +4315,25 @@ def host_fresh_archive(provider, sid, tmux, session):
             temporary.unlink()
         except OSError:
             pass
+
+
+def host_history_claim(provider, sid, session):
+    state = session.get("state") if isinstance(session, dict) else None
+    if provider not in HOST_HISTORY_OWNERS or not isinstance(state, dict) or state.get("display_history"):
+        return False
+    tmux = state.get("tmux")
+    if not isinstance(tmux, str) or TMUX_NAME.fullmatch(tmux) is None:
+        return False
+    try:
+        history = host_paths(provider, sid)["history"]
+        if history.is_file():
+            state["display_history"] = True
+            host_state_write(provider, sid, state)
+        else:
+            host_fresh_archive(provider, sid, tmux, session)
+    except (OSError, ValueError, sqlite3.Error, subprocess.SubprocessError):
+        return False
+    return bool(state.get("display_history"))
 
 
 def host_fresh_note_user(state, text):
@@ -6999,6 +7019,7 @@ def host_startup_failure(provider, sid, tmux, state, reason, retry_generation=0)
 def host_loop(provider, sid, tmux, session, server, agent):
     import selectors
     host_session_reset(session, agent)
+    host_history_claim(provider, sid, session)
     host_nightly_mark(provider, sid, session)
     if provider in ("claude", "codex"):
         session["settings"] = host_settings(provider, sid)
