@@ -327,7 +327,12 @@ function evidenceMarkdown(summary, selection) {
     for (const run of summary.head[row.feature]) {
       lines.push(`- head artifact ${run.artifact}: status ${run.status}, checks ${run.checks}, cleanup ${run.cleanup || 'none recorded'}${run.error ? `, error ${run.error}` : ''}`);
       for (const video of (run.videos || []).slice(0, 4)) lines.push(`  - evidence/${run.artifact}/${video}`);
+      for (const video of run.comparisonVideos || []) lines.push(`  - evidence/${run.artifact}/${video}`);
       for (const shot of run.screenshots.slice(0, 12)) lines.push(`  - evidence/${run.artifact}/${shot}`);
+    }
+    for (const run of summary.before?.[row.feature] || []) {
+      lines.push(`- before artifact ${run.artifact}: status ${run.status} (base behavior, not a head regression)`);
+      for (const video of run.comparisonVideos || []) lines.push(`  - evidence/${run.artifact}/${video}`);
     }
     lines.push('');
   }

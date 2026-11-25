@@ -273,10 +273,12 @@ test('Claude output reaches scripts through environment variables, never inline'
   for (const block of runBlocks) assert.doesNotMatch(block, /structured_output|pull_request\.(?:title|body|head\.ref)/);
 });
 
-test('the verifier reuses verify.yml for the head build only', () => {
-  assert.equal([...workflow.matchAll(/uses: \.\/\.github\/workflows\/verify\.yml/g)].length, 1);
-  assert.match(workflow, /features: \$\{\{ needs\.select\.outputs\.features \}\}\n      revision: \$\{\{ needs\.resolve\.outputs\.head_sha \}\}/);
-  assert.doesNotMatch(workflow, /app_revision|base_cache|harness_version/);
+test('the verifier reuses verify.yml and the head harness for matching before and after journeys', () => {
+  assert.equal([...workflow.matchAll(/uses: \.\/\.github\/workflows\/verify\.yml/g)].length, 2);
+  assert.equal([...workflow.matchAll(/features: \$\{\{ needs\.select\.outputs\.features \}\}\n      revision: \$\{\{ needs\.resolve\.outputs\.head_sha \}\}/g)].length, 2);
+  assert.match(workflow, /app_revision: \$\{\{ needs\.resolve\.outputs\.base_tip_sha \}\}\n      video_label: before/);
+  assert.match(workflow, /revision: \$\{\{ needs\.resolve\.outputs\.head_sha \}\}\n      video_label: after/);
+  assert.doesNotMatch(workflow, /base_cache|harness_version/);
   assert.match(verify, /workflow_call:[\s\S]*?app_revision:\n        required: false\n        type: string/);
   assert.match(verify, /APP_REVISION: \$\{\{ inputs\.app_revision \}\}/);
   assert.match(verify, /fromJSON\(needs.journeys.outputs.matrix\)/);
