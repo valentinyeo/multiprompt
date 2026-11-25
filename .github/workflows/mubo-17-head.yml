@@ -36,14 +36,10 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   stream:
-    name: streaming reply window, round ${{ matrix.round }}
+    name: streaming reply windows, base alternating with head
     needs: head
     runs-on: windows-latest
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        round: [1, 2, 3, 4, 5]
+    timeout-minutes: 210
     steps:
       - name: Keep LF line endings
         run: git config --global core.autocrlf false
@@ -63,18 +59,21 @@ jobs:
       - name: Build the boundary launcher
         shell: pwsh
         run: ./tools/mubo-speed/build-launcher.ps1
-      - name: Measure one streaming window per build, alternating the order
+      - name: Measure five alternating streaming windows per build
         shell: pwsh
         env:
-          ROUND: ${{ matrix.round }}
+          ROUNDS: '5'
         run: |
-          $order = if ([int]$env:ROUND % 2 -eq 1) { @($env:BASE_TAG, 'head') } else { @('head', $env:BASE_TAG) }
-          foreach ($tag in $order) {
-            ./tools/mubo-speed/idle-log-cpu.ps1 -Exe "bin/$tag/multiprompt-x64.exe" -Evidence "evidence/round-$($env:ROUND)/$tag" -Tag $tag -Scenario stream -SshPath harness/ssh.exe -IdleSeconds 600 -SettleSeconds 60
-            Write-Host "$tag round $($env:ROUND) stream exit $LASTEXITCODE"
+          $count = [int]$env:ROUNDS
+          foreach ($round in 1..$count) {
+            $order = if ($round % 2 -eq 1) { @($env:BASE_TAG, 'head') } else { @('head', $env:BASE_TAG) }
+            foreach ($tag in $order) {
+              ./tools/mubo-speed/idle-log-cpu.ps1 -Exe "bin/$tag/multiprompt-x64.exe" -Evidence "evidence/round-$round/$tag" -Tag $tag -Scenario stream -SshPath harness/ssh.exe -IdleSeconds 600 -SettleSeconds 60
+              Write-Host "$tag round $round stream exit $LASTEXITCODE"
+            }
           }
           exit 0
-      - name: Summarise this round
+      - name: Summarise
         if: always()
         shell: pwsh
         run: |
@@ -83,7 +82,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: mubo-17-head-stream-${{ github.run_id }}-${{ matrix.round }}
+          name: mubo-17-head-stream-${{ github.run_id }}
           path: evidence
           if-no-files-found: error
           retention-days: 14
@@ -97,13 +96,12 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          pattern: mubo-17-head-stream-${{ github.run_id }}-*
+          name: mubo-17-head-stream-${{ github.run_id }}
           path: evidence
       - name: Show the downloaded evidence
         run: find evidence -name 'idle.json' | sort
       - name: Report every window
         run: |
-          node tools/mubo-speed/summarize.mjs evidence
           node -e '
           const fs = require("node:fs");
           const path = require("node:path");
@@ -112,22 +110,30 @@ jobs:
             for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
               const full = path.join(dir, entry.name);
               if (entry.isDirectory()) walk(full);
-              else if (entry.name === "idle.json") rows.push(JSON.parse(fs.readFileSync(full, "utf8")));
+              else if (entry.name === "idle.json") rows.push({ ...JSON.parse(fs.readFileSync(full, "utf8")), file: full });
             }
           };
           walk("evidence");
-          const lines = ["| round | build | status | log MB/hour | CPU % of one core | transcript reads | chat paint lines |", "| --- | --- | --- | --- | --- | --- | --- |"];
-          for (const run of rows.sort((a, b) => String(a.file ?? "").localeCompare(String(b.file ?? "")))) {
-            lines.push(`| ${run.tag} | ${run.scenario} | ${run.status} | ${run.logMbPerHour} | ${run.cpuPercentOfOneCore} | ${run.windowTranscriptReads} | ${run.windowChatPaintLines} |`);
-            console.log(run.tag, run.status, run.logMbPerHour, run.cpuPercentOfOneCore, run.windowTranscriptReads, run.windowChatPaintLines, run.topLogTags?.slice(0, 5).map(t => t.tag + "=" + t.lines).join(" "), run.error ?? "");
+          const pick = (tag, field) => rows.filter(r => r.tag === tag).map(r => r[field]).sort((a, b) => a - b);
+          const median = values => values.length ? values[Math.floor(values.length / 2)] : null;
+          const lines = ["| round | build | status | log MB/hour | CPU % of one core | transcript reads | paint lines |", "| --- | --- | --- | --- | --- | --- | --- |"];
+          for (const run of rows.sort((a, b) => a.file.localeCompare(b.file))) {
+            lines.push(`| ${(run.file.match(/round-(\d+)/) || [])[1]} | ${run.tag} | ${run.status} | ${run.logMbPerHour} | ${run.cpuPercentOfOneCore} | ${run.windowTranscriptReads} | ${run.windowChatPaintLines} |`);
           }
-          fs.writeFileSync("evidence/windows.md", lines.join("\n") + "\n");
-          console.log(lines.join("\n"));
+          for (const field of ["logMbPerHour", "cpuPercentOfOneCore", "windowTranscriptReads", "windowChatPaintLines"]) {
+            lines.push(` - median ${field}: ${process.env.BASE_TAG} ${median(pick(process.env.BASE_TAG, field))} head ${median(pick("head", field))}`);
+          }
+          const text = lines.join("\n") + "\n";
+          fs.writeFileSync("windows.md", text);
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, text);
+          console.log(text);
           '
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
           name: mubo-17-head-report-${{ github.run_id }}
-          path: evidence
+          path: |
+            evidence
+            windows.md
           if-no-files-found: warn
           retention-days: 30
