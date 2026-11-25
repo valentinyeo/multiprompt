@@ -2,7 +2,7 @@ name: Verify idle SSH reuse
 on:
   workflow_dispatch:
   push:
-    branches: [mubo-532-ssh-idle]
+    branches: ['mubo-532-ssh-idle*']
 permissions:
   contents: read
 concurrency:
