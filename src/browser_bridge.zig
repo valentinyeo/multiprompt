@@ -2811,7 +2811,13 @@ fn zsbSessionSwitchAi(argv: []const []const u8, out: []u8, comptime ops: type) u
                         const text = std.fmt.bufPrint(out, "{{\"ok\":true,\"status\":\"failed\",\"reason\":\"adopt failed\",\"tab\":{d},\"provider\":\"{s}\"}}\n", .{ args.tab, current_name }) catch return 0;
                         return text.len;
                     }
-                    const text = std.fmt.bufPrint(out, "{{\"ok\":true,\"status\":\"switched\",\"tab\":{d},\"provider\":\"{s}\",\"sid\":\"{s}\"}}\n", .{ args.tab, ws_switch.agentProviderName(done.agent) orelse "", done.sid[0..done.sid_len] }) catch return 0;
+                    const provider_name = ws_switch.agentProviderName(done.agent) orelse "";
+                    const text = if (done.model_applied) blk: {
+                        if (ws_switch.targetModelLabel(done.agent)) |model| {
+                            break :blk std.fmt.bufPrint(out, "{{\"ok\":true,\"status\":\"switched\",\"tab\":{d},\"provider\":\"{s}\",\"sid\":\"{s}\",\"model\":\"{s}\"}}\n", .{ args.tab, provider_name, done.sid[0..done.sid_len], model }) catch return 0;
+                        }
+                        break :blk std.fmt.bufPrint(out, "{{\"ok\":true,\"status\":\"switched\",\"tab\":{d},\"provider\":\"{s}\",\"sid\":\"{s}\"}}\n", .{ args.tab, provider_name, done.sid[0..done.sid_len] }) catch return 0;
+                    } else std.fmt.bufPrint(out, "{{\"ok\":true,\"status\":\"switched\",\"tab\":{d},\"provider\":\"{s}\",\"sid\":\"{s}\"}}\n", .{ args.tab, provider_name, done.sid[0..done.sid_len] }) catch return 0;
                     return text.len;
                 },
                 .already => |agent| {
@@ -3694,6 +3700,7 @@ test "MUBO-535 session-switch-ai switches live chats adopts state skips already 
         const ws_switch = @import("workspace_switch_ai.zig");
         var calls: usize = 0;
         var mode: enum { switched, busy, failed, refused } = .switched;
+        var model_applied: bool = false;
         fn snapshot(tab: u32, target: u8) ws_switch.SnapshotResult {
             return ws_switch.snapshotTabOnUi(tab, target);
         }
@@ -3703,7 +3710,7 @@ test "MUBO-535 session-switch-ai switches live chats adopts state skips already 
                 .switched => blk: {
                     var sid = std.mem.zeroes([40]u8);
                     @memcpy(sid[0..new_sid.len], new_sid);
-                    break :blk .{ .switched = .{ .agent = target, .sid = sid, .sid_len = new_sid.len } };
+                    break :blk .{ .switched = .{ .agent = target, .sid = sid, .sid_len = new_sid.len, .model_applied = model_applied } };
                 },
                 .busy => .busy,
                 .refused => .{ .refused = "unsupported_provider" },
@@ -3732,10 +3739,10 @@ test "MUBO-535 session-switch-ai switches live chats adopts state skips already 
     FakeSwitchOps.mode = .refused;
     try std.testing.expectEqualStrings("{\"ok\":true,\"status\":\"refused\",\"reason\":\"unsupported_provider\",\"tab\":42,\"provider\":\"claude\"}\n", out[0..zsbSessionSwitchAi(&.{ "session-switch-ai", "--tab", "42", "--to", "antigravity" }, &out, FakeSwitchOps)]);
     try std.testing.expectEqual(@as(u8, 1), app_state.shells[1].ai_agent);
-    try std.testing.expectEqual(@as(u8, 1), app_state.shells[1].ai_agent);
 
     FakeSwitchOps.mode = .switched;
-    try std.testing.expectEqualStrings("{\"ok\":true,\"status\":\"switched\",\"tab\":42,\"provider\":\"codex\",\"sid\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"}\n", out[0..zsbSessionSwitchAi(&.{ "session-switch-ai", "--tab", "42", "--to", "codex" }, &out, FakeSwitchOps)]);
+    FakeSwitchOps.model_applied = true;
+    try std.testing.expectEqualStrings("{\"ok\":true,\"status\":\"switched\",\"tab\":42,\"provider\":\"codex\",\"sid\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\",\"model\":\"gpt-6.1-sol\"}\n", out[0..zsbSessionSwitchAi(&.{ "session-switch-ai", "--tab", "42", "--to", "codex" }, &out, FakeSwitchOps)]);
     try std.testing.expectEqual(@as(u8, 2), app_state.shells[1].ai_agent);
     try std.testing.expectEqualStrings(new_sid, app_state.shells[1].claude_sid[0..app_state.shells[1].claude_sid_len]);
     try std.testing.expectEqual(@as(usize, 1), ZsbTabTestOps.persisted);

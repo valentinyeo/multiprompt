@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, statSync, unlinkSync } from 'node:fs';
+import { createHash, randomBytes } from 'node:crypto';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, renameSync, statSync, unlinkSync } from 'node:fs';
+import { hostname } from 'node:os';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isAbsolute, join, resolve } from 'node:path';
@@ -35,6 +36,7 @@ commands:
   workspace delete <name> [--move-to <workspace>]
   workspace color <name> <color>
   workspace switch-ai <workspace> <claude|codex|antigravity> [--json] [--timeout SECONDS]
+  agents providers [--write] [--host N] [--json]
   group list
   group create <name>
   group rename <old> <new>
@@ -81,7 +83,7 @@ function parse(argv) {
     if (withValue.has(name)) {
       if (i + 1 >= argv.length || argv[i + 1].startsWith('--')) throw new Failure(`--${name} needs a value`);
       flags[name] = argv[++i];
-    } else if (['star', 'dry-run', 'json', 'no-tmux', 'ping'].includes(name)) flags[name] = true;
+    } else if (['star', 'dry-run', 'json', 'no-tmux', 'ping', 'write'].includes(name)) flags[name] = true;
     else throw new Failure(`unknown option --${name}`);
   }
   return flags;
@@ -484,6 +486,182 @@ const SWITCH_AI_TARGETS = new Set(['claude', 'codex', 'antigravity']);
 const SWITCH_AI_CHAT_PROVIDERS = new Set(['claude', 'codex', 'pi', 'antigravity']);
 const SWITCH_AI_POLL_MS = 2000;
 const SWITCH_AI_TIMEOUT_S = 120;
+const AGENT_PROVIDER_CODEX_MODELS = { sol: 'gpt-6.1-sol', terra: 'gpt-6.1-terra', luna: 'gpt-6-luna', astra: 'gpt-6-astra' };
+const AGENT_PROVIDER_DEFAULT_MODELS = { antigravity: 'gemini-4-neon', codex: 'gpt-6.1-sol', claude: 'opus' };
+
+function agentProvidersPath(ctx) {
+  const home = ctx.env.HOME || '';
+  if (!home) throw new Failure('HOME is required');
+  return join(home, '.local/state/multiprompt/agent-providers.json');
+}
+
+function normalizeAgentProvider(value) {
+  if (typeof value !== 'string') return '';
+  const name = value.trim().toLowerCase();
+  if (!name) return '';
+  if (name === 'agy') return 'antigravity';
+  return name;
+}
+
+function resolveAgentModel(provider, rawModel) {
+  const text = typeof rawModel === 'string' ? rawModel.trim() : '';
+  if (text) {
+    if (provider === 'codex' && AGENT_PROVIDER_CODEX_MODELS[text.toLowerCase()]) return AGENT_PROVIDER_CODEX_MODELS[text.toLowerCase()];
+    return text;
+  }
+  return AGENT_PROVIDER_DEFAULT_MODELS[provider] || '';
+}
+
+function detectServerSlot(ctx, explicitHost) {
+  if (explicitHost !== undefined) return hostSlot(explicitHost);
+  const envHost = (ctx.env.MULTIPROMPT_HOST || '').trim();
+  if (envHost) return hostSlot(envHost);
+  const home = ctx.env.HOME || '';
+  const serversFile = ctx.env.MULTIPROMPT_SERVERS_FILE || ctx.env.MULTIPROMPT_SERVERS || (home ? join(home, '.local/share/vstack/config/servers.json') : '');
+  if (!serversFile) return null;
+  let facts = null;
+  try { facts = JSON.parse(readFileSync(serversFile, 'utf8')); } catch { return null; }
+  const servers = Array.isArray(facts?.servers) ? facts.servers : [];
+  const host = String(ctx.hostname ? ctx.hostname() : hostname()).toLowerCase();
+  const matched = servers.filter(server => {
+    if (!server || typeof server !== 'object') return false;
+    const names = [server.hostname, server.previous_hostname].filter(item => typeof item === 'string' && item);
+    return names.some(name => name.toLowerCase() === host);
+  });
+  if (matched.length !== 1) return null;
+  const slot = matched[0].multiprompt_slot;
+  return Number.isInteger(slot) && slot >= 0 && slot <= 2 ? slot : null;
+}
+
+function readExistingAgentProviders(filePath) {
+  const entries = new Map();
+  try {
+    const parsed = JSON.parse(readFileSync(filePath, 'utf8'));
+    if (!parsed || !Array.isArray(parsed.chats)) return entries;
+    for (const chat of parsed.chats) {
+      if (!chat || typeof chat.tmux !== 'string' || !chat.tmux) continue;
+      entries.set(chat.tmux.toLowerCase(), chat);
+    }
+  } catch {}
+  return entries;
+}
+
+function readLocalAgentHostConfigs(ctx) {
+  const home = ctx.env.HOME || '';
+  const byTmux = new Map();
+  const list = [];
+  if (!home) return { dirExists: false, byTmux, list };
+  const root = join(home, '.local/state/multiprompt/agent-host');
+  let names;
+  try { names = readdirSync(root); } catch { return { dirExists: false, byTmux, list }; }
+  for (const name of names.sort()) {
+    if (!name.endsWith('.config.json')) continue;
+    const full = join(root, name);
+    let config = null;
+    try { config = JSON.parse(readFileSync(full, 'utf8')); } catch { continue; }
+    if (!config || config.enabled !== true || config.switched_to || config.spawn_mode === 'headless') continue;
+    const provider = normalizeAgentProvider(config.provider);
+    const tmux = typeof config.tmux === 'string' ? config.tmux.trim() : '';
+    if (!provider || !tmux) continue;
+    let mtimeIso = '';
+    try { mtimeIso = new Date(statSync(full).mtimeMs).toISOString(); } catch {}
+    const entry = { provider, tmux, model: typeof config.model === 'string' ? config.model.trim() : '', mtimeIso };
+    if (!byTmux.has(tmux.toLowerCase())) {
+      byTmux.set(tmux.toLowerCase(), entry);
+      list.push(entry);
+    }
+  }
+  return { dirExists: true, byTmux, list };
+}
+
+function collectAgentProviders(ctx, options = {}) {
+  const nowIso = (ctx.now ? ctx.now() : new Date()).toISOString();
+  const statePath = agentProvidersPath(ctx);
+  const prevMap = readExistingAgentProviders(statePath);
+  const hostConfigs = readLocalAgentHostConfigs(ctx);
+  const switchedMap = options.switched || {};
+  const slot = detectServerSlot(ctx, options.host);
+  let listing = options.listing || null;
+  if (!listing) {
+    try {
+      listing = zsbCall(ctx, ['workspace-list']);
+    } catch (error) {
+      if (!hostConfigs.dirExists) throw error;
+    }
+  }
+  const chats = [];
+  const seen = new Set();
+  if (listing && Array.isArray(listing.workspaces)) {
+    const hostFilter = slot !== null && Array.isArray(listing.hosts) && typeof listing.hosts[slot] === 'string' ? listing.hosts[slot] : null;
+    for (const { workspace, tab } of listingTabs(listing)) {
+      if (!tab || tab.chat !== true || tab.worker === true || tab.kind === 'worker') continue;
+      if (hostFilter !== null && tab.host !== hostFilter) continue;
+      const provider = normalizeAgentProvider(tab.provider);
+      const tmux = typeof tab.tmux === 'string' ? tab.tmux.trim() : '';
+      if (!provider || !tmux) continue;
+      const key = tmux.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const hostCfg = hostConfigs.byTmux.get(key);
+      const prev = prevMap.get(key);
+      const sw = switchedMap[key];
+      const model = resolveAgentModel(provider, sw?.model || tab.model || (hostCfg && hostCfg.provider === provider ? hostCfg.model : ''));
+      const since = sw?.since || (prev && normalizeAgentProvider(prev.provider) === provider && typeof prev.since === 'string' && prev.since ? prev.since : (hostCfg && hostCfg.provider === provider && hostCfg.mtimeIso ? hostCfg.mtimeIso : nowIso));
+      chats.push({ workspace: String(workspace || ''), chat: String(tab.title || tmux), tmux, provider, model, since });
+    }
+  } else {
+    for (const cfg of hostConfigs.list) {
+      const key = cfg.tmux.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const prev = prevMap.get(key);
+      const model = resolveAgentModel(cfg.provider, cfg.model);
+      const since = prev && normalizeAgentProvider(prev.provider) === cfg.provider && typeof prev.since === 'string' && prev.since ? prev.since : (cfg.mtimeIso || nowIso);
+      chats.push({ workspace: String(prev?.workspace || ''), chat: String(prev?.chat || cfg.tmux), tmux: cfg.tmux, provider: cfg.provider, model, since });
+    }
+  }
+  const by_provider = {};
+  for (const chat of chats) by_provider[chat.provider] = (by_provider[chat.provider] || 0) + 1;
+  return { updated: nowIso, chats, by_provider };
+}
+
+function writeAgentProvidersFile(ctx, state) {
+  const targetPath = agentProvidersPath(ctx);
+  const dir = dirname(targetPath);
+  mkdirSync(dir, { recursive: true });
+  const tempPath = join(dir, `.agent-providers.${process.pid}.${randomBytes(6).toString('hex')}.tmp`);
+  try {
+    writeFileSync(tempPath, JSON.stringify(state) + '\n', { mode: 0o600 });
+    renameSync(tempPath, targetPath);
+  } catch (error) {
+    try { unlinkSync(tempPath); } catch {}
+    throw error;
+  }
+  return targetPath;
+}
+
+async function agentsCommand(ctx, sub, flags) {
+  if (sub !== 'providers') throw new Failure('agents needs providers');
+  if (flags._.length !== 0) throw new Failure('agents providers takes no positional arguments');
+  const state = collectAgentProviders(ctx, { host: flags.host });
+  if (flags.write) {
+    const filePath = writeAgentProvidersFile(ctx, state);
+    if (flags.json) ctx.out(JSON.stringify(state));
+    else {
+      const summary = Object.entries(state.by_provider).map(([provider, count]) => `${provider}=${count}`).join(', ');
+      ctx.out(`wrote ${filePath} (${state.chats.length} chat${state.chats.length === 1 ? '' : 's'}${summary ? ': ' + summary : ''})`);
+    }
+    return 0;
+  }
+  if (flags.json) {
+    ctx.out(JSON.stringify(state));
+    return 0;
+  }
+  for (const chat of state.chats) ctx.out(`${chat.workspace || '-'}\t${chat.chat}\t${chat.tmux}\t${chat.provider}\t${chat.model || '-'}`);
+  const summary = Object.entries(state.by_provider).map(([provider, count]) => `${provider}=${count}`).join(', ');
+  ctx.out(`total: ${state.chats.length} chat${state.chats.length === 1 ? '' : 's'}${summary ? ' (' + summary + ')' : ''}`);
+  return 0;
+}
 
 function switchAiLockPath(ctx) {
   const home = ctx.env.HOME || '';
@@ -521,7 +699,7 @@ function switchAiChats(workspace) {
     ...(workspace.tabs || []),
     ...(workspace.groups || []).flatMap(group => group.tabs || [])
   ];
-  return tabs.filter(tab => tab.chat === true && SWITCH_AI_CHAT_PROVIDERS.has(String(tab.provider || '').toLowerCase()));
+  return tabs.filter(tab => tab.chat === true && tab.worker !== true && tab.kind !== 'worker' && SWITCH_AI_CHAT_PROVIDERS.has(String(tab.provider || '').toLowerCase()));
 }
 
 function switchAiProvider(ctx, tabId) {
@@ -550,7 +728,7 @@ async function switchOneChat(ctx, tab, target, waitMs) {
     } catch (error) {
       return { tab: tab.id, title, outcome: 'failed', reason: error.message || 'switch failed', provider };
     }
-    if (reply.status === 'switched') return { tab: tab.id, title, outcome: 'switched', from: provider, provider: reply.provider || target, sid: reply.sid || null };
+    if (reply.status === 'switched') return { tab: tab.id, title, outcome: 'switched', from: provider, provider: reply.provider || target, sid: reply.sid || null, ...(reply.model ? { model: reply.model } : {}) };
     if (reply.status === 'already') return { tab: tab.id, title, outcome: 'already', provider: reply.provider || target };
     if (reply.status === 'refused') return { tab: tab.id, title, outcome: 'refused', reason: reply.reason || 'the server refused this switch', provider };
     if (reply.status === 'busy') {
@@ -596,8 +774,13 @@ async function workspaceSwitchAi(ctx, flags) {
         continue;
       }
       const result = await switchOneChat(ctx, tab, target, waitMs);
-      if (result.outcome === 'switched') totals.switched += 1;
-      else if (result.outcome === 'already') totals.already += 1;
+      if (result.outcome === 'switched') {
+        totals.switched += 1;
+        const switchedAt = (ctx.now ? ctx.now() : new Date()).toISOString();
+        const switchedKey = String(tab.tmux || '').trim().toLowerCase();
+        const switched = switchedKey ? { [switchedKey]: { since: switchedAt, model: result.model || null } } : {};
+        writeAgentProvidersFile(ctx, collectAgentProviders(ctx, { host: flags.host, switched }));
+      } else if (result.outcome === 'already') totals.already += 1;
       else if (result.outcome === 'busy') totals.busy += 1;
       else if (result.outcome === 'refused') totals.refused += 1;
       else totals.failed += 1;
@@ -610,6 +793,7 @@ async function workspaceSwitchAi(ctx, flags) {
         else ctx.out(`failed ${result.title}: ${result.reason}`);
       }
     }
+    if (totals.switched === 0) writeAgentProvidersFile(ctx, collectAgentProviders(ctx, { host: flags.host, listing }));
     const ok = totals.failed === 0 && totals.refused === 0;
     if (flags.json) {
       ctx.out(JSON.stringify({ ok, verb: 'workspace switch-ai', workspace: workspace.name, target, total: chats.length, to_switch: pending.length, ...totals, chats: results }));
@@ -1194,7 +1378,12 @@ export async function run(argv, overrides = {}) {
     }
     if (command === 'workspace' && rest[0] === 'switch-ai') {
       const flags = parse(rest.slice(1));
-      return await workspaceSwitchAi({ env, out, err, ownerPath: overrides.ownerPath, delay: overrides.delay || (ms => new Promise(done => setTimeout(done, ms))) }, flags);
+      return await workspaceSwitchAi({ env, out, err, ownerPath: overrides.ownerPath, now: overrides.now, hostname: overrides.hostname, delay: overrides.delay || (ms => new Promise(done => setTimeout(done, ms))) }, flags);
+    }
+    if (command === 'agents') {
+      const sub = rest[0];
+      const flags = parse(rest.slice(1));
+      return await agentsCommand({ env, out, err, now: overrides.now, hostname: overrides.hostname }, sub, flags);
     }
     if (command === 'move') {
       const flags = parse(rest);

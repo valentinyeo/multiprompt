@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { run } from './mb.mjs';
@@ -90,8 +90,14 @@ if args[0] == 'session-switch-ai' and len(args) == 5 and args[1] == '--tab' and 
             sys.exit(0)
         tab['provider'] = target
         tab['sid'] = 'new-' + str(tab_id) + '-' + target
+        model = {'codex': 'gpt-6.1-sol', 'claude': 'opus'}.get(target)
+        if model:
+            tab['model'] = model
         save()
-        print(json.dumps({'ok': True, 'status': 'switched', 'tab': tab_id, 'provider': target, 'sid': tab['sid']}))
+        reply = {'ok': True, 'status': 'switched', 'tab': tab_id, 'provider': target, 'sid': tab['sid']}
+        if model:
+            reply['model'] = model
+        print(json.dumps(reply))
         sys.exit(0)
     print(json.dumps({'ok': False, 'error': 'unknown_tab'}))
     sys.exit(1)
@@ -99,7 +105,7 @@ print(json.dumps({'ok': False, 'error': 'bad_args', 'message': 'unexpected ' + '
 sys.exit(2)
 `;
 
-function harness(listing = LISTING) {
+function harness(listing = LISTING, extraEnv = {}, extraOverrides = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'mb-ws-switch-ai-'));
   const statePath = join(dir, 'state.json');
   const logPath = join(dir, 'calls.log');
@@ -107,22 +113,26 @@ function harness(listing = LISTING) {
   writeFileSync(logPath, '');
   const binary = join(dir, 'mp-zsb');
   writeFileSync(binary, ZSB, { mode: 0o755 });
-  const calls = async argv => {
+  const calls = async (argv, callEnv = {}, callOverrides = {}) => {
     const lines = [], errors = [];
-    const env = { HOME: dir, PATH: process.env.PATH, MULTIPROMPT_ZSB: binary, MB_TEST_STATE: statePath, MB_TEST_LOG: logPath };
+    const env = { HOME: dir, PATH: process.env.PATH, MULTIPROMPT_ZSB: binary, MB_TEST_STATE: statePath, MB_TEST_LOG: logPath, ...extraEnv, ...callEnv };
     const code = await run(argv, {
       env,
       delay: async () => {},
       out: line => lines.push(line),
       err: line => errors.push(line),
       fetch() { assert.fail('workspace switch-ai must not call the account service'); },
-      tmux() { assert.fail('workspace switch-ai must not touch local tmux sessions'); }
+      tmux() { assert.fail('workspace switch-ai must not touch local tmux sessions'); },
+      ...extraOverrides,
+      ...callOverrides
     });
     return { code, lines, errors };
   };
   const bridge = () => readFileSync(logPath, 'utf8').split('\n').filter(line => line && line !== 'workspace-list');
   const state = () => JSON.parse(readFileSync(statePath, 'utf8'));
-  return { dir, statePath, calls, bridge, state };
+  const providersPath = join(dir, '.local/state/multiprompt/agent-providers.json');
+  const providers = () => JSON.parse(readFileSync(providersPath, 'utf8'));
+  return { dir, statePath, providersPath, calls, bridge, state, providers };
 }
 
 test('workspace switch-ai moves every agent chat in the workspace, ignores shells and workers, leaves other workspaces alone, and is idempotent', async t => {
@@ -317,4 +327,159 @@ test('workspace switch-ai refuses an unknown workspace and a second run while on
   const released = await h.calls(['workspace', 'switch-ai', 'Work', 'antigravity']);
   assert.equal(released.code, 0, released.errors.join('\n'));
   assert.equal(existsSync(lockPath), false);
+});
+
+test('workspace switch-ai rewrites agent-providers.json atomically after each switch with every agent chat on that server and accurate counts', async t => {
+  const listing = {
+    ok: true,
+    hosts: ['remote-1', 'remote-2', 'remote-3'],
+    workspaces: [
+      {
+        name: 'HT Product',
+        tabs: [
+          { id: 10, title: 'Plain Shell', host: 'remote-1', tmux: 'sh-1', chat: false, provider: null },
+          { id: 11, title: 'Worker Run', host: 'remote-1', tmux: 'wrk-1', chat: true, worker: true, provider: 'codex' },
+          { id: 12, title: 'HT Bugs', host: 'remote-1', tmux: 'live-bugs', chat: true, provider: 'claude', messages: 2 },
+          { id: 13, title: 'HT Design', host: 'remote-1', tmux: 'live-design', chat: true, provider: 'antigravity', messages: 1 },
+          { id: 14, title: 'Remote Two Chat', host: 'remote-2', tmux: 'live-r2', chat: true, provider: 'claude', messages: 1 }
+        ],
+        groups: [
+          {
+            name: 'Infra',
+            tabs: [
+              { id: 15, title: 'HT Ops', host: 'remote-1', tmux: 'live-ops', chat: true, provider: 'pi', fail_once: true, messages: 1 }
+            ]
+          }
+        ]
+      },
+      {
+        name: 'Other Server Space',
+        groups: [],
+        tabs: [
+          { id: 20, title: 'HT Support', host: 'remote-1', tmux: 'live-support', chat: true, provider: 'codex', model: 'sol', messages: 1 },
+          { id: 21, title: 'HT OpenCode', host: 'remote-1', tmux: 'live-oc', chat: true, provider: 'opencode', model: 'glm-5', messages: 1 }
+        ]
+      }
+    ]
+  };
+  let tick = 0;
+  const times = [
+    '2026-11-25T11:30:00.000Z',
+    '2026-11-25T11:30:01.000Z',
+    '2026-11-25T11:30:02.000Z',
+    '2026-11-25T11:30:03.000Z',
+    '2026-11-25T11:30:04.000Z'
+  ];
+  const now = () => new Date(times[Math.min(tick++, times.length - 1)]);
+  const h = harness(listing, { MULTIPROMPT_HOST: '0' }, { now });
+  t.after(() => rmSync(h.dir, { recursive: true, force: true }));
+
+  const first = await h.calls(['workspace', 'switch-ai', 'HT Product', 'antigravity']);
+  assert.equal(first.code, 1);
+  assert.equal(existsSync(h.providersPath), true);
+  const stateDir = join(h.dir, '.local/state/multiprompt');
+  assert.deepEqual(readdirSync(stateDir).filter(name => name.endsWith('.tmp')), []);
+  assert.equal(statSync(h.providersPath).mode & 0o777, 0o600);
+
+  const afterPartial = h.providers();
+  assert.deepEqual(Object.keys(afterPartial), ['updated', 'chats', 'by_provider']);
+  assert.match(afterPartial.updated, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+  assert.deepEqual(afterPartial.by_provider, { antigravity: 2, pi: 1, codex: 1, opencode: 1 });
+  assert.equal(afterPartial.chats.length, 5);
+  for (const entry of afterPartial.chats) {
+    assert.deepEqual(Object.keys(entry), ['workspace', 'chat', 'tmux', 'provider', 'model', 'since']);
+    assert.match(entry.since, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+  }
+  assert.ok(!afterPartial.chats.some(item => item.tmux === 'sh-1' || item.tmux === 'wrk-1' || item.tmux === 'live-r2'));
+  const bugs = afterPartial.chats.find(item => item.tmux === 'live-bugs');
+  assert.equal(bugs.workspace, 'HT Product');
+  assert.equal(bugs.chat, 'HT Bugs');
+  assert.equal(bugs.provider, 'antigravity');
+  assert.equal(bugs.model, 'gemini-4-neon');
+  const support = afterPartial.chats.find(item => item.tmux === 'live-support');
+  assert.equal(support.workspace, 'Other Server Space');
+  assert.equal(support.provider, 'codex');
+  assert.equal(support.model, 'gpt-6.1-sol');
+
+  const second = await h.calls(['workspace', 'switch-ai', 'HT Product', 'codex']);
+  assert.equal(second.code, 0, second.errors.join('\n'));
+  const afterCodex = h.providers();
+  assert.deepEqual(afterCodex.by_provider, { codex: 4, opencode: 1 });
+  const bugsCodex = afterCodex.chats.find(item => item.tmux === 'live-bugs');
+  assert.equal(bugsCodex.provider, 'codex');
+  assert.equal(bugsCodex.model, 'gpt-6.1-sol');
+});
+
+test('agents providers --write rebuilds agent-providers.json idempotently, preserves since, filters by server slot, and supports offline host fallback', async t => {
+  const listing = {
+    ok: true,
+    hosts: ['remote-1', 'remote-2', 'remote-3'],
+    workspaces: [
+      {
+        name: 'HT Product',
+        tabs: [
+          { id: 31, title: 'HT Bugs', host: 'remote-1', tmux: 'live-bugs', chat: true, provider: 'agy' },
+          { id: 32, title: 'HT Shell', host: 'remote-1', tmux: 'sh-1', chat: false, provider: null },
+          { id: 33, title: 'HT Second', host: 'remote-2', tmux: 'live-second', chat: true, provider: 'claude' }
+        ],
+        groups: []
+      },
+      {
+        name: 'Personal',
+        tabs: [
+          { id: 34, title: 'My Claude', host: 'remote-1', tmux: 'live-claude', chat: true, provider: 'claude' },
+          { id: 35, title: 'My Codex', host: 'remote-1', tmux: 'live-codex', chat: true, provider: 'codex' }
+        ],
+        groups: []
+      }
+    ]
+  };
+  const h = harness(listing);
+  t.after(() => rmSync(h.dir, { recursive: true, force: true }));
+
+  const serversPath = join(h.dir, 'servers.json');
+  writeFileSync(serversPath, JSON.stringify({ servers: [{ id: 's1', hostname: 'box-one', multiprompt_slot: 0 }] }));
+  const hostDir = join(h.dir, '.local/state/multiprompt/agent-host');
+  mkdirSync(hostDir, { recursive: true });
+  writeFileSync(join(hostDir, 'codex-1.config.json'), JSON.stringify({ enabled: true, provider: 'codex', tmux: 'live-codex', model: 'sol' }));
+  writeFileSync(join(hostDir, 'headless.config.json'), JSON.stringify({ enabled: true, provider: 'claude', tmux: 'live-worker', spawn_mode: 'headless' }));
+  writeFileSync(join(hostDir, 'old.config.json'), JSON.stringify({ enabled: false, provider: 'claude', tmux: 'live-old', switched_to: { provider: 'codex', sid: 'x' } }));
+
+  const dry = await h.calls(['agents', 'providers', '--json'], { MULTIPROMPT_SERVERS_FILE: serversPath }, { hostname: () => 'box-one', now: () => new Date('2026-11-25T10:00:00.000Z') });
+  assert.equal(dry.code, 0, dry.errors.join('\n'));
+  assert.equal(existsSync(h.providersPath), false);
+  const dryBody = JSON.parse(dry.lines[0]);
+  assert.deepEqual(dryBody.by_provider, { antigravity: 1, claude: 1, codex: 1 });
+  assert.equal(dryBody.chats.find(item => item.tmux === 'live-bugs').provider, 'antigravity');
+  assert.equal(dryBody.chats.find(item => item.tmux === 'live-codex').model, 'gpt-6.1-sol');
+
+  const firstWrite = await h.calls(['agents', 'providers', '--write'], { MULTIPROMPT_SERVERS_FILE: serversPath }, { hostname: () => 'box-one', now: () => new Date('2026-11-25T10:00:00.000Z') });
+  assert.equal(firstWrite.code, 0, firstWrite.errors.join('\n'));
+  assert.match(firstWrite.lines[0], /^wrote .* \(3 chats: antigravity=1, claude=1, codex=1\)$/);
+  const snap1 = h.providers();
+  assert.equal(snap1.updated, '2026-11-25T10:00:00.000Z');
+  assert.equal(snap1.chats.find(item => item.tmux === 'live-bugs').since, '2026-11-25T10:00:00.000Z');
+
+  const secondWrite = await h.calls(['agents', 'providers', '--write', '--json'], { MULTIPROMPT_SERVERS_FILE: serversPath }, { hostname: () => 'box-one', now: () => new Date('2026-11-26T10:00:00.000Z') });
+  assert.equal(secondWrite.code, 0, secondWrite.errors.join('\n'));
+  const snap2 = h.providers();
+  assert.equal(snap2.updated, '2026-11-26T10:00:00.000Z');
+  assert.deepEqual(snap2.chats, snap1.chats);
+  assert.deepEqual(snap2.by_provider, snap1.by_provider);
+
+  const brokenZsb = join(h.dir, 'broken-zsb');
+  writeFileSync(brokenZsb, '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+  const offline = await h.calls(['agents', 'providers', '--write', '--json'], { MULTIPROMPT_ZSB: brokenZsb }, { now: () => new Date('2026-11-26T12:00:00.000Z') });
+  assert.equal(offline.code, 0, offline.errors.join('\n'));
+  const snapOffline = h.providers();
+  assert.equal(snapOffline.updated, '2026-11-26T12:00:00.000Z');
+  assert.deepEqual(snapOffline.by_provider, { codex: 1 });
+  assert.equal(snapOffline.chats[0].workspace, 'Personal');
+  assert.equal(snapOffline.chats[0].chat, 'My Codex');
+  assert.equal(snapOffline.chats[0].tmux, 'live-codex');
+  assert.equal(snapOffline.chats[0].model, 'gpt-6.1-sol');
+
+  const badSub = await h.calls(['agents', 'nope']);
+  assert.equal(badSub.code, 1);
+  assert.match(badSub.errors[0], /agents needs providers/);
 });

@@ -18,6 +18,7 @@ pub const SwitchOutcome = union(enum) {
         agent: u8,
         sid: [40]u8 = std.mem.zeroes([40]u8),
         sid_len: u8 = 0,
+        model_applied: bool = false,
     },
     already: u8,
     busy,
@@ -127,6 +128,23 @@ pub fn agentProviderName(agent: u8) ?[]const u8 {
     };
 }
 
+pub fn targetModelChoice(agent: u8) ?[]const u8 {
+    return switch (agent) {
+        claude_agent => "opus",
+        codex_agent => "sol",
+        else => null,
+    };
+}
+
+pub fn targetModelLabel(agent: u8) ?[]const u8 {
+    return switch (agent) {
+        claude_agent => "opus",
+        codex_agent => "gpt-6.1-sol",
+        antigravity_agent => "gemini-4-neon",
+        else => null,
+    };
+}
+
 pub fn isLiveChatShell(shell: *const app_state.Shell) bool {
     return shell.kind == .tmux and command_palette.canRestartChat(shell.ai_agent, shell.claude_sid_len, shell.tmux_session_len);
 }
@@ -203,13 +221,47 @@ pub fn parseSwitchReply(allocator: std.mem.Allocator, body: []const u8) SwitchOu
     return .{ .failed = switchFailureReason(fields.reason) };
 }
 
+pub fn formatSetModelRequest(out: []u8, identity: SessionIdentity, model: []const u8) ?[]const u8 {
+    const provider = identity.provider();
+    const sid = std.mem.sliceTo(&identity.sid, 0);
+    if (provider.len == 0 or sid.len == 0 or model.len == 0) return null;
+    return std.fmt.bufPrint(out, "{{\"op\":\"set_model\",\"id\":{d},\"host\":{d},\"provider\":\"{s}\",\"sid\":\"{s}\",\"model\":\"{s}\"}}", .{ identity.owner, identity.host.index(), provider, sid, model }) catch null;
+}
+
+pub fn parseSettingReplyOk(allocator: std.mem.Allocator, body: []const u8) bool {
+    const parsed = std.json.parseFromSlice(SwitchEnvelope, allocator, std.mem.trim(u8, body, " \r\n"), .{ .ignore_unknown_fields = true }) catch return false;
+    defer parsed.deinit();
+    const fields = switchEnvelopeFields(parsed.value);
+    return std.mem.eql(u8, fields.status, "ok");
+}
+
+pub fn applyTargetModelWithTransport(identity: SessionIdentity, agent: u8, sid: []const u8, comptime send_fn: anytype) bool {
+    const choice = targetModelChoice(agent) orelse return false;
+    var next_identity = SessionIdentity.remote(identity.host.index(), std.mem.sliceTo(&identity.tmux, 0), sid, agent) orelse return false;
+    next_identity.owner = identity.owner;
+    var buf: [512]u8 = undefined;
+    const request = formatSetModelRequest(&buf, next_identity, choice) orelse return false;
+    var response: std.ArrayList(u8) = .empty;
+    defer response.deinit(std.heap.page_allocator);
+    if (!send_fn(next_identity, request, &response)) return false;
+    return parseSettingReplyOk(std.heap.page_allocator, response.items);
+}
+
 pub fn switchChatWithTransport(identity: SessionIdentity, target: u8, comptime send_fn: anytype) SwitchOutcome {
     var buf: [512]u8 = undefined;
     const request = formatSwitchRequest(&buf, identity, target) orelse return .{ .failed = "this live chat cannot switch" };
     var response: std.ArrayList(u8) = .empty;
     defer response.deinit(std.heap.page_allocator);
     if (!send_fn(identity, request, &response)) return .{ .failed = "the server did not answer" };
-    return parseSwitchReply(std.heap.page_allocator, response.items);
+    const outcome = parseSwitchReply(std.heap.page_allocator, response.items);
+    switch (outcome) {
+        .switched => |done| {
+            var updated = done;
+            updated.model_applied = applyTargetModelWithTransport(identity, done.agent, done.sid[0..done.sid_len], send_fn);
+            return .{ .switched = updated };
+        },
+        else => return outcome,
+    }
 }
 
 fn liveSwitchTransport(identity: SessionIdentity, request: []const u8, response: *std.ArrayList(u8)) bool {
@@ -637,4 +689,89 @@ test "MUBO-535 a refused switch leaves the chat on its old AI and a later run sw
     }
     try std.testing.expectEqual(antigravity_agent, app_state.shells[0].ai_agent);
     try std.testing.expectEqualStrings("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", app_state.shells[0].claude_sid[0..app_state.shells[0].claude_sid_len]);
+}
+
+test "MUBO-535 switch applies target model tier via existing set_model op for codex and claude only" {
+    const Fake = struct {
+        var count: usize = 0;
+        var requests: [4][512]u8 = undefined;
+        var lens: [4]usize = .{ 0, 0, 0, 0 };
+        var replies: [4][]const u8 = .{ "", "", "", "" };
+        var ok_flags: [4]bool = .{ true, true, true, true };
+
+        fn reset() void {
+            count = 0;
+            lens = .{ 0, 0, 0, 0 };
+            replies = .{ "", "", "", "" };
+            ok_flags = .{ true, true, true, true };
+        }
+
+        fn send(_: SessionIdentity, request: []const u8, out: *std.ArrayList(u8)) bool {
+            const idx = count;
+            count += 1;
+            if (idx < requests.len) {
+                @memcpy(requests[idx][0..request.len], request);
+                lens[idx] = request.len;
+            }
+            if (idx >= ok_flags.len or !ok_flags[idx]) return false;
+            out.appendSlice(std.heap.page_allocator, replies[idx]) catch return false;
+            return true;
+        }
+    };
+
+    var claude_id = SessionIdentity.remote(0, "live-a", "11111111-1111-4111-8111-111111111111", claude_agent) orelse return error.TestUnexpectedResult;
+    claude_id.owner = 42;
+
+    Fake.reset();
+    Fake.replies[0] = "{\"id\":42,\"result\":{\"status\":\"switched\",\"provider\":\"codex\",\"sid\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\"}}";
+    Fake.replies[1] = "{\"id\":42,\"result\":{\"status\":\"ok\"}}";
+    switch (switchChatWithTransport(claude_id, codex_agent, Fake.send)) {
+        .switched => |done| {
+            try std.testing.expectEqual(codex_agent, done.agent);
+            try std.testing.expect(done.model_applied);
+            try std.testing.expectEqualStrings("gpt-6.1-sol", targetModelLabel(done.agent).?);
+        },
+        else => return error.TestUnexpectedResult,
+    }
+    try std.testing.expectEqual(@as(usize, 2), Fake.count);
+    try std.testing.expectEqualStrings("{\"op\":\"switch_ai\",\"id\":42,\"host\":0,\"provider\":\"claude\",\"sid\":\"11111111-1111-4111-8111-111111111111\",\"to\":\"codex\"}", Fake.requests[0][0..Fake.lens[0]]);
+    try std.testing.expectEqualStrings("{\"op\":\"set_model\",\"id\":42,\"host\":0,\"provider\":\"codex\",\"sid\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"model\":\"sol\"}", Fake.requests[1][0..Fake.lens[1]]);
+
+    var codex_id = SessionIdentity.remote(0, "live-a", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", codex_agent) orelse return error.TestUnexpectedResult;
+    codex_id.owner = 42;
+    Fake.reset();
+    Fake.replies[0] = "{\"id\":42,\"result\":{\"status\":\"switched\",\"provider\":\"claude\",\"sid\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\"}}";
+    Fake.replies[1] = "{\"id\":42,\"result\":{\"status\":\"ok\"}}";
+    switch (switchChatWithTransport(codex_id, claude_agent, Fake.send)) {
+        .switched => |done| {
+            try std.testing.expectEqual(claude_agent, done.agent);
+            try std.testing.expect(done.model_applied);
+            try std.testing.expectEqualStrings("opus", targetModelLabel(done.agent).?);
+        },
+        else => return error.TestUnexpectedResult,
+    }
+    try std.testing.expectEqual(@as(usize, 2), Fake.count);
+    try std.testing.expectEqualStrings("{\"op\":\"set_model\",\"id\":42,\"host\":0,\"provider\":\"claude\",\"sid\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"model\":\"opus\"}", Fake.requests[1][0..Fake.lens[1]]);
+
+    Fake.reset();
+    Fake.replies[0] = "{\"id\":42,\"result\":{\"status\":\"switched\",\"provider\":\"antigravity\",\"sid\":\"dddddddd-dddd-4ddd-8ddd-dddddddddddd\"}}";
+    switch (switchChatWithTransport(claude_id, antigravity_agent, Fake.send)) {
+        .switched => |done| {
+            try std.testing.expectEqual(antigravity_agent, done.agent);
+            try std.testing.expect(!done.model_applied);
+        },
+        else => return error.TestUnexpectedResult,
+    }
+    try std.testing.expectEqual(@as(usize, 1), Fake.count);
+
+    Fake.reset();
+    Fake.replies[0] = "{\"id\":42,\"result\":{\"status\":\"switched\",\"provider\":\"codex\",\"sid\":\"eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee\"}}";
+    Fake.replies[1] = "{\"id\":42,\"result\":{\"status\":\"refused\",\"reason\":\"invalid_model\"}}";
+    switch (switchChatWithTransport(claude_id, codex_agent, Fake.send)) {
+        .switched => |done| {
+            try std.testing.expectEqual(codex_agent, done.agent);
+            try std.testing.expect(!done.model_applied);
+        },
+        else => return error.TestUnexpectedResult,
+    }
 }
