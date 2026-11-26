@@ -463,11 +463,11 @@ class MpSessionsTest(unittest.TestCase):
         names = self.home / ".local/state/multiprompt/chat-names.json"
         names.write_text(json.dumps({target["tmux"]: dict(name="Antigravity Lead", at=1.0),
                                      sender["tmux"]: dict(name="Sender", at=1.0)}), encoding="utf-8")
-        done = self.run_send("--to", "Antigravity Lead", "hello there", MULTIPROMPT_TAB=sender["tmux"],
+        done = self.run_send("--to", "Antigravity Lead", "hello there", "--json", MULTIPROMPT_TAB=sender["tmux"],
                              MULTIPROMPT_READER_SOURCE=str(READER))
         self.assertIn(done.returncode, (0, 3), done.stderr)
         sent = json.loads(done.stdout)
-        self.assertEqual(sent["sid"], target["sid"])
+        self.assertRegex(sent.get("id") or "", r"\Amp-[0-9a-f]{32}\Z")
         self.assertEqual([(row[1], row[2], row[3]) for row in self.message_rows()],
                          [("antigravity", target["sid"], "From Sender: hello there")])
 
