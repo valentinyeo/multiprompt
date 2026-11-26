@@ -472,7 +472,7 @@ pub fn reconnect(idx: u32) bool {
     app_state.g_pending_resurrect_len = 0;
     app_state.g_pending_tmux_cmd_len = 0;
     const session = if (shell.tmux_session_len > 0) shell.tmux_session[0..shell.tmux_session_len] else null;
-    const command = remoteShellCommand(&command_buf, shell.kind, session, shell.shell_id, shell.ssh_reconnect.create_session, shell.cached_cwd[0..shell.cached_cwd_len]);
+    const command = remoteShellCommand(&command_buf, shell.kind, session, shell.shell_id, shell.ssh_reconnect.create_session or shell.ssh_reconnect.creating_session, shell.cached_cwd[0..shell.cached_cwd_len]);
     app_state.g_pending_tmux_identity = previous_identity;
     app_state.g_pending_tmux_host = previous_host;
     app_state.g_pending_resurrect_len = previous_resurrect;
@@ -756,6 +756,23 @@ test "MUBO-597 palette VPS tabs keep their workspace and native attachment throu
         const slot = find(shell.shell_id) orelse return error.NoSlot;
         try std.testing.expect(std.mem.indexOf(u8, slot.command[0..slot.command_len], "tmux new-session -A -s") != null);
         try std.testing.expect(std.mem.indexOf(u8, slot.command[0..slot.command_len], "/'projects/example'") != null);
+        const opening = slot.command;
+        const opening_len = slot.command_len;
+        app_state.g_main_hwnd = null;
+        defer app_state.g_main_hwnd = @ptrFromInt(1);
+        ready(shell.shell_id, false);
+        shell.ssh_reconnect.start();
+        try std.testing.expect(!reconnect(@intCast(i)));
+        try std.testing.expectEqualStrings(opening[0..opening_len], slot.command[0..slot.command_len]);
+        try std.testing.expect(shell.ssh_reconnect.creating_session);
+        ready(shell.shell_id, true);
+        try std.testing.expect(!shell.ssh_reconnect.creating_session);
+        shell.ssh_reconnect.lost(0, 0);
+        shell.ssh_reconnect.start();
+        try std.testing.expect(!reconnect(@intCast(i)));
+        var expected_buf: [256]u8 = undefined;
+        const expected = try std.fmt.bufPrint(&expected_buf, "export ZSB_SESSION=zss-{d}; tmux attach -t '={s}'", .{ shell.shell_id, shell.tmux_session[0..shell.tmux_session_len] });
+        try std.testing.expectEqualStrings(expected, slot.command[0..slot.command_len]);
     }
     try std.testing.expect(!std.mem.eql(u8, &app_state.shells[0].tmux_session, &app_state.shells[1].tmux_session));
     const identity = "1:2:$3";
