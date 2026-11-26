@@ -228,15 +228,17 @@ try {
                 Assert ($cardEvent.WaitOne(15000)) 'Card fixture did not report readiness'
                 $stagedNotes = Get-Content "$cardExe.update/release-notes.json" -Raw | ConvertFrom-Json
                 Assert ($stagedNotes.version -ceq '9.10.0') 'Staged notes version mismatch'
-                $expectedNotes = @('Typing feels faster', 'Chats keep your place', 'Middle change', 'Older change')
+                $expectedNotes = @('Typing feels faster', 'Chats keep your place')
                 $currentReleases = @(@($stagedNotes.releases) | Where-Object { $_.version -ceq '9.10.0' })
                 $middleReleases = @(@($stagedNotes.releases) | Where-Object { $_.version -ceq '9.9.0' })
                 $olderReleases = @(@($stagedNotes.releases) | Where-Object { $_.version -ceq '9.8.0' })
                 Assert ($currentReleases.Count -eq 1 -and $middleReleases.Count -eq 1 -and $olderReleases.Count -eq 1) 'Staged note releases missing or duplicated'
-                $observedNotes = @($currentReleases[0].changes[0], $currentReleases[0].changes[1], $middleReleases[0].changes[0], $olderReleases[0].changes[0]) | ForEach-Object { $_ -replace '^(?:IGSH|MUBO)-\d+ ', '' }
-                for ($i = 0; $i -lt $expectedNotes.Count; $i++) { Assert ($observedNotes[$i] -ceq $expectedNotes[$i]) 'Staged note order changed' }
+                $stagedTitles = @($currentReleases[0].changes[0], $currentReleases[0].changes[1], $middleReleases[0].changes[0], $olderReleases[0].changes[0]) | ForEach-Object { $_ -replace '^(?:IGSH|MUBO)-\d+ ', '' }
+                Assert ($stagedTitles.Count -eq 4 -and $stagedTitles[2] -ceq 'Middle change' -and $stagedTitles[3] -ceq 'Older change') 'Staged note releases lost their older entries'
                 Assert ((Get-FileHash "$cardExe.update/release-notes.json" -Algorithm SHA256).Hash -eq (Get-FileHash (Join-Path $script:releaseFolder 'release-notes.json') -Algorithm SHA256).Hash) 'Staged notes differ from the signed release'
-                $collapsed = Wait-CardView $log 0 'collapsed' $expectedNotes[0..2] 'See all'
+                $collapsed = Wait-CardView $log 0 'collapsed' $expectedNotes 'See all'
+                $cardText = Read-SharedLog $log
+                Assert (-not $cardText.Contains('Middle change') -and -not $cardText.Contains('Older change')) 'An older release line was painted under the offered version'
                 $cardProcess.Refresh()
                 $rectangle = New-Object UpdateProof+Rect
                 Assert ([UpdateProof]::GetWindowRect($cardProcess.MainWindowHandle, [ref]$rectangle)) 'Update card window unavailable'

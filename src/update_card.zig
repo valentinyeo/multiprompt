@@ -459,7 +459,7 @@ pub fn paintSidebarUpdateCard(hdc: HANDLE, font_title: HANDLE, font_subtitle: HA
             debugLog(std.fmt.bufPrint(&log_buf, "[update] card note {d}={s}", .{ i, card_notes.line(i) }) catch continue);
             debugLog(std.fmt.bufPrint(&log_buf, "[update] card note id {d}={s}", .{ i, card_notes.id(i) }) catch continue);
         }
-        debugLog2("[update] card remaining=", "See all");
+        debugLog2("[update] card remaining=", if (cardShowsSeeAll()) "See all" else "none");
     }
     const button = updateCardButtonRect(card);
     smooth.fillRoundRect(hdc, button, uiScaled(12), RGB(242, 242, 242));

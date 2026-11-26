@@ -122,7 +122,8 @@ test('existing card uses the same growing rectangle for layout and hits, with th
   assert.match(read('src/main.zig'), /if \(pt\.x >= 0 and pt\.x < SIDEBAR_W\(\) and pt\.y >= 0\) \{\s+const delta: i16 = @bitCast\(@as\(u16, @truncate\(wp >> 16\)\)\);\s+if \(@import\("update_card\.zig"\)\.updateCardScroll\(pt\.x, pt\.y, delta\)\) return 0/);
   const notes = read('src/update_notes.zig');
   for (const name of [
-    'ticket titles and skipped releases retain newest-first order',
+    'only the offered release change lines reach the card',
+    'a release with no published change shows no lines instead of older changes',
     'invalid notes and filler are not displayed',
     'three cards lines show by default and the extra changes stay counted',
     'one published change still links the full release notes',
@@ -133,8 +134,9 @@ test('existing card uses the same growing rectangle for layout and hits, with th
   assert.match(notes, /pub fn shown\(self: \*const Notes\) usize \{\s+return @min\(self.count, COLLAPSED_LINES\);\s+\}/);
   assert.match(notes, /RELEASE_URL = "https:\/\/github\.com\/valentinyeo\/multiprompt\/releases\/tag\/v"/);
   assert.match(notes, /fn productChange\(text: \[\]const u8\)/);
-  assert.match(notes, /!versionNewer\(installed, release.version\) or versionNewer\(offered, release.version\)/);
-  assert.match(notes, /while \(at < result.count and !versionNewer\(versions\[at\], release.version\)\)/);
+  assert.match(notes, /if \(!versionNewer\(installed, offered\)\) return result;/);
+  assert.match(notes, /if \(!std\.mem\.eql\(u8, release\.version, offered\)\) continue;/);
+  assert.doesNotMatch(notes, /versions\[/);
   assert.match(notes, /for \(TICKET_KEYS\) \|key\| if \(std\.mem\.startsWith\(u8, text, key\)\) return key\.len/);
   const rect = card.slice(card.indexOf('pub fn updateCardRect()'), card.indexOf('fn updateCardButtonRect('));
   assert.match(rect, /\.left = uiScaled\(8\), \.top = bottom - updateCardHeight\(\), \.right = @import\("browser_pane.zig"\).SIDEBAR_W\(\) - uiScaled\(8\), \.bottom = bottom/);
@@ -156,18 +158,20 @@ test('the previous card stayed quiet and hid See all for a release with one to t
   assertSeeAllAtAnyChangeCount(read('src/update_card.zig'));
 });
 
-test('safe-updates journey requires painted multi-version notes and screenshot from the real branch app', () => {
+test('safe-updates journey paints only the offered release notes and proves older entries stay out', () => {
   const suite = read('tools/update-release.test.ps1');
   assert.match(suite, /Copy-Item -LiteralPath \$Verifier -Destination \$cardExe/);
   assert.match(suite, /Save-Update \$cardExe '0.0.0' 'x64'/);
   assert.match(suite, /Start-Process \$cardExe -ArgumentList "--update-ready \$cardEventName"/);
   assert.match(suite, /\$cardMutex.WaitOne\(\)/);
   assert.match(suite, /Staged notes differ from the signed release/);
-  assert.match(suite, /\$observedNotes\[\$i\] -ceq \$expectedNotes\[\$i\]/);
+  assert.match(suite, /\$expectedNotes = @\('Typing feels faster', 'Chats keep your place'\)/);
+  assert.match(suite, /\$stagedTitles\.Count -eq 4/);
+  assert.match(suite, /An older release line was painted under the offered version/);
   assert.match(suite, /GetClientRect\(\$cardProcess.MainWindowHandle/);
   assert.match(suite, /GetDpiForWindow\(\$cardProcess.MainWindowHandle/);
   assert.match(suite, /\$collapsed \| ConvertTo-Json/);
-  assert.match(suite, /Wait-CardView \$log 0 'collapsed' \$expectedNotes\[0\.\.2\] 'See all'/);
+  assert.match(suite, /Wait-CardView \$log 0 'collapsed' \$expectedNotes 'See all'/);
   assert.match(suite, /Update card See all does not point at the matching release notes/);
   assert.match(suite, /Update card See all did not open the release notes/);
   assert.match(suite, /Click-CardMore \$collapsed/);
@@ -205,6 +209,7 @@ test('the published board keys reach the card and the real release explains itse
   const month = published.releases.find(release => release.version === '0.28.1961');
   assert.equal(month.changes.length, 4);
   assert.match(notes, /test "MUBO-577 real published release paints change lines for an available update"/);
+  assert.match(notes, /test "MUBO-577 offered release never paints an older release change"/);
 });
 
 test('the real release proof uses the downloaded production notes and their matching See all destination', () => {

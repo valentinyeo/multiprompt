@@ -107,37 +107,26 @@ fn productChange(text: []const u8) ?Change {
 
 pub fn pick(releases: []const Release, installed: []const u8, offered: []const u8) Notes {
     var result = Notes{};
-    var versions: [MAX_LINES][]const u8 = undefined;
+    if (!versionNewer(installed, offered)) return result;
     for (releases) |release| {
-        if (!versionNewer(installed, release.version) or versionNewer(offered, release.version)) continue;
+        if (!std.mem.eql(u8, release.version, offered)) continue;
         for (release.changes) |raw| {
             const text = std.mem.trim(u8, raw, " \t\r\n");
             const change = productChange(text) orelse continue;
             result.total += 1;
-            var at: usize = 0;
-            while (at < result.count and !versionNewer(versions[at], release.version)) at += 1;
-            if (at == result.lines.len) continue;
-            var end = @min(result.count, result.lines.len - 1);
-            while (end > at) : (end -= 1) {
-                result.lines[end] = result.lines[end - 1];
-                result.lengths[end] = result.lengths[end - 1];
-                result.ids[end] = result.ids[end - 1];
-                result.id_lengths[end] = result.id_lengths[end - 1];
-                versions[end] = versions[end - 1];
-            }
-            @memcpy(result.lines[at][0..change.text.len], change.text);
-            result.lengths[at] = change.text.len;
-            const id_len = @min(change.id.len, result.ids[at].len);
-            @memcpy(result.ids[at][0..id_len], change.id[0..id_len]);
-            result.id_lengths[at] = id_len;
-            versions[at] = release.version;
-            result.count = @min(result.count + 1, result.lines.len);
+            if (result.count == result.lines.len) continue;
+            @memcpy(result.lines[result.count][0..change.text.len], change.text);
+            result.lengths[result.count] = change.text.len;
+            const id_len = @min(change.id.len, result.ids[result.count].len);
+            @memcpy(result.ids[result.count][0..id_len], change.id[0..id_len]);
+            result.id_lengths[result.count] = id_len;
+            result.count += 1;
         }
     }
     return result;
 }
 
-test "ticket titles and skipped releases retain newest-first order" {
+test "only the offered release change lines reach the card" {
     const releases = [_]Release{
         .{ .version = "1.9.0", .changes = &.{"IGSH-1 Already installed"} },
         .{ .version = "1.10.0", .changes = &.{"IGSH-2 Older change"} },
@@ -145,12 +134,23 @@ test "ticket titles and skipped releases retain newest-first order" {
         .{ .version = "1.11.0", .changes = &.{ "IGSH-4 Newest change", "HYCI-5 Another change" } },
     };
     const notes = pick(&releases, "1.9.0", "1.11.0");
-    try std.testing.expectEqual(@as(usize, 2), notes.count);
+    try std.testing.expectEqual(@as(usize, 1), notes.count);
+    try std.testing.expectEqual(@as(usize, 1), notes.total);
     try std.testing.expectEqualStrings("Newest change", notes.line(0));
     try std.testing.expectEqualStrings("IGSH-4", notes.id(0));
-    try std.testing.expectEqualStrings("Older change", notes.line(1));
-    try std.testing.expectEqualStrings("IGSH-2", notes.id(1));
     try std.testing.expectEqual(@as(usize, 0), pick(&releases, "1.11.0", "1.9.0").count);
+}
+
+test "a release with no published change shows no lines instead of older changes" {
+    const releases = [_]Release{
+        .{ .version = "1.11.0", .changes = &.{ "IGSH-0 Bad", "IGSH-12 Checks and fixes, no visible change" } },
+        .{ .version = "1.10.0", .changes = &.{"IGSH-2 Older change"} },
+        .{ .version = "1.9.0", .changes = &.{"IGSH-1 Already installed"} },
+    };
+    const notes = pick(&releases, "1.9.0", "1.11.0");
+    try std.testing.expectEqual(@as(usize, 0), notes.count);
+    try std.testing.expectEqual(@as(usize, 0), notes.total);
+    try std.testing.expectEqual(@as(usize, 0), notes.shown());
 }
 
 test "invalid notes and filler are not displayed" {
@@ -221,13 +221,26 @@ test "published board keys reach the card and keep long Unicode notes whole" {
         .{ .version = "1.0.0", .changes = &.{"IGSH-12 Valid café"} },
     };
     const notes = pick(&releases, "0.9.0", "1.2.0");
-    try std.testing.expectEqual(@as(usize, 3), notes.count);
+    try std.testing.expectEqual(@as(usize, 2), notes.count);
     try std.testing.expectEqualStrings("Poteto tab points at its chat from before a clear", notes.line(0));
     try std.testing.expectEqualStrings(long, notes.line(1));
     try std.testing.expectEqualStrings("MUBO-243", notes.id(0));
     try std.testing.expectEqualStrings("MUBO-77", notes.id(1));
-    try std.testing.expectEqualStrings("Valid café", notes.line(2));
-    try std.testing.expectEqual(@as(usize, 3), notes.shown());
+    try std.testing.expectEqual(@as(usize, 2), notes.shown());
+}
+
+test "MUBO-577 offered release never paints an older release change" {
+    const parsed = try std.json.parseFromSlice(Document, std.testing.allocator, @embedFile("testdata/mubo-577-release-notes.json"), .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+    const newest = pick(parsed.value.releases, "0.28.1983", "0.28.1985");
+    try std.testing.expectEqual(@as(usize, 1), newest.total);
+    try std.testing.expectEqual(@as(usize, 1), newest.count);
+    try std.testing.expectEqualStrings("Poteto tab points at its chat from before a clear", newest.line(0));
+    try std.testing.expectEqualStrings("MUBO-243", newest.id(0));
+    const older = pick(parsed.value.releases, "0.28.1983", "0.28.1984");
+    try std.testing.expectEqual(@as(usize, 1), older.count);
+    try std.testing.expectEqualStrings("Switch a chat to Antigravity and back", older.line(0));
+    try std.testing.expectEqualStrings("IGSH-3050", older.id(0));
 }
 
 test "MUBO-577 real published release paints change lines for an available update" {
