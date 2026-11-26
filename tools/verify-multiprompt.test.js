@@ -2218,7 +2218,9 @@ test('IGSH-900 relaunch-saved-sessions journey seeds saved sessions, relaunches 
   for (const required of ['seeded-state', 'occupied-ports', 'selection-kept', 'IGSH-890', 'auto-release-admit.sh']) assert.ok(map.includes(required), required);
   assert.match(read(skill + 'features/README.md'), /\[Relaunch saved sessions\]\(relaunch-saved-sessions.md\)/);
   assert.match(read(skill + 'SKILL.md'), /`relaunch-saved-sessions`/);
-  assert.throws(() => assert.match(control.replace("'relaunch-saved-sessions')][string]$Feature", "')][string]$Feature"), /ValidateSet\([^\n)]*'relaunch-saved-sessions'/));
+  const dropped = "'session-tabs', 'relaunch-saved-sessions'";
+  assert.ok(control.includes(dropped), 'the ValidateSet still lists relaunch-saved-sessions after session-tabs');
+  assert.throws(() => assert.match(control.replace(dropped, "'session-tabs'"), /ValidateSet\([^\n)]*'relaunch-saved-sessions'/));
 });
 
 test('IGSH-925 chat-first-paint journey relaunches a saved chat with a docked browser and rejects any moved chat rectangle', () => {

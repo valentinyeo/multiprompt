@@ -568,6 +568,7 @@ foreach ($plan in $plans) {
     $isAntigravity = $plan.name -eq 'antigravity-chats'
     $isRecall = $plan.name -eq 'recall-handed'
     $socketTemp = $null
+    $workspaceOwned = $null
     $hasTranscript = $isAntigravity -or $isModel -or $isRecall -or $isInstant -or $isResync -or $isLiveDelivery -or $isReply -or $isNotes -or $isReaction -or $isAccepted -or $isQueue -or $isSendStays -or $isCancel -or $isActivity -or $isHistory -or $isSending -or $isRemote -or $isHax
     $steps = [Collections.Generic.List[object]]::new()
     $procDir = $null
@@ -653,7 +654,14 @@ foreach ($plan in $plans) {
         if ($env:CHAT_SKILLS_PROOF -eq '1') { $savedSession.tabs[0].csid = 'a1b2c3d4-0923-4000-8000-000000000923' }
         if ($env:CHAT_STARTUP_FAILURE_PROOF -eq '1') { $savedSession.tabs[0].csid = 'a1b2c3d4-1593-4000-8000-000000001593' }
         if ($isAntigravity -or $isModel -or $isRecall) { $savedSession.tabs[0].csid = $sid }
-        if ($isAntigravity) { $savedSession.tabs[0].ccwd = '/verify/work' }
+        if ($isAntigravity) {
+            $savedSession.tabs[0].ccwd = '/verify/work'
+            $workspace = Join-Path (Join-Path ([IO.Path]::GetPathRoot($profile)) 'verify') 'work'
+            if (-not (Test-Path -LiteralPath $workspace)) {
+                New-Item -ItemType Directory -Force $workspace | Out-Null
+                $workspaceOwned = $workspace
+            }
+        }
         if ($env:CHAT_WORKING_LIVE_PROOF -eq '1' -or $isFreshStart) { $savedSession.tabs[0].csid = 'a1b2c3d4-1668-4000-8000-000000001668' }
         if ($isNotes) { $savedSession.tabs[0].name = 'Mini Boss CEO' }
         if ($isHax) {
@@ -1564,7 +1572,8 @@ foreach ($plan in $plans) {
             }
             Remove-Item -LiteralPath $profile -Recurse -Force
             if ($socketTemp -and (Test-Path -LiteralPath $socketTemp)) { Remove-Item -LiteralPath $socketTemp -Recurse -Force }
-            $cleanup.scratch_removed = -not (Test-Path -LiteralPath $profile) -and (-not $socketTemp -or -not (Test-Path -LiteralPath $socketTemp))
+            if ($workspaceOwned -and (Test-Path -LiteralPath $workspaceOwned)) { Remove-Item -LiteralPath $workspaceOwned -Recurse -Force }
+            $cleanup.scratch_removed = -not (Test-Path -LiteralPath $profile) -and (-not $socketTemp -or -not (Test-Path -LiteralPath $socketTemp)) -and (-not $workspaceOwned -or -not (Test-Path -LiteralPath $workspaceOwned))
         } catch { $observation.error = "Evidence/cleanup: $_" }
         Save $observation "$caseDir/observation.json"
         Save $cleanup "$caseDir/cleanup.json"

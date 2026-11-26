@@ -1225,6 +1225,63 @@ fn chatHistoryRequest(target: @import("session_identity.zig").Host, id: u32, que
     return false;
 }
 
+fn hostPublishedSha(target: @import("session_identity.zig").Host) ?[64]u8 {
+    const host = target.index();
+    if (uiThreadBusy()) return null;
+    transport.kick(host);
+    if (!transport.waitReady(host, 5_000)) return null;
+    const channel = transport.open(host, false) orelse return null;
+    defer transport.close(channel);
+    if (!transport.write(channel, "{\"id\":1,\"op\":\"engine_info\"}")) return null;
+    const a = std.heap.page_allocator;
+    var frame: std.ArrayList(u8) = .empty;
+    defer frame.deinit(a);
+    var chunk: [4096]u8 = undefined;
+    const deadline = GetTickCount64() + 8_000;
+    while (std.mem.indexOfScalar(u8, frame.items, '\n') == null) {
+        if (GetTickCount64() >= deadline) return null;
+        const n = transport.readWithin(channel, &chunk, 1_000) orelse return null;
+        if (n == 0) continue;
+        if (frame.items.len + n > 65536) return null;
+        frame.appendSlice(a, chunk[0..n]) catch return null;
+    }
+    const line = frame.items[0..std.mem.indexOfScalar(u8, frame.items, '\n').?];
+    const parsed = std.json.parseFromSlice(struct {
+        id: u32,
+        engine_info: ?struct { sha256: []const u8 = "" } = null,
+    }, a, line, .{ .ignore_unknown_fields = true }) catch return null;
+    defer parsed.deinit();
+    const sha = (parsed.value.engine_info orelse return null).sha256;
+    if (sha.len != 64) return null;
+    for (sha) |c| if (!std.ascii.isDigit(c) and !(c >= 'a' and c <= 'f')) return null;
+    var out: [64]u8 = undefined;
+    @memcpy(&out, sha);
+    return out;
+}
+
+fn hostLaunchPrepareThread(slot: usize) void {
+    const launch = &app_state.g_host_launches[slot];
+    defer {
+        launch.ready.store(true, .release);
+        if (app_state.g_main_hwnd) |main| _ = PostMessageW(main, app_state.WM_APP_CHAT_HOST_READY, slot, 0);
+    }
+    const target = @import("session_identity.zig").Host.fromIndex(launch.host) orelse return;
+    const published = hostPublishedSha(target) orelse {
+        @import("diagnostics.zig").debugLog("[chat] launch refused: chat runtime not confirmed");
+        return;
+    };
+    var path_buf: [96]u8 = undefined;
+    const path = @import("agent_host.zig").runtimePath(&path_buf, &published) orelse return;
+    @memcpy(launch.runtime[0..path.len], path);
+    launch.runtime_len = @intCast(path.len);
+}
+
+pub fn chatHostLaunchPrepare(slot: usize) bool {
+    const thread = std.Thread.spawn(.{}, hostLaunchPrepareThread, .{slot}) catch return false;
+    thread.detach();
+    return true;
+}
+
 fn chatHistoryQuery(key: chat_transcript.Identity, id: u32, history: chat_history.History, before: u64) ?[]u8 {
     const a = std.heap.page_allocator;
     return std.json.Stringify.valueAlloc(a, .{

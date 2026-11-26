@@ -26,6 +26,9 @@
 - An install removes leftover temporary files.
 - Legacy integer-only launchers select the installed fingerprinted reader instead of downgrading it.
 - Fingerprinted launchers replace a different selection with their own bundle.
+- The desktop asks its own bundle for the runtime it published before it launches a chat.
+- A new chat starts from that content-addressed file, never from the shared `reader.py` pointer.
+- Files under `~/.multiprompt-runtime` are written once, so an older client that reselects its own bundle cannot redirect a chat that is already launching.
 - Hashes carry no release ordering; two different fingerprinted clients select the last bundle presented.
 - Published tools carry the app version that published them, in `tools.json`.
 - A bundle never moves a published tool to a copy from an older app version.

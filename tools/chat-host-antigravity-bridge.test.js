@@ -33,6 +33,47 @@ test('rendered switch-back proof keeps every message and divider in order', () =
   assert.throws(() => verifyCopiedHistory('original multi-line reply', ['original\nmulti-line reply']), /lost or reordered/);
 });
 
+test('fresh Antigravity transcript proof requires exact alternating turns and rejects grouped, swapped, duplicate, missing or stray rows', () => {
+  const { verifyFreshTranscript } = require('./chat-antigravity-proof.cjs');
+  const texts = [
+    'first message in a fresh antigravity chat',
+    'second message in a fresh antigravity chat',
+    'third message in a fresh antigravity chat',
+  ];
+  const replies = [
+    'Antigravity stand-in reply 1.',
+    'Antigravity stand-in reply 3.',
+    'Antigravity stand-in reply 5.',
+  ];
+  const interleaved = [texts[0], replies[0], texts[1], replies[1], texts[2], replies[2]];
+  assert.doesNotThrow(() => verifyFreshTranscript(interleaved.join('\r\n\r\n'), texts, replies, 'before'));
+  assert.doesNotThrow(() => verifyFreshTranscript(interleaved.join('\n\n'), texts, replies, 'after'));
+  assert.throws(() => verifyFreshTranscript([...texts, ...replies].join('\n\n'), texts, replies, 'grouped'), /out of order/);
+  const swapped = [texts[0], replies[1], texts[1], replies[0], texts[2], replies[2]];
+  assert.throws(() => verifyFreshTranscript(swapped.join('\n\n'), texts, replies, 'swapped'), /out of order/);
+  assert.throws(() => verifyFreshTranscript([...interleaved, replies[0]].join('\n\n'), texts, replies, 'duplicate'), /exactly one/);
+  assert.throws(() => verifyFreshTranscript(interleaved.slice(0, -1).join('\n\n'), texts, replies, 'missing'), /exactly one/);
+  assert.throws(() => verifyFreshTranscript([...interleaved, 'unexpected row'].join('\n\n'), texts, replies, 'stray'), /exact alternating turns/);
+});
+
+test('fresh Antigravity identity lookup resolves unique stable sid/host/tmux and rejects missing or duplicate rows', () => {
+  const { resolveFreshTab } = require('./chat-antigravity-proof.cjs');
+  const expected = { sid: 'c7f72ab5-55d7-48f1-bad4-01f89935467c', host: 0, tmux: 'live-54de9' };
+  const tabs = [
+    { name: 'Verify agent', manual: true, tmux_session: 'verify-agent', csid: '0da0026c-6fd1-4302-b47f-e071c7a2bb2f' },
+    { name: 'Renamed display label', tmux_session: 'live-54de9', csid: 'c7f72ab5-55d7-48f1-bad4-01f89935467c' },
+  ];
+  const found = resolveFreshTab(tabs, expected, 'post-reload');
+  assert.equal(found.csid, expected.sid);
+  assert.equal(found.tmux_session, expected.tmux);
+  const hostOne = resolveFreshTab([{ ...tabs[1], tmux_host: 1 }], { ...expected, host: 1 }, 'host-1');
+  assert.equal(hostOne.tmux_host, 1);
+  assert.throws(() => resolveFreshTab(tabs, { ...expected, host: 1 }, 'wrong-host'), /missing, count=0[\s\S]*live-54de9/);
+  assert.throws(() => resolveFreshTab(tabs, { ...expected, tmux: 'live-other' }, 'wrong-tmux'), /missing, count=0[\s\S]*live-54de9/);
+  assert.throws(() => resolveFreshTab(tabs, { ...expected, sid: '00000000-0000-4000-8000-000000000000' }, 'wrong-sid'), /missing, count=0[\s\S]*c7f72ab5/);
+  assert.throws(() => resolveFreshTab([tabs[0], tabs[1], { ...tabs[1], name: 'Duplicate' }], expected, 'dup'), /duplicate, count=2[\s\S]*Duplicate/);
+});
+
 test('antigravity host adapter registers agy and stream-json argv', () => {
   assert.match(source, /HOST_PROVIDERS = \(.*'antigravity'/);
   assert.match(source, /'antigravity': 'agy'/);

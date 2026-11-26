@@ -11,6 +11,8 @@ root = pathlib.Path(sys.argv[1])
 source = (root / 'tools/verify-chat-delivery/boundary.py').read_text(encoding='utf-8')
 adapter = next(node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef) and node.name == 'transport_reader')
 ssh = next(node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef) and node.name == 'ssh')
+commands = next(node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef) and node.name == 'python_commands')
+remote = next(node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef) and node.name == 'python_remote')
 broker = (root / 'src/chat_transport.py').read_text(encoding='utf-8')
 main = next(node for node in ast.parse(broker).body if isinstance(node, ast.If) and isinstance(node.test, ast.Compare))
 registered = []
@@ -44,7 +46,7 @@ def terminal_reader():
 '''
 with tempfile.TemporaryDirectory() as folder:
     fixture = pathlib.Path(folder) / 'fixture_boundary.py'
-    fixture.write_text(prefix + '\n' + ast.unparse(adapter) + '\n' + ast.unparse(ssh) + "\nif __name__ == '__main__': sys.exit(ssh())\n")
+    fixture.write_text(prefix + '\n' + ast.unparse(commands) + '\n' + ast.unparse(remote) + '\n' + ast.unparse(adapter) + '\n' + ast.unparse(ssh) + "\nif __name__ == '__main__': sys.exit(ssh())\n")
     child = subprocess.Popen([sys.executable, '-u', str(fixture), 'ssh'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     replies = queue.Queue()
     def receive():

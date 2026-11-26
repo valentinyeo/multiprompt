@@ -20,7 +20,7 @@ function body(source, name) {
 
 test('a new live chat on the shared server connection runs its start command', () => {
   const palette = read('src/command_palette.zig');
-  for (const name of ['spawnHostedChatSession', 'spawnWorkspaceSessionAt']) {
+  for (const name of ['spawnHostedChatNow', 'openWorkspaceTab']) {
     const spawn = body(palette, name);
     const started = spawn.indexOf('live.starting(');
     assert.ok(started >= 0, `${name} marks the chat as starting`);

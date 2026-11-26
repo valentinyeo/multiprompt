@@ -3993,6 +3993,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             @import("command_palette.zig").finishSwitchAi(lp);
             return 0;
         },
+        app_state.WM_APP_CHAT_HOST_READY => {
+            @import("command_palette.zig").finishHostLaunch(wp);
+            return 0;
+        },
         app_state.WM_APP_PI_MODEL_RESULT => {
             @import("chat_send.zig").chatPiModelFinish(lp);
             return 0;
