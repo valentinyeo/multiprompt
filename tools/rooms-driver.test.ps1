@@ -45,9 +45,12 @@ function Reject([scriptblock]$Body, [string]$Message) {
     try { & $Body } catch { $caught = $true }
     Require $caught $Message
 }
-function Wait-For([string]$ConditionName, [scriptblock]$Body, [int]$Seconds = 30) {
+$script:waitChecks = 0
+function Wait-For([string]$ConditionName, [scriptblock]$Check, [int]$Seconds = 45) {
+    $script:waitChecks++
+    if ($script:waitChecks -gt 100) { throw "Wait-For re-entered its own check $($script:waitChecks) times for $ConditionName" }
     for ($attempt = 0; $attempt -lt 5; $attempt++) {
-        $value = & $Body
+        $value = & $Check
         if ($value) { return $value }
     }
     throw "Timed out: $ConditionName"
@@ -124,6 +127,8 @@ function Reset-Fixture {
     $script:clipboardIndex = 0
     $script:copy_attempts = 0
     $script:copy_ever_read = $false
+    $script:matcherCalls = 0
+    $script:waitChecks = 0
     $script:presses = @()
     $script:result = @{ observations = @(); cases = @(); driverErrors = @() }
     $script:members = @(
@@ -232,6 +237,14 @@ Reset-Fixture
 $script:clipboards = @{ Alpha = @('Alpha says READY534'); Bravo = @('Bravo says READY534') }
 Reject { & $privateCase } 'Private case accepted copied chats that never contain the member reply'
 Write-Host 'PASS private case refuses a chat whose copied text never holds the reply'
+
+Reset-Fixture
+$script:member = 'Bravo'
+$script:clipboards = @{ Bravo = @('Bravo says PRIVATE534') }
+$matched = Copy-Chat-Until 'Bravo' 'Bravo real private reply' { param($text) $script:matcherCalls++; $text.Contains('Bravo says PRIVATE534') } -Seconds 5 -Attempts 4 -ReadSeconds 1
+Require ($matched -ceq 'Bravo says PRIVATE534') "The first matching copy returned '$matched' instead of the copied chat text"
+Require ($script:matcherCalls -eq 1) "Copy-Chat-Until judged the copy $($script:matcherCalls) times instead of once, so its matcher is re-entering itself"
+Write-Host 'PASS Copy-Chat-Until stops on the first matching copy instead of recursing through Wait-For'
 
 function Away-Rows { @($script:events | ForEach-Object { @{ body = ($_ | ConvertTo-Json -Compress -Depth 10) } }) }
 function Away-State {

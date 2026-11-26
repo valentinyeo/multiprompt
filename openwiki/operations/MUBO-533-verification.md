@@ -234,6 +234,12 @@ Corrections in the driver and its hosted regressions:
   deterministic stream-json provider. It requires the saved host state `result.subtype` to be `interrupted`, one
   saved room answer from the interrupted member, one transcript row with that text, and exactly one answer from each
   of the two members. A duplicate, a turn that was never interrupted and a missing partial text each fail it.
+- `Copy-Chat-Until` took its predicate in a parameter named `$Check`, which is also the name `Wait-For` binds the
+  block it runs. PowerShell resolves a variable inside that block to the nearest scope, so `& $Check` called the
+  block itself and copied forever: job 140130963586 re-entered `Copy-Chat` every 0.6s until the 30-minute cancel.
+  The predicate is now `$Matcher`, and the hosted regression keeps `Wait-For`'s real parameter names and fails if the
+  predicate runs more than once for one matching copy. No other `Wait-For` or `Wait-Or` caller reads a name either
+  helper declares; the only overlap was the clipboard read behind `Wait-Or`, which now uses `$read`.
 - Case 13 is reachable. A disposable server-side wrapper is installed as `/usr/local/bin/python3` on the runner WSL
   for one case. It matches only the production room bootstrap and only the case's own `post_human` body, runs the
   real room helper, records the committed receipt and withholds that one reply; every later attempt passes through.

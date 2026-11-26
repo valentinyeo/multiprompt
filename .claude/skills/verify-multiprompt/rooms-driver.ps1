@@ -417,7 +417,7 @@ function Copy-Chat([string]$Name, [int]$Attempts = 4, [int]$ReadSeconds = 4) {
         Press @(0x11, 0x43) "Ctrl+C: copy visible chat messages (attempt $attempt)"
         $script:copy_attempts += 1
         Trace-Step "copy read: $Name attempt $attempt"
-        $text = Wait-Or { $value = Read-Clipboard; if ($value) { $value } } $ReadSeconds
+        $text = Wait-Or { $read = Read-Clipboard; if ($read) { $read } } $ReadSeconds
         if ($text) {
             [IO.File]::WriteAllText("$Evidence/$Name.txt", $text)
             Trace-Step "copy kept: $Name attempt $attempt"
@@ -430,7 +430,7 @@ function Copy-Chat([string]$Name, [int]$Attempts = 4, [int]$ReadSeconds = 4) {
     Trace-Step "copy empty: $Name"
     return $null
 }
-function Copy-Chat-Until([string]$Name, [string]$Wanted, [scriptblock]$Check, [int]$Seconds = 45, [int]$Attempts = 4, [int]$ReadSeconds = 4) {
+function Copy-Chat-Until([string]$Name, [string]$Wanted, [scriptblock]$Matcher, [int]$Seconds = 45, [int]$Attempts = 4, [int]$ReadSeconds = 4) {
     Trace-Step "copy-until start: $Wanted"
     $script:copy_attempts = 0
     $script:copy_ever_read = $false
@@ -439,7 +439,7 @@ function Copy-Chat-Until([string]$Name, [string]$Wanted, [scriptblock]$Check, [i
         return (Wait-For $Wanted {
             $text = Copy-Chat $Name $Attempts $ReadSeconds
             if ($null -ne $text) { $script:copy_ever_read = $true }
-            if ($text -and (& $Check $text)) { $text }
+            if ($text -and (& $Matcher $text)) { $text }
         } $Seconds)
     } catch { $failure = $_ }
     if (-not $script:copy_ever_read) { throw "No chat text was ever read from $Name's Chat View; the real Ctrl+C copy produced nothing in $($script:copy_attempts) bounded attempts, so $Wanted is unjudged" }
