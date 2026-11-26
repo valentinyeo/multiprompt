@@ -30,6 +30,22 @@ function verifyFreshTranscript(transcript, texts, replies, label) {
   assert.equal(normalized, expected.join('\n\n'), `the ${label} Antigravity copy did not match the exact alternating turns`);
 }
 
+function tabHostIndex(tab) {
+  return Number.isSafeInteger(tab && tab.tmux_host) ? tab.tmux_host : 0;
+}
+
+function resolveFreshTab(tabs, expected, label) {
+  assert.ok(Array.isArray(tabs), `the ${label} session tabs list is missing`);
+  const expectedHost = Number.isSafeInteger(expected.host) ? expected.host : 0;
+  const matched = tabs.filter(tab => tab && tab.csid === expected.sid && tabHostIndex(tab) === expectedHost && tab.tmux_session === expected.tmux);
+  if (matched.length !== 1) {
+    const summary = tabs.map(tab => `${tab && tab.name}[host=${tabHostIndex(tab)},tmux=${tab && tab.tmux_session},csid=${tab && tab.csid}]`).join('; ');
+    const reason = matched.length === 0 ? 'missing' : 'duplicate';
+    assert.fail(`the ${label} Antigravity identity lookup failed (${reason}, count=${matched.length}) for host=${expectedHost} tmux=${expected.tmux} csid=${expected.sid}; tabs=${summary}`);
+  }
+  return matched[0];
+}
+
 function verify(root) {
   const dir = path.join(root, 'antigravity-chats');
   const read = name => fs.readFileSync(path.join(dir, name), 'utf8');
@@ -68,11 +84,26 @@ function verify(root) {
   assert.ok(read('stand-in/invocations.jsonl').includes('antigravity'), 'the new session did not route an Antigravity launch');
   const after = json('session-new-session.json');
   assert.equal(after.tabs.length, seed.tabs.length + 1, 'the new Antigravity session did not add one row');
-  const fresh = after.tabs.find(tab => tab.name === 'Antigravity');
-  assert.ok(fresh, 'the new row is not named Antigravity');
+  const freshReload = json('fresh-reload.json');
+  const fresh = resolveFreshTab(after.tabs, { sid: freshReload.sid, host: freshReload.host, tmux: freshReload.tmux }, 'new-session');
+  assert.equal(fresh.name, 'Antigravity', 'the new row is not named Antigravity');
   assert.equal(fresh.cv, true, 'the new Antigravity row did not open in Chat View');
   assert.match(fresh.tmux_session, /^live-/);
-  const freshReload = json('fresh-reload.json');
+  const freshConfig = json('fresh-antigravity-config.json');
+  assert.equal(freshConfig.provider, 'antigravity');
+  assert.equal(freshConfig.enabled, true);
+  assert.equal(freshConfig.sid, fresh.csid, 'the fresh Antigravity host config sid disagrees with the tab');
+  assert.equal(freshConfig.tmux, fresh.tmux_session, 'the fresh Antigravity host config tmux disagrees with the tab');
+  const afterReload = json('session-after-fresh-reload.json');
+  assert.equal(afterReload.tabs.length, seed.tabs.length + 1, 'the full reloads changed the number of tabs');
+  const freshAfter = resolveFreshTab(afterReload.tabs, { sid: fresh.csid, host: tabHostIndex(fresh), tmux: fresh.tmux_session }, 'post-reload');
+  assert.equal(freshAfter.name, 'Antigravity', 'the fresh Antigravity default tab name drifted after reloads');
+  assert.equal(freshAfter.ai_agent, 8, 'the fresh Antigravity tab changed provider after reloads');
+  assert.equal(freshAfter.cv, true, 'the fresh Antigravity tab left Chat View after reloads');
+  const verifyAfter = afterReload.tabs.filter(tab => tab && tab.tmux_session === 'verify-agent');
+  assert.equal(verifyAfter.length, 1, 'the manually named switched tab is not unique after reloads');
+  assert.equal(verifyAfter[0].name, seed.tabs[0].name, 'the manually named switched tab drifted after reloads');
+  assert.equal(verifyAfter[0].manual, true, 'the manually named switched tab lost its manual flag after reloads');
   assert.equal(freshReload.reload, 'Chat View Resync chat');
   assert.equal(freshReload.reloads, 2, 'the journey must reload the whole history more than once');
   assert.equal(freshReload.messages, 3, 'the journey must send three distinct synthetic messages');
@@ -80,6 +111,9 @@ function verify(root) {
   assert.deepEqual(freshReload.replies, ['Antigravity stand-in reply 1.', 'Antigravity stand-in reply 3.', 'Antigravity stand-in reply 5.']);
   assert.equal(freshReload.tabAwayBack, true);
   assert.equal(freshReload.sidAfter, fresh.csid, 'the full reloads changed the fresh Antigravity chat identity');
+  assert.equal(freshReload.tmuxAfter, fresh.tmux_session, 'the full reloads changed the fresh Antigravity tmux identity');
+  assert.equal(freshReload.hostAfter, tabHostIndex(fresh), 'the full reloads changed the fresh Antigravity host identity');
+  assert.equal(freshReload.nameAfter, 'Antigravity', 'the full reloads changed the fresh Antigravity tab name');
   assert.equal(freshReload.displayHistoryAfter, true, 'the full reloads dropped the claimed Antigravity history flag');
   const claim = json('fresh-history-claim.json');
   assert.equal(claim.display_history, true, 'the fresh Antigravity host start never claimed its canonical history');
@@ -203,7 +237,7 @@ function verify(root) {
   };
 }
 
-module.exports = { verify, verifyCopiedHistory, verifyFreshTranscript };
+module.exports = { verify, verifyCopiedHistory, verifyFreshTranscript, resolveFreshTab };
 if (require.main === module) {
   const root = process.argv[2];
   try {

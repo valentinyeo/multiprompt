@@ -198,8 +198,12 @@ $expectedShells = $tabsBefore.Count + 1
 Bind-Transcript
 $savedNewSession = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
 Copy-Item "$settings/session.json" "$caseDir/session-new-session.json"
-$newTab = @($savedNewSession.tabs | Where-Object { $_.name -ceq 'Antigravity' })[0]
+$newMatches = @($savedNewSession.tabs | Where-Object { $_.name -ceq 'Antigravity' -and $_.cv -eq $true })
+if ($newMatches.Count -ne 1) { throw ('Expected one fresh Antigravity tab in session-new-session.json, found ' + $newMatches.Count) }
+$newTab = $newMatches[0]
 if (-not $newTab.tmux_session.StartsWith('live-')) { throw 'The new Antigravity tab is not a hosted live chat' }
+$freshTmux = [string]$newTab.tmux_session
+$freshHost = if ($newTab.PSObject.Properties['tmux_host'] -and $null -ne $newTab.tmux_host) { [int]$newTab.tmux_host } else { 0 }
 [void](Wait-For 'launch command carried the antigravity provider' {
     (Test-Path "$state/invocations.jsonl") -and (Read-Shared "$state/invocations.jsonl").Contains('antigravity')
 } 30)
@@ -347,8 +351,37 @@ Fresh-Transcript 'tab away and back' (Fresh-Text 'tab-away-back')
 if ($freshBlocksReturned -ne $freshBlocksBefore) { throw ('The tab away and back view changed the painted Antigravity row count: ' + $freshBlocksBefore + ' -> ' + $freshBlocksReturned) }
 if ((Fresh-Text 'tab-away-back').Trim() -cne (Fresh-Text 'before').Trim()) { throw 'The tab away and back view changed the visible Antigravity transcript' }
 Shot 'antigravity-fresh-tab-returned'
-$freshSessionRow = @((Get-Content "$settings/session.json" -Raw | ConvertFrom-Json).tabs | Where-Object { $_.name -ceq 'Antigravity' })[0]
-if ($freshSessionRow.csid -cne $freshSid) { throw 'The full reloads changed the fresh Antigravity chat identity' }
+function Resolve-FreshTab($Tabs, [string]$ExpectedSid, [int]$ExpectedHost, [string]$ExpectedTmux, [string]$Stage) {
+    $allTabs = @($Tabs)
+    $matched = @($allTabs | Where-Object {
+        $rowHost = if ($_.PSObject.Properties['tmux_host'] -and $null -ne $_.tmux_host) { [int]$_.tmux_host } else { 0 }
+        $rowSid = if ($_.PSObject.Properties['csid']) { [string]$_.csid } else { '' }
+        $rowTmux = if ($_.PSObject.Properties['tmux_session']) { [string]$_.tmux_session } else { '' }
+        ($rowSid -ceq $ExpectedSid) -and ($rowHost -eq $ExpectedHost) -and ($rowTmux -ceq $ExpectedTmux)
+    })
+    if ($matched.Count -ne 1) {
+        $summary = @($allTabs | ForEach-Object {
+            $rHost = if ($_.PSObject.Properties['tmux_host'] -and $null -ne $_.tmux_host) { [int]$_.tmux_host } else { 0 }
+            $rSid = if ($_.PSObject.Properties['csid']) { [string]$_.csid } else { '' }
+            $rTmux = if ($_.PSObject.Properties['tmux_session']) { [string]$_.tmux_session } else { '' }
+            ('{0}[host={1},tmux={2},csid={3}]' -f $_.name, $rHost, $rTmux, $rSid)
+        }) -join '; '
+        $reason = if ($matched.Count -eq 0) { 'missing' } else { 'duplicate' }
+        throw ('The ' + $Stage + ' Antigravity identity lookup failed (' + $reason + ', count=' + $matched.Count + ') for host=' + $ExpectedHost + ' tmux=' + $ExpectedTmux + ' csid=' + $ExpectedSid + '; tabs=' + $summary)
+    }
+    return $matched[0]
+}
+Copy-Item "$settings/session.json" "$caseDir/session-after-fresh-reload.json" -Force
+$savedAfterFresh = Get-Content "$caseDir/session-after-fresh-reload.json" -Raw | ConvertFrom-Json
+$freshSessionRow = Resolve-FreshTab $savedAfterFresh.tabs $freshSid $freshHost $freshTmux 'post-reload'
+if ($freshSessionRow.name -cne 'Antigravity') { throw ('The fresh Antigravity default tab name drifted after reloads: ' + $freshSessionRow.name) }
+if ([int]$freshSessionRow.ai_agent -ne 8) { throw ('The fresh Antigravity tab changed provider after reloads: ' + $freshSessionRow.ai_agent) }
+if ($freshSessionRow.cv -ne $true) { throw 'The fresh Antigravity tab left Chat View after reloads' }
+$verifyTabAfter = @($savedAfterFresh.tabs | Where-Object { $_.tmux_session -ceq 'verify-agent' })
+if ($verifyTabAfter.Count -ne 1 -or $verifyTabAfter[0].name -cne $tabsBefore[0].name -or $verifyTabAfter[0].manual -ne $true) { throw 'The manually named switched tab drifted during the fresh Antigravity journey' }
+$freshConfigAfter = Get-Content $freshConfig -Raw | ConvertFrom-Json
+if ($freshConfigAfter.sid -cne $freshSid -or $freshConfigAfter.tmux -cne $freshTmux -or $freshConfigAfter.provider -cne 'antigravity' -or $freshConfigAfter.enabled -ne $true) { throw 'The fresh Antigravity host config identity changed after reloads' }
+$freshHostAfter = if ($freshSessionRow.PSObject.Properties['tmux_host'] -and $null -ne $freshSessionRow.tmux_host) { [int]$freshSessionRow.tmux_host } else { 0 }
 $freshClaimAfter = Get-Content $freshState -Raw | ConvertFrom-Json
 if ($freshClaimAfter.display_history -ne $true) { throw 'The full reloads dropped the claimed Antigravity history flag' }
-Save @{provider='antigravity'; sid=$freshSid; messages=$freshTexts.Count; texts=$freshTexts; replies=$freshReplies; reload='Chat View Resync chat'; reloads=2; tabAwayBack=$true; blocksBefore=$freshBlocksBefore; blocksAfter=$freshBlocksAfter; sidAfter=$freshSessionRow.csid; displayHistoryAfter=$freshClaimAfter.display_history; copiedBefore='fresh-copied-before.txt'; copiedAfter='fresh-copied-after.txt'; copiedTwice='fresh-copied-reload-twice.txt'; copiedTabAway='fresh-copied-tab-away-back.txt'; sameTranscript=$true; claim='fresh-history-claim.json'} "$caseDir/fresh-reload.json"
+Save @{provider='antigravity'; sid=$freshSid; host=$freshHost; tmux=$freshTmux; nameBefore=$newTab.name; nameAfter=$freshSessionRow.name; messages=$freshTexts.Count; texts=$freshTexts; replies=$freshReplies; reload='Chat View Resync chat'; reloads=2; tabAwayBack=$true; blocksBefore=$freshBlocksBefore; blocksAfter=$freshBlocksAfter; sidAfter=$freshSessionRow.csid; tmuxAfter=$freshSessionRow.tmux_session; hostAfter=$freshHostAfter; displayHistoryAfter=$freshClaimAfter.display_history; copiedBefore='fresh-copied-before.txt'; copiedAfter='fresh-copied-after.txt'; copiedTwice='fresh-copied-reload-twice.txt'; copiedTabAway='fresh-copied-tab-away-back.txt'; sameTranscript=$true; claim='fresh-history-claim.json'} "$caseDir/fresh-reload.json"

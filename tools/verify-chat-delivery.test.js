@@ -1690,3 +1690,15 @@ test('MUBO-221 the fresh Antigravity transcript check enforces alternating promp
   assert.match(body, /did not match the exact alternating turns/);
   assert.match(journey, /\$freshThirdReply[\s\S]*Copy-Item \$freshHistory "\$caseDir\/fresh-antigravity-history\.jsonl" -Force/);
 });
+
+test('MUBO-221 the fresh Antigravity identity check resolves unique stable sid/host/tmux without blind indexing and enforces the name contract', () => {
+  const journey = read('tools/verify-chat-delivery/antigravity-chats.ps1');
+  assert.doesNotMatch(journey, /Where-Object\s*\{\s*\$_\.name\s*-ceq\s*'Antigravity'\s*\}\s*\)\[0\]/);
+  assert.match(journey, /function Resolve-FreshTab\(/);
+  assert.match(journey, /\(\$rowSid -ceq \$ExpectedSid\) -and \(\$rowHost -eq \$ExpectedHost\) -and \(\$rowTmux -ceq \$ExpectedTmux\)/);
+  assert.match(journey, /if \(\$matched\.Count -eq 0\) \{ 'missing' \} else \{ 'duplicate' \}/);
+  assert.match(journey, /Copy-Item "\$settings\/session\.json" "\$caseDir\/session-after-fresh-reload\.json" -Force/);
+  assert.match(journey, /\$freshSessionRow = Resolve-FreshTab \$savedAfterFresh\.tabs \$freshSid \$freshHost \$freshTmux 'post-reload'/);
+  assert.match(journey, /\$freshSessionRow\.name -cne 'Antigravity'/);
+  assert.match(journey, /\$verifyTabAfter\.Count -ne 1 -or \$verifyTabAfter\[0\]\.name -cne \$tabsBefore\[0\]\.name -or \$verifyTabAfter\[0\]\.manual -ne \$true/);
+});
