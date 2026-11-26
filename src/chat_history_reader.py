@@ -3474,7 +3474,12 @@ def host_reply(query):
     if query.get("op") in ("login", "login_answer") and provider != "pi":
         return dict(status="refused", reason="unsupported_provider")
     if query.get("op") == "set_permission_mode" and provider not in ("claude", "codex"):
-        return dict(status="refused", reason="unsupported_provider")
+        if query.get("mode") not in HOST_PERMISSION_MODES:
+            return host_refuse("invalid_permission_mode")
+        fixed = HOST_ADAPTERS[provider]["set_mode"]
+        if fixed is host_set_mode:
+            return dict(status="refused", reason="unsupported_provider")
+        return fixed(provider, sid, None, query.get("mode"))
     if not host_owned(provider, sid):
         operation = query.get("op")
         if operation not in ("set_model", "set_effort", "set_permission_mode"):
@@ -6204,7 +6209,20 @@ def host_antigravity_interrupt(provider, sid, session):
 
 
 def host_antigravity_set_mode(provider, sid, session, mode):
+    host_log(provider, sid, "antigravity_mode_refused", dict(mode=mode))
     return host_refuse("antigravity_mode_fixed")
+
+
+HOST_ANTIGRAVITY_ANSWER_OPS = ("approval_reply", "question_reply", "plan_reply")
+
+
+def host_antigravity_answer(provider, sid, tmux, session, request):
+    operation = request.get("op")
+    if operation not in HOST_ANTIGRAVITY_ANSWER_OPS:
+        return host_refuse("unsupported_request")
+    host_log(provider, sid, "antigravity_answer_refused",
+             dict(op=operation, request_id=request.get("request_id")))
+    return host_refuse("antigravity_dialog_unsupported")
 
 
 def host_antigravity_names(session, entity, update):
@@ -6287,6 +6305,9 @@ def host_antigravity_event(provider, sid, tmux, session, event):
                                 is_error=failed), tool_id)
                 started.discard(tool_id)
             return
+        host_accept(provider, sid, tmux, session, event)
+        host_log(provider, sid, "antigravity_step_ignored",
+                 dict(step_type=step_type, state=state, step_index=step_index))
         return
     if kind == "result":
         result = event.get("result") if isinstance(event.get("result"), dict) else {}
@@ -7079,7 +7100,8 @@ HOST_ADAPTERS = {
                    answer=host_answer, interrupt=host_interrupt, set_mode=host_set_mode,
                    binding="stream_json_user_line", provenance="stream_json_turn_start"),
     "antigravity": dict(argv=host_antigravity_argv, open=host_antigravity_open, write=host_antigravity_write,
-                        event=host_antigravity_event, answer=host_pi_answer, interrupt=host_antigravity_interrupt,
+                        event=host_antigravity_event, answer=host_antigravity_answer,
+                        interrupt=host_antigravity_interrupt,
                         set_mode=host_antigravity_set_mode,
                         binding="stream_json_user_line", provenance="stream_json_turn_start"),
 }

@@ -8446,6 +8446,56 @@ class IGSH_1828_HostRecallTest(HostControlFixture, unittest.TestCase):
 class HostAntigravityTurnTest(HostEventStreamFixture, unittest.TestCase):
     provider = 'antigravity'
 
+    def writes(self):
+        return [json.loads(line) for line in self.agent_input.getvalue().decode().splitlines() if line.strip()]
+
+    def answer(self, **request):
+        return reader.host_handle_request('antigravity', self.sid, self.tmux, self.session, request)
+
+    def test_antigravity_answers_with_its_own_handler(self):
+        self.assertIs(reader.HOST_ADAPTERS['antigravity']['answer'], reader.host_antigravity_answer)
+        self.assertIsNot(reader.HOST_ADAPTERS['antigravity']['answer'], reader.host_pi_answer)
+
+    def test_antigravity_refuses_every_dialog_without_speaking_the_pi_protocol(self):
+        for request in (dict(op='approval_reply', request_id='agy-approval-1', decision='accept'),
+                        dict(op='question_reply', request_id='agy-question-1', answers={'Colour': 'Lime'}),
+                        dict(op='plan_reply', request_id='agy-plan-1', action='implement')):
+            with self.subTest(op=request['op']):
+                self.assertEqual(self.answer(**request), dict(status='refused', reason='antigravity_dialog_unsupported'))
+        self.assertEqual(self.writes(), [], 'Antigravity must not be sent a Pi extension_ui_response line')
+        self.assertEqual(self.session['parked'], {})
+
+    def test_antigravity_refuses_an_answer_op_it_does_not_claim(self):
+        reply = reader.host_antigravity_answer('antigravity', self.sid, self.tmux, self.session,
+                                              dict(op='login_answer', request_id='agy-1'))
+        self.assertEqual(reply, dict(status='refused', reason='unsupported_request'))
+        self.assertEqual(self.writes(), [])
+
+    def test_antigravity_mode_is_fixed_through_both_entry_points(self):
+        self.write_config()
+        through_host = self.answer(op='set_permission_mode', mode='plan')
+        through_settings = reader.host_reply(dict(provider='antigravity', sid=self.sid, op='set_permission_mode',
+                                                  mode='plan'))
+        self.assertEqual(through_host, dict(status='refused', reason='antigravity_mode_fixed'))
+        self.assertEqual(through_settings, dict(status='refused', reason='antigravity_mode_fixed'))
+        self.assertEqual(reader.host_reply(dict(provider='antigravity', sid=self.sid, op='set_permission_mode',
+                                                mode='yolo'))['reason'], 'invalid_permission_mode')
+        self.assertNotIn('permission_mode', reader.host_config('antigravity', self.sid))
+
+    def test_an_antigravity_dialog_step_keeps_the_send_and_the_reply(self):
+        self.session['sends'] = [dict(id='mp-antigravity-3', attempt='a', epoch=0, accepted=False, turn='t-1',
+                                      sha256='x', uuid=None, text='hello')]
+        self.feed(dict(event='step_update',
+                       step_update=dict(conversation_id='conversation-1', step_index=0, state='ACTIVE',
+                                        step_type='question')))
+        self.assertTrue(self.session['sends'][0]['accepted'],
+                        'a dialog step Antigravity sends must leave the message sent')
+        self.feed(dict(event='result', result=dict(conversation_id='conversation-1', status='SUCCESS',
+                                                  response='Lime it is')))
+        self.assertEqual([row['payload']['text'] for row in self.antigravity_events('text.done')], ['Lime it is'])
+        ended = self.antigravity_events('turn.ended')
+        self.assertEqual(ended[-1]['payload']['status'], 'completed')
+
     def antigravity_events(self, kind=None):
         db = reader.message_store_db(self.tmux)
         rows = [json.loads(body) for (body,) in db.execute(
