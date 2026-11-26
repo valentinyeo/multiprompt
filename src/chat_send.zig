@@ -752,7 +752,7 @@ pub fn sendChatPrompt() void {
         const live = !@import("chat_view.zig").canToggle(shell.tmux_session[0..shell.tmux_session_len]);
         const selected_skill = app_state.g_chat_ac_skill_shell_id == shell.shell_id and app_state.g_chat_ac_skill_command_len > 0 and std.mem.startsWith(u16, text, app_state.g_chat_ac_skill_command[0..app_state.g_chat_ac_skill_command_len]);
         const interactive = app_state.g_chat_ac_dialog_shell_id == shell.shell_id and app_state.g_chat_ac_dialog_len > 0 and std.mem.startsWith(u16, text, app_state.g_chat_ac_dialog_command[0..app_state.g_chat_ac_dialog_len]);
-        const route = @import("chat_slash.zig").decide(live, text, selected_skill, interactive);
+        const route = @import("chat_slash.zig").decideForAgent(live, shell.ai_agent, text, selected_skill, interactive);
         switch (route) {
             .plan, .permissions => {
                 chatModeOpenPicker(route == .plan);

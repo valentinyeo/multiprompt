@@ -1013,7 +1013,17 @@ pub fn chatAcAgent() chat_complete.Agent {
     return switch (app_state.shells[app_state.active_shell].ai_agent) {
         1 => .claude,
         2 => .codex,
+        8 => .antigravity,
         else => .other,
+    };
+}
+
+fn chatAcMruIndex(agent: chat_complete.Agent) usize {
+    return switch (agent) {
+        .claude => 0,
+        .codex => 1,
+        .antigravity => 2,
+        .other => 0,
     };
 }
 
@@ -1278,7 +1288,7 @@ fn chatAcRank(text: []const u16, token: chat_complete.Token) void {
         query_buf[0 .. std.unicode.utf16LeToUtf8(&query_buf, text[token.start + 1 .. token.end]) catch 0]
     else
         "";
-    const agent_index: usize = if (chatAcAgent() == .codex) 1 else 0;
+    const agent_index = chatAcMruIndex(chatAcAgent());
     var mru: [20][]const u8 = undefined;
     for (0..app_state.g_chat_ac_mru_count[agent_index]) |i| mru[i] = std.mem.sliceTo(&app_state.g_chat_ac_mru[agent_index][i], 0);
     const same_query = app_state.g_chat_ac.query_len == query.len and std.mem.eql(u8, app_state.g_chat_ac.query[0..app_state.g_chat_ac.query_len], query);
@@ -1397,7 +1407,11 @@ fn chatAcFetchThread(req: ChatAcRequest) void {
     const cwd = std.mem.sliceTo(&req.cwd, 0);
     const ac_host = chatAcCompleterHost(req.host, cwd);
     syncAcCompleter(ac_host);
-    const agent = if (req.agent == .codex) "codex" else "claude";
+    const agent: []const u8 = switch (req.agent) {
+        .codex => "codex",
+        .antigravity => "antigravity",
+        else => "claude",
+    };
     const request = std.fmt.bufPrint(&wire, "{d}\t{s}\t{s}\t{s}\t{s}\t\n", .{ req.id, op, agent, if (session.len == 0) "-" else session, if (std.mem.startsWith(u8, cwd, "/")) cwd else "-" }) catch return;
     const started = GetTickCount64();
     var bytes: [128 * 1024]u8 = undefined;
@@ -1645,7 +1659,7 @@ fn chatAcAccept() bool {
         app_state.g_chat_ac_dialog_shell_id = app_state.shells[app_state.active_shell].shell_id;
         app_state.g_chat_ac_skill_shell_id = app_state.g_chat_ac_dialog_shell_id;
     }
-    if ((app_state.g_chat_ac.token.start == 0 or app_state.g_chat_ac.token.mode != .slash) and (entry.kind == 'S' or entry.kind == 'K') and ilen <= app_state.g_chat_ac_skill_command.len) {
+    if ((app_state.g_chat_ac.token.start == 0 or app_state.g_chat_ac.token.mode != .slash) and (entry.kind == 'S' or entry.kind == 'K' or entry.kind == 'J') and ilen <= app_state.g_chat_ac_skill_command.len) {
         app_state.g_chat_ac_skill_command_len = ilen;
         @memcpy(app_state.g_chat_ac_skill_command[0..ilen], wide[0..ilen]);
     }
@@ -1653,7 +1667,7 @@ fn chatAcAccept() bool {
         app_state.g_chat_ac_dialog_len = ilen;
         @memcpy(app_state.g_chat_ac_dialog_command[0..ilen], wide[0..ilen]);
     }
-    const a: usize = if (chatAcAgent() == .codex) 1 else 0;
+    const a = chatAcMruIndex(chatAcAgent());
     chat_complete.promoteRecent(&app_state.g_chat_ac_mru[a], &app_state.g_chat_ac_mru_count[a], entry.name);
     if (entry.kind == 'M') @import("chat_mention.zig").remember(entry.name, entry.hint);
     chatAcClose();
@@ -3496,6 +3510,30 @@ test "SOFT-3086 accepting a slash skill mid-message inserts plain text" {
         try std.testing.expectEqual(case.start == 0, app_state.g_chat_ac_skill_command_len > 0);
         try std.testing.expectEqual(@as(usize, 0), app_state.g_chat_skill_name_len);
     }
+}
+
+test "antigravity maps to its own autocomplete agent and MRU bucket" {
+    const saved_active = app_state.active_shell;
+    const saved_count = app_state.shell_count;
+    const saved_agent = app_state.shells[0].ai_agent;
+    defer {
+        app_state.active_shell = saved_active;
+        app_state.shell_count = saved_count;
+        app_state.shells[0].ai_agent = saved_agent;
+    }
+    app_state.active_shell = 0;
+    app_state.shell_count = 1;
+    app_state.shells[0].ai_agent = 1;
+    try std.testing.expectEqual(chat_complete.Agent.claude, chatAcAgent());
+    app_state.shells[0].ai_agent = 2;
+    try std.testing.expectEqual(chat_complete.Agent.codex, chatAcAgent());
+    app_state.shells[0].ai_agent = 8;
+    try std.testing.expectEqual(chat_complete.Agent.antigravity, chatAcAgent());
+    app_state.shells[0].ai_agent = 0;
+    try std.testing.expectEqual(chat_complete.Agent.other, chatAcAgent());
+    try std.testing.expectEqual(@as(usize, 0), chatAcMruIndex(.claude));
+    try std.testing.expectEqual(@as(usize, 1), chatAcMruIndex(.codex));
+    try std.testing.expectEqual(@as(usize, 2), chatAcMruIndex(.antigravity));
 }
 
 test "IGSH-884 every composer button stays on one bottom line for multiline drafts" {
