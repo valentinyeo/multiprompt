@@ -98,10 +98,31 @@ try {
     $receipt = @{ contract = $Contract; binaryVersion = $binaryVersion; version = $document.version; sha256 = $hash; changes = $published; painted = $named; ids = $paintedIds; seeAll = $seeAll; simulatedOffer = '999.0.0'; success = $true }
     $receipt | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 (Join-Path $Evidence 'released-card.json')
     if ($Wrapped) {
+        $script:cardLog = ''
+        $script:cardLogMark = 0
+        $script:cardResized = $false
+        function Card-Log {
+            if (-not (Test-Path -LiteralPath $log)) { return '' }
+            $stream = [IO.File]::Open($log, 'Open', 'Read', ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+            $reader = [IO.StreamReader]::new($stream)
+            try { $reader.ReadToEnd() } finally { $reader.Dispose() }
+        }
+        function Card-Mark {
+            $script:cardLog = Card-Log
+            $script:cardLogMark = $script:cardLog.Length
+        }
+        function Card-Tail {
+            if ($script:cardLogMark -ge $script:cardLog.Length) { return '' }
+            return $script:cardLog.Substring($script:cardLogMark)
+        }
+        function Card-Fresh {
+            if ($script:cardResized) { return Card-Tail }
+            return $script:cardLog
+        }
         function Wait-Card([scriptblock]$Condition, [string]$Failure) {
             $deadline = [DateTime]::UtcNow.AddSeconds(10)
             do {
-                $script:cardLog = if (Test-Path $log) { Get-Content $log -Raw } else { '' }
+                $script:cardLog = Card-Log
                 if (& $Condition) { return }
                 if ($process.HasExited -or [DateTime]::UtcNow -gt $deadline) { throw $Failure }
                 Start-Sleep -Milliseconds 100
@@ -134,12 +155,10 @@ try {
         function Resize-Card([int]$Width, [int]$Height) {
             $before = New-Object ReleaseCardProof+Rect
             if (-not [ReleaseCardProof]::GetWindowRect($process.MainWindowHandle, [ref]$before)) { throw 'Card resize has no window' }
-            if ($before.R - $before.L -ne $Width -or $before.B - $before.T -ne $Height) {
-                $script:cardLog = ''
-                Remove-Item $log -Force
-            }
+            $script:cardResized = ($before.R - $before.L -ne $Width -or $before.B - $before.T -ne $Height)
+            if ($script:cardResized) { Card-Mark }
             if (-not [ReleaseCardProof]::SetWindowPos($process.MainWindowHandle, [IntPtr]::Zero, 0, 0, $Width, $Height, 0x0040)) { throw 'Card resize failed' }
-            Wait-Card { $script:cardLog -match '\[update\] notes viewport=' -and $script:cardLog -match '\[update\] card remaining=' } 'Card did not expose wrapped note bounds'
+            Wait-Card { (Card-Fresh) -match '\[update\] notes viewport=' -and (Card-Fresh) -match '\[update\] card remaining=' } 'Card did not expose wrapped note bounds'
             $after = New-Object ReleaseCardProof+Rect
             if (-not [ReleaseCardProof]::GetWindowRect($process.MainWindowHandle, [ref]$after)) { throw 'Card resized window unavailable' }
             Write-Output ('WRAPPED_CARD_WINDOW=' + ($after.R - $after.L) + 'x' + ($after.B - $after.T))
@@ -176,10 +195,9 @@ try {
         $local.Y = [int](($collapsed.top + $collapsed.bottom) / 2)
         if (-not [ReleaseCardProof]::ClientToScreen($process.MainWindowHandle, [ref]$local)) { throw 'Card wheel coordinate failed' }
         $wheelPoint = [IntPtr](($local.Y -shl 16) -bor ($local.X -band 0xffff))
-        $script:cardLog = ''
-        Remove-Item $log -Force
+        Card-Mark
         $null = [ReleaseCardProof]::PostMessage($process.MainWindowHandle, 0x20A, [IntPtr](-120 -shl 16), $wheelPoint)
-        Wait-Card { $script:cardLog -match '\[update\] card remaining=' -and (Card-Bounds).scroll -gt 0 } 'Notes did not scroll inside their card'
+        Wait-Card { (Card-Tail) -match '\[update\] card remaining=' -and (Card-Bounds).scroll -gt 0 } 'Notes did not scroll inside their card'
         $scrolled = Card-Bounds
         $restartAfter = Card-Click 'restart button'
         if ($restartBefore.x -ne $restartAfter.x -or $restartBefore.y -ne $restartAfter.y -or $restartAfter.y -le $scrolled.bottom -or $scrolled.top -lt 0) { throw 'Scrolling moved or hid Restart' }
@@ -214,8 +232,8 @@ try {
         Get-CimInstance Win32_Process | Where-Object { $_.ParentProcessId -eq $process.Id -and $_.Name -ieq 'powershell.exe' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
         if (-not $process.HasExited) { $process.Kill(); $process.WaitForExit() }
     }
-    if ($Wrapped -and (Test-Path $log)) { Copy-Item -LiteralPath $log -Destination (Join-Path $Evidence 'debug.log') -Force -ErrorAction SilentlyContinue }
-    if ($Wrapped -and (Test-Path $log)) { Get-Content $log | Select-Object -Last 80 | ForEach-Object { Write-Output ('WRAPPED_CARD_LOG=' + $_) } }
+    if ($Wrapped -and (Test-Path -LiteralPath $log)) { Copy-Item -LiteralPath $log -Destination (Join-Path $Evidence 'debug.log') -Force -ErrorAction SilentlyContinue }
+    if ($Wrapped -and (Test-Path -LiteralPath $log)) { Get-Content -LiteralPath $log | Select-Object -Last 80 | ForEach-Object { Write-Output ('WRAPPED_CARD_LOG=' + $_) } }
     $mutex.ReleaseMutex()
     $mutex.Dispose()
     $event.Dispose()
