@@ -71,6 +71,26 @@ pub fn attachCommand(buf: []u8, session: []const u8, identity: []const u8, creat
     return writer.buffered();
 }
 
+pub fn workspaceShellCommand(buf: []u8, session: []const u8, identity: []const u8, cwd: ?[]const u8, create: bool) ![]const u8 {
+    var writer = std.Io.Writer.fixed(buf);
+    if (create) {
+        if (cwd) |dir| {
+            try writer.writeAll("cd -- ");
+            if (std.mem.startsWith(u8, dir, "~/")) {
+                try writer.writeAll("\"$HOME\"/");
+                try quote(&writer, dir[2..]);
+            } else if (std.mem.eql(u8, dir, "~")) {
+                try writer.writeAll("\"$HOME\"");
+            } else try quote(&writer, dir);
+            try writer.writeAll(" 2>/dev/null || cd; ");
+        } else try writer.writeAll("cd; ");
+    }
+    var attach_buf: [1536]u8 = undefined;
+    try writer.writeAll(try attachCommand(&attach_buf, session, identity, create));
+    if (create and identity.len == 0) try writer.writeAll(" -c \"$PWD\"");
+    return writer.buffered();
+}
+
 pub const Pane = struct {
     active: bool = false,
     visible: bool = false,
@@ -92,6 +112,13 @@ pub fn restoreWinner(tabs: anytype, index: usize) usize {
             (other.last_viewed == tabs[winner].last_viewed and i < winner)) winner = i;
     }
     return winner;
+}
+
+test "MUBO-597 workspace shell paths stay quoted and attach never resets the current directory" {
+    var buf: [2048]u8 = undefined;
+    try std.testing.expectEqualStrings("cd -- '/repo'\\''s folder' 2>/dev/null || cd; tmux new-session -A -s 'term-test' -c \"$PWD\"", try workspaceShellCommand(&buf, "term-test", "", "/repo's folder", true));
+    try std.testing.expectEqualStrings("cd -- \"$HOME\" 2>/dev/null || cd; tmux new-session -A -s 'term-test' -c \"$PWD\"", try workspaceShellCommand(&buf, "term-test", "", "~", true));
+    try std.testing.expectEqualStrings("tmux attach -t '=term-test'", try workspaceShellCommand(&buf, "term-test", "", "/different/repo", false));
 }
 
 test "pane choice prefers active then visible then last viewed with stable ties" {

@@ -132,10 +132,13 @@ test('manual and nightly verification execute native appearance', async () => {
     const output = execFileSync(process.execPath, ['-'], { cwd: new URL('..', import.meta.url), input: source, encoding: 'utf8', env: { ...process.env, EVENT: event, FEATURE: feature, FEATURES: '', APP_REVISION: '' }, stdio: ['pipe', 'pipe', 'pipe'] });
     return JSON.parse(output.split('\n').find(line => line.startsWith('selected=')).slice(9));
   };
-  assert.deepEqual(matrix('schedule', ''), features.available);
+  const automatic = features.available.filter(feature => feature !== 'rooms');
+  assert.deepEqual(matrix('schedule', ''), automatic);
   assert.deepEqual(matrix('workflow_dispatch', 'appearance'), ['appearance']);
   assert.ok(matrix('workflow_dispatch', 'all').includes('appearance'));
-  const broken = script.replace(': available;', ': [];');
+  assert.ok(matrix('workflow_dispatch', 'all').includes('rooms'));
+  assert.ok(!matrix('schedule', '').includes('rooms'));
+  const broken = script.replace('available.filter(', '[].filter(');
   assert.notEqual(broken, script);
   assert.throws(() => matrix('schedule', '', broken));
   assert.match(verify, /runs-on: windows-latest/);

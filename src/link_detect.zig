@@ -10,10 +10,14 @@ pub fn isUrlChar(c: u16) bool {
     };
 }
 
-pub fn scheme(text: []const u16) bool {
+pub fn address(text: []const u16) bool {
     return std.mem.startsWith(u16, text, &[_]u16{ 'h', 't', 't', 'p', ':', '/', '/' }) or
         std.mem.startsWith(u16, text, &[_]u16{ 'h', 't', 't', 'p', 's', ':', '/', '/' }) or
-        std.mem.startsWith(u16, text, &[_]u16{ 'w', 'w', 'w', '.' });
+        std.mem.startsWith(u16, text, &[_]u16{ 'f', 'i', 'l', 'e', ':', '/', '/' });
+}
+
+pub fn scheme(text: []const u16) bool {
+    return address(text) or std.mem.startsWith(u16, text, &[_]u16{ 'w', 'w', 'w', '.' });
 }
 
 pub fn trimEnd(text: []const u16) usize {
@@ -190,6 +194,19 @@ fn check(rows: []const []const u16, width: usize, row: usize, col: usize, expect
     const url = at(rows, width, row, col, &out) orelse return error.NoUrl;
     try std.testing.expectEqual(expected.len, url.len);
     for (expected, url) |a, b| try std.testing.expectEqual(@as(u16, a), b);
+}
+
+test "MUBO-593 web and file addresses are links while other schemes stay plain text" {
+    try std.testing.expect(scheme(std.unicode.utf8ToUtf16LeStringLiteral("https://example.test")));
+    try std.testing.expect(scheme(std.unicode.utf8ToUtf16LeStringLiteral("http://example.test")));
+    try std.testing.expect(scheme(std.unicode.utf8ToUtf16LeStringLiteral("file:///C:/notes.md")));
+    try std.testing.expect(address(std.unicode.utf8ToUtf16LeStringLiteral("file:///C:/notes.md")));
+    try std.testing.expect(!address(std.unicode.utf8ToUtf16LeStringLiteral("www.example.test")));
+    try std.testing.expect(!scheme(std.unicode.utf8ToUtf16LeStringLiteral("javascript:alert(1)")));
+    try std.testing.expect(!scheme(std.unicode.utf8ToUtf16LeStringLiteral("mailto:me@example.test")));
+    const file = std.unicode.utf8ToUtf16LeStringLiteral("open file:///C:/notes.md now");
+    const found = next(file, 0) orelse return error.NoUrl;
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("file:///C:/notes.md"), file[found.start..found.end]);
 }
 
 test "single line and punctuation" {

@@ -12,7 +12,7 @@ pub var source_rows_scanned: std.atomic.Value(usize) = .init(0);
 pub const MAX_CACHE_BYTES = 16 * 1024 * 1024;
 pub const TAIL_BYTES = 512 * 1024;
 pub const CACHE_WRITE_MS = 30_000;
-const Header = struct { version: u8 = 6, start: u64 = 0, inode: u64, offset: u64, sid: []const u8, host: u8, codex: bool, pi: bool = false, tmux: []const u8, mtime: u64 = 0, probe: []const u8 = "", read_sid: []const u8 = "", partial: bool = false };
+const Header = struct { version: u8 = 7, start: u64 = 0, inode: u64, offset: u64, sid: []const u8, host: u8, codex: bool, pi: bool = false, agent: u8 = 0, tmux: []const u8, mtime: u64 = 0, probe: []const u8 = "", read_sid: []const u8 = "", partial: bool = false };
 pub const History = struct {
     status: transcript.Status = .{},
     rows: std.ArrayList(u8) = .empty,
@@ -753,7 +753,7 @@ pub const History = struct {
 
     pub fn encode(self: History, a: std.mem.Allocator, key: transcript.Identity) ![]u8 {
         const rows = try self.cacheRows(a);
-        const header = try std.json.Stringify.valueAlloc(a, Header{ .inode = self.inode, .offset = self.offset, .start = self.start, .sid = std.mem.sliceTo(&self.sid, 0), .host = key.host, .codex = key.codex, .pi = key.pi, .tmux = std.mem.sliceTo(&key.tmux, 0), .mtime = self.mtime, .probe = std.mem.sliceTo(&self.probe, 0), .read_sid = std.mem.sliceTo(&self.read_sid, 0), .partial = rows.len < self.rows.items.len or self.restore_full }, .{});
+        const header = try std.json.Stringify.valueAlloc(a, Header{ .inode = self.inode, .offset = self.offset, .start = self.start, .sid = std.mem.sliceTo(&self.sid, 0), .host = key.host, .codex = key.codex, .pi = key.pi, .agent = key.agentId(), .tmux = std.mem.sliceTo(&key.tmux, 0), .mtime = self.mtime, .probe = std.mem.sliceTo(&self.probe, 0), .read_sid = std.mem.sliceTo(&self.read_sid, 0), .partial = rows.len < self.rows.items.len or self.restore_full }, .{});
         defer a.free(header);
         if (header.len + 1 > 512) return error.InvalidHistory;
         return std.fmt.allocPrint(a, "{s}\n{s}", .{ header, rows });
@@ -765,8 +765,9 @@ pub const History = struct {
         const parsed = try std.json.parseFromSlice(Header, a, bytes[0..end], .{});
         defer parsed.deinit();
         const h = parsed.value;
-        if ((h.version < 2 or h.version > 6) or h.sid.len == 0 or h.sid.len >= 40 or h.read_sid.len >= 40 or bytes[bytes.len - 1] != '\n' or
-            (h.probe.len != 0 and h.probe.len != 64) or h.host != key.host or h.codex != key.codex or h.pi != key.pi or !std.mem.eql(u8, h.tmux, std.mem.sliceTo(&key.tmux, 0)) or
+        const header_agent: u8 = if (h.agent != 0) h.agent else if (h.pi) 3 else if (h.codex) 2 else 1;
+        if ((h.version < 2 or h.version > 7) or h.sid.len == 0 or h.sid.len >= 40 or h.read_sid.len >= 40 or bytes[bytes.len - 1] != '\n' or
+            (h.probe.len != 0 and h.probe.len != 64) or h.host != key.host or h.codex != key.codex or h.pi != key.pi or header_agent != key.agentId() or !std.mem.eql(u8, h.tmux, std.mem.sliceTo(&key.tmux, 0)) or
             (key.sid[0] != 0 and !std.mem.eql(u8, h.sid, std.mem.sliceTo(&key.sid, 0)))) return error.InvalidHistory;
         var result: History = .{ .inode = h.inode, .offset = h.offset, .mtime = h.mtime, .restore_full = h.partial or h.version < 6, .start = h.start, .revision = 1 };
         errdefer result.deinit(a);
@@ -991,11 +992,11 @@ pub fn statusOnly(wire: []const u8) bool {
 
 pub fn cacheKey(key: transcript.Identity) u64 {
     const name = if (key.tmux[0] != 0) std.mem.sliceTo(&key.tmux, 0) else std.mem.sliceTo(&key.sid, 0);
-    return std.hash.Wyhash.hash(std.hash.Wyhash.hash(0, &.{ key.host, @intFromBool(key.codex) | (@as(u8, @intFromBool(key.pi)) << 1), @intFromBool(key.tmux[0] != 0) }), name);
+    return std.hash.Wyhash.hash(std.hash.Wyhash.hash(0, &.{ key.host, key.agentId(), @intFromBool(key.tmux[0] != 0) }), name);
 }
 
 pub fn sameSession(a: transcript.Identity, b: transcript.Identity) bool {
-    if (a.shell_id == 0 or b.shell_id == 0 or a.host != b.host or a.codex != b.codex or a.pi != b.pi) return false;
+    if (a.shell_id == 0 or b.shell_id == 0 or a.host != b.host or a.agentId() != b.agentId()) return false;
     if (a.sid[0] != 0 and b.sid[0] != 0 and !std.mem.eql(u8, &a.sid, &b.sid)) return false;
     if (a.tmux[0] != 0 or b.tmux[0] != 0) return a.tmux[0] != 0 and std.mem.eql(u8, &a.tmux, &b.tmux);
     if (a.sid[0] != 0 or b.sid[0] != 0) return a.sid[0] != 0 and std.mem.eql(u8, &a.sid, &b.sid);
@@ -1269,6 +1270,39 @@ test "cache headers reject reused sessions hosts providers and hash-path collisi
     try std.testing.expectError(error.InvalidHistory, History.decode(a, disk, key));
     try std.testing.expectError(error.InvalidHistory, History.decode(a, disk, transcript.Identity.initTmux(2, 0, false, "another", "")));
     try std.testing.expect(!sameSession(transcript.Identity.init(1, 0, false, "", ""), transcript.Identity.init(2, 0, false, "", "")));
+}
+
+test "MUBO-584 antigravity keeps its own cache key session and header" {
+    const a = std.testing.allocator;
+    var claude = transcript.Identity.initTmux(1, 0, false, "term-1", "/work");
+    claude.agent = 1;
+    var antigravity = claude;
+    antigravity.agent = 8;
+    try std.testing.expect(cacheKey(claude) != cacheKey(antigravity));
+    try std.testing.expect(sameSession(claude, transcript.Identity.initTmux(1, 0, false, "term-1", "/work")));
+    try std.testing.expect(!sameSession(claude, antigravity));
+    var h: History = .{};
+    defer h.deinit(a);
+    try h.apply(a, first, 1, claude);
+    const disk = try h.encode(a, claude);
+    defer a.free(disk);
+    try std.testing.expectError(error.InvalidHistory, History.decode(a, disk, antigravity));
+    var restored = try History.decode(a, disk, claude);
+    defer restored.deinit(a);
+    try std.testing.expectEqualStrings(h.rows.items, restored.rows.items);
+}
+
+test "MUBO-584 version six cache headers still load for their own provider" {
+    const a = std.testing.allocator;
+    const legacy = "{\"version\":6,\"inode\":9,\"offset\":100,\"sid\":\"sid\",\"host\":0,\"codex\":false,\"tmux\":\"term-1\"}\n" ++ row;
+    var claude = transcript.Identity.initTmux(1, 0, false, "term-1", "");
+    claude.agent = 1;
+    var restored = try History.decode(a, legacy, claude);
+    defer restored.deinit(a);
+    try std.testing.expectEqualStrings("sid", std.mem.sliceTo(&restored.sid, 0));
+    var antigravity = claude;
+    antigravity.agent = 8;
+    try std.testing.expectError(error.InvalidHistory, History.decode(a, legacy, antigravity));
 }
 
 test "durable snapshots are bounded while live history stays complete and partial tails require rehydration" {

@@ -119,7 +119,8 @@ with tempfile.TemporaryDirectory() as directory:
 with tempfile.TemporaryDirectory() as directory:
     prepare(directory)
     config = r['host_read'](r['host_paths']('claude', sid)['config'])
-    config['auto_switch'] = dict(on=True, order=['claude', 'codex', 'pi'], empty=dict(codex=time.time(), pi=time.time()))
+    config['auto_switch'] = dict(on=True, order=['claude', 'codex', 'pi', 'antigravity'],
+                                 empty=dict(codex=time.time(), pi=time.time(), antigravity=time.time()))
     r['host_write'](r['host_paths']('claude', sid)['config'], config)
     started, seen, session = exhausted(directory, [json.dumps(event) for event in events])
     assert started == [] and seen == [], (started, seen)
@@ -135,13 +136,39 @@ with tempfile.TemporaryDirectory() as directory:
 `);
 });
 
+test('an exhausted order lands on Antigravity and an Antigravity limit moves the chat away', () => {
+  python(setup + String.raw`
+events = [json.loads(line) for line in ${JSON.stringify(fixtures('claude-usage-limit.jsonl'))}]
+with tempfile.TemporaryDirectory() as directory:
+    prepare(directory)
+    config = r['host_read'](r['host_paths']('claude', sid)['config'])
+    config['auto_switch'] = dict(on=True, order=['claude', 'codex', 'pi', 'antigravity'],
+                                 empty=dict(codex=time.time(), pi=time.time()))
+    r['host_write'](r['host_paths']('claude', sid)['config'], config)
+    started, seen, session = exhausted(directory, [json.dumps(event) for event in events])
+    assert seen == [('claude', 'antigravity', message)], seen
+    assert started and started[0][0] == 'antigravity', started
+    assert row() == ('antigravity', started[0][1], 'queued'), row()
+    assert r['host_config']('claude', sid) is None
+agy = [json.loads(line) for line in ${JSON.stringify(fixtures('agy-resource-exhausted.ndjson'))}]
+with tempfile.TemporaryDirectory() as directory:
+    prepare(directory, 'antigravity')
+    started, seen, session = exhausted(directory, [json.dumps(event) for event in agy], provider='antigravity')
+    assert seen == [('antigravity', 'claude', message)], seen
+    assert started and started[0][0] == 'claude', started
+    assert row() == ('claude', started[0][1], 'queued'), row()
+    assert r['host_config']('antigravity', sid) is None
+    print('AUTO_SWITCH_PASS')
+`);
+});
+
 test('the toggle defaults on, saves off and stops the switch', () => {
   python(setup + String.raw`
 events = [json.loads(line) for line in ${JSON.stringify(fixtures('claude-usage-limit.jsonl'))}]
 with tempfile.TemporaryDirectory() as directory:
     prepare(directory)
     settings = r['host_auto_switch_settings'](r['host_config']('claude', sid))
-    assert settings['on'] is True and settings['order'][:3] == ['claude', 'codex', 'pi'], settings
+    assert settings['on'] is True and settings['order'] == ['claude', 'codex', 'pi', 'antigravity'], settings
     assert r['host_reply'](dict(op='set_auto_switch', provider='claude', sid=sid, toggle=True)) == dict(status='ok', on=False)
     assert r['host_read'](r['host_paths']('claude', sid)['config'])['auto_switch']['on'] is False
     started, seen, session = exhausted(directory, [json.dumps(event) for event in events])

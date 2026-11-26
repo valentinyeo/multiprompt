@@ -4825,6 +4825,102 @@ class IGSH_1266_SharedMessageHostTest(unittest.TestCase):
         self.assertEqual(self.submit().get('origin'), 'human')
 
 
+class MUBO_594_QueuedMessageActionsTest(unittest.TestCase):
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name)
+        self.path = self.home / 'sid.jsonl'
+        self.path.write_text('')
+        self.base = dict(message_protocol=1, provider='claude', sid='sid', tmux='fixture')
+        self.sources = {name: base64.b64encode((ROOT / 'src/chat_connectors' / (name + '.py')).read_bytes()).decode()
+                        for name in ('claude', 'codex')}
+        self.addCleanup(patch.stopall)
+        patch.object(reader, 'HOME', self.home).start()
+        patch.object(reader, 'CONNECTOR_SOURCES', self.sources, create=True).start()
+        patch.object(reader, 'resolve_tmux_agent', return_value=('sid', self.path)).start()
+        patch.object(reader, 'send_response_preserve_draft', return_value={'status': 'sent'}).start()
+
+    def request(self, op, **values):
+        return reader.message_store_request(dict(self.base, op='message_' + op, **values))
+
+    def submit(self, token='message_mubo594_0001', text='queued prompt'):
+        return self.request('submit', message_id=token, text=text)['message']
+
+    def queued(self):
+        snapshot = self.request('snapshot')
+        return [item['message'] for item in snapshot['items'] if 'message' in item]
+
+    def text(self, token='message_mubo594_0001'):
+        return self.request('status', message_id=token)['message']
+
+    def test_a_queued_message_lists_with_its_text_and_position(self):
+        self.submit()
+        self.submit('message_mubo594_0002', 'second prompt')
+        listed = self.queued()
+        self.assertEqual([row['text'] for row in listed], ['queued prompt', 'second prompt'])
+        self.assertEqual([row['state'] for row in listed], ['queued', 'queued'])
+        self.assertEqual([row['position'] for row in listed], [1, 2])
+
+    def test_edit_updates_the_text_in_place_and_stays_idempotent(self):
+        self.submit()
+        first = self.request('edit', message_id='message_mubo594_0001', text='a better prompt')
+        self.assertEqual((first['message']['text'], first['message']['state']), ('a better prompt', 'queued'))
+        second = self.request('edit', message_id='message_mubo594_0001', text='a better prompt')
+        self.assertEqual(first['seq'], second['seq'])
+        self.assertEqual([row['text'] for row in self.queued()], ['a better prompt'])
+        self.assertEqual(self.text()['text'], 'a better prompt')
+
+    def test_edit_without_text_cancels_and_hands_the_text_back(self):
+        self.submit()
+        reply = self.request('edit', message_id='message_mubo594_0001')['message']
+        self.assertEqual((reply['text'], reply['state']), ('queued prompt', 'cancelled'))
+        self.assertEqual(self.text()['state'], 'cancelled')
+        self.assertEqual(self.request('edit', message_id='message_mubo594_0001')['message']['state'], 'cancelled')
+
+    def test_delete_cancels_a_queued_message_once(self):
+        self.submit()
+        first = self.request('dismiss', message_id='message_mubo594_0001')['message']
+        second = self.request('dismiss', message_id='message_mubo594_0001')['message']
+        self.assertEqual((first['state'], second['state']), ('cancelled', 'cancelled'))
+        self.assertEqual([row['id'] for row in self.queued() if row['state'] == 'queued'], [])
+
+    def test_send_now_promotes_the_queued_message_to_the_front_once(self):
+        self.submit()
+        self.submit('message_mubo594_0002', 'second prompt')
+        promoted = self.request('send_now', message_id='message_mubo594_0002')
+        self.assertTrue(promoted['promoted'])
+        self.assertEqual([row['text'] for row in self.queued()], ['second prompt', 'queued prompt'])
+        again = self.request('send_now', message_id='message_mubo594_0002')
+        self.assertFalse(again['promoted'])
+        self.assertEqual([row['text'] for row in self.queued()], ['second prompt', 'queued prompt'])
+
+    def test_send_now_after_dispatch_is_an_idempotent_no_op(self):
+        self.submit()
+        self.request('dispatch')
+        self.assertNotEqual(self.text()['state'], 'queued')
+        reply = self.request('send_now', message_id='message_mubo594_0001')
+        self.assertFalse(reply['promoted'])
+        self.assertEqual(reply['message']['state'], self.text()['state'])
+
+    def test_a_client_that_never_sends_the_new_ops_keeps_working(self):
+        self.submit()
+        self.assertEqual(self.queued()[0]['state'], 'queued')
+        self.assertEqual(self.request('dismiss', message_id='message_mubo594_0001')['message']['state'], 'cancelled')
+        with self.assertRaises(ValueError):
+            self.request('edit_everything', message_id='message_mubo594_0001')
+
+    def test_the_new_ops_refuse_identities_they_do_not_own(self):
+        self.submit()
+        other = dict(self.base, sid='other-sid', tmux='other-chat')
+        with self.assertRaises(ValueError):
+            reader.message_store_request(dict(other, op='message_edit', message_id='message_mubo594_0001', text='hijack'))
+        with self.assertRaises(ValueError):
+            reader.message_store_request(dict(other, op='message_send_now', message_id='message_mubo594_0001'))
+        self.assertEqual((self.text()['text'], self.text()['state']), ('queued prompt', 'queued'))
+
+
 class IGSH_1900_MpSendReportTest(unittest.TestCase):
     def module(self):
         import importlib.machinery
@@ -5400,8 +5496,10 @@ def track_fixture_hosts(test):
     test.host_children = []
     spawn = reader.host_spawn
 
-    def tracked(provider, sid, *args, **kwargs):
-        child = spawn(provider, sid, *args, **kwargs)
+    def tracked(provider, sid, source=None):
+        if source is None:
+            source = getattr(test, 'host_source', None)
+        child = spawn(provider, sid, source)
         if child is not None and provider == test.provider and sid == test.sid:
             test.host_children.append(child)
         return child
@@ -5432,6 +5530,176 @@ def stop_fixture_host_loop(test, thread, session):
     thread.join(timeout=10)
     test.assertTrue(started, 'fixture host loop did not initialize')
     test.assertFalse(thread.is_alive(), 'fixture host loop outlived its HOME patch')
+
+
+class MUBO_221_AntigravityHistoryRetentionTest(unittest.TestCase):
+    provider = 'antigravity'
+    tmux = 'live-antigravity-retention'
+    text = 'fresh chat question'
+    reply = 'All good'
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name)
+        self.addCleanup(patch.stopall)
+        patch.object(reader, 'HOME', self.home).start()
+        patch.object(reader, 'MESSAGE_WORKER_IDLE_SECONDS', 0.1).start()
+        patch.dict(os.environ, dict(HOME=str(self.home))).start()
+        self.sid = str(uuid.uuid4())
+        self.host_source = None
+        self.host_children = []
+        track_fixture_hosts(self)
+        self.agent = self.home / 'agy-stand-in.py'
+        self.agent.write_text((ROOT / 'tools/fixtures/MUBO-221/agy-stand-in.py').read_text(encoding='utf-8'), encoding='utf-8')
+        self.stream = ROOT / 'tools/fixtures/SOFT-3050/agy-stream.ndjson'
+        self.addCleanup(self.stop_hosts)
+
+    def stop_hosts(self):
+        try:
+            reader.host_stop(self.provider, self.sid, force=True)
+        finally:
+            for child in self.host_children:
+                stop_fixture_process(child)
+            reader.host_reap_agent(self.provider, self.sid)
+
+    def paths(self):
+        return reader.host_paths(self.provider, self.sid)
+
+    def enable(self):
+        reply = reader.host_cli(['enable', self.provider, self.sid, '--tmux', self.tmux, '--cwd', str(self.home)])
+        self.assertEqual(reply.get('status'), 'enabled', reply)
+        config = reader.host_read(self.paths()['config'])
+        config['command'] = [sys.executable, str(self.agent), str(self.stream)]
+        reader.host_write(self.paths()['config'], config)
+
+    def events(self):
+        db = reader.message_store_db(self.tmux)
+        try:
+            return [json.loads(body) for (body,) in db.execute('SELECT body FROM message_events WHERE provider=? AND sid=? ORDER BY seq', (self.provider, self.sid))]
+        finally:
+            db.close()
+
+    def evidence(self):
+        errors = self.paths()['errors']
+        log = self.paths()['log']
+        return ('events=%s log=%s stderr=%s' % (json.dumps(self.events())[-1500:],
+                                               log.read_text(encoding='utf-8')[-1000:] if log.exists() else '',
+                                               errors.read_text(encoding='utf-8')[-1000:] if errors.exists() else ''))
+
+    def wait_for(self, predicate, timeout=90):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            value = predicate()
+            if value:
+                return value
+            time.sleep(0.05)
+        self.fail('timed out waiting for the antigravity host; ' + self.evidence())
+
+    def lock_free(self):
+        handle = reader.host_lock(self.provider, self.sid)
+        if handle is None:
+            return False
+        handle.close()
+        return True
+
+    def ready(self):
+        return [event for event in self.events()
+                if event.get('kind') == 'host.status' and (event.get('payload') or {}).get('state') == 'ready']
+
+    def send(self):
+        self.start()
+        self.wait_for(self.ready)
+        store = dict(message_protocol=1, provider=self.provider, sid=self.sid, tmux=self.tmux)
+        token = 'mubo221' + uuid.uuid4().hex
+        submitted = reader.message_store_request(dict(store, op='message_submit', message_id=token, text=self.text, origin='human'))
+        self.assertEqual(submitted['message']['state'], 'queued')
+        reader.message_store_request(dict(store, op='message_dispatch'))
+        self.wait_for(lambda: [event for event in self.events() if event.get('kind') == 'text.done'])
+        return token
+
+    def fetch(self):
+        query = dict(id=7, provider=self.provider, sid=self.sid, tmux=self.tmux, cwd=str(self.home),
+                     cached_sid='', inode=0, offset=0, follow=True, source_offsets=True)
+        wire = reader.response(query)
+        lines = wire.splitlines()
+        self.assertEqual(lines[-1], reader.END)
+        fields = lines[0].split('\t')
+        return fields, [json.loads(line) for line in lines[1:-1]], wire
+
+    def read(self):
+        fields, rows, wire = self.fetch()
+        self.assertEqual(fields[:4], ['@mp', '7', 'history', 'ok'], wire)
+        return fields, rows
+
+    def messages(self, rows):
+        return [(row['role'], row['text'], row.get('id')) for row in rows if row.get('role') in ('user', 'assistant')]
+
+    def pre_fix_source(self):
+        call = '    host_history_claim(provider, sid, session)\n'
+        source = (ROOT / 'src/chat_history_reader.py').read_text(encoding='utf-8')
+        self.assertEqual(source.count(call), 1, 'the host loop claim call moved; the pre-fix baseline no longer removes it')
+        scope = dict(__name__='mubo221_prefix_reader')
+        exec(compile(source.replace(call, ''), 'reader-before-host-history-claim', 'exec'), scope)
+        return scope['READER_SOURCE']
+
+    def start(self):
+        started = reader.host_cli(['start', self.provider, self.sid])
+        self.assertIn(started.get('status'), ('started', 'already'), started)
+
+    def test_a_fresh_antigravity_chat_keeps_its_reply_across_full_reloads(self):
+        self.enable()
+        token = self.send()
+        fields, rows = self.read()
+        messages = self.messages(rows)
+        self.assertEqual([(role, text) for role, text, _ in messages], [('user', self.text), ('assistant', self.reply)], rows)
+        self.assertEqual(messages[0][2], token)
+        self.assertTrue(messages[1][2])
+        self.assertEqual(len({identity for _, _, identity in messages}), len(messages))
+        self.assertTrue(reader.host_session_state(self.provider, self.sid).get('display_history'))
+        self.assertTrue(self.paths()['history'].is_file())
+        for _ in range(2):
+            self.assertEqual(self.read(), (fields, rows))
+        self.assertEqual(self.messages(self.read()[1]), messages)
+
+    def test_an_existing_unset_antigravity_chat_rebuilds_its_rows_on_host_start(self):
+        self.enable()
+        token = self.send()
+        self.read()
+        reader.host_stop(self.provider, self.sid, force=True)
+        self.wait_for(lambda: not reader.host_owned(self.provider, self.sid) and self.lock_free())
+        self.paths()['history'].unlink()
+        state = reader.host_read(self.paths()['state']) or {}
+        state.pop('display_history', None)
+        reader.host_write(self.paths()['state'], state)
+        self.assertEqual(self.fetch()[0][3], 'missing')
+        self.start()
+        self.wait_for(lambda: self.paths()['history'].is_file() and self.read()[1])
+        messages = self.messages(self.read()[1])
+        self.assertEqual([(role, text) for role, text, _ in messages], [('user', self.text), ('assistant', self.reply)], messages)
+        self.assertEqual(messages[0][2], token)
+        self.assertEqual(len({identity for _, _, identity in messages}), len(messages))
+        self.assertTrue(reader.host_session_state(self.provider, self.sid).get('display_history'))
+        self.assertEqual(len([event for event in self.events() if event.get('kind') == 'text.done']), 1)
+
+    def test_a_fresh_chat_without_the_host_claim_serves_no_history_and_the_claim_restores_it(self):
+        self.enable()
+        self.host_source = self.pre_fix_source()
+        token = self.send()
+        fields, rows, wire = self.fetch()
+        self.assertIn(fields[3], ('missing', 'ok'), wire)
+        self.assertEqual(self.messages(rows), [], wire)
+        self.assertFalse(reader.host_session_state(self.provider, self.sid).get('display_history'))
+        self.assertFalse(self.paths()['history'].is_file())
+        reader.host_stop(self.provider, self.sid, force=True)
+        self.wait_for(lambda: not reader.host_owned(self.provider, self.sid) and self.lock_free())
+        self.host_source = None
+        self.start()
+        self.wait_for(lambda: self.paths()['history'].is_file() and self.read()[1])
+        messages = self.messages(self.read()[1])
+        self.assertEqual([(role, text) for role, text, _ in messages], [('user', self.text), ('assistant', self.reply)], messages)
+        self.assertEqual(messages[0][2], token)
+        self.assertTrue(reader.host_session_state(self.provider, self.sid).get('display_history'))
 
 
 class FixtureLifecycleTest(unittest.TestCase):
@@ -7262,7 +7530,7 @@ class HostEventStreamTest(HostEventStreamFixture, unittest.TestCase):
         started = self.events('item.started')
         self.assertEqual([row['item'] for row in started], ['toolu_inner'])
         self.assertEqual(started[0]['payload'], dict(type='tool_call', tool='Read', input=dict(file_path='a'),
-                                                    title='Read', display_name='Read'))
+                                                    title='Read', display_name='Read', step='Reading'))
 
     def test_tool_steps_and_the_turn_end_reach_the_event_log(self):
         self.feed(dict(type='assistant', message=dict(id='msg-1', content=[dict(type='tool_use', id='toolu_one', name='Bash',
@@ -8274,6 +8542,56 @@ class IGSH_1828_HostRecallTest(HostControlFixture, unittest.TestCase):
 class HostAntigravityTurnTest(HostEventStreamFixture, unittest.TestCase):
     provider = 'antigravity'
 
+    def writes(self):
+        return [json.loads(line) for line in self.agent_input.getvalue().decode().splitlines() if line.strip()]
+
+    def answer(self, **request):
+        return reader.host_handle_request('antigravity', self.sid, self.tmux, self.session, request)
+
+    def test_antigravity_answers_with_its_own_handler(self):
+        self.assertIs(reader.HOST_ADAPTERS['antigravity']['answer'], reader.host_antigravity_answer)
+        self.assertIsNot(reader.HOST_ADAPTERS['antigravity']['answer'], reader.host_pi_answer)
+
+    def test_antigravity_refuses_every_dialog_without_speaking_the_pi_protocol(self):
+        for request in (dict(op='approval_reply', request_id='agy-approval-1', decision='accept'),
+                        dict(op='question_reply', request_id='agy-question-1', answers={'Colour': 'Lime'}),
+                        dict(op='plan_reply', request_id='agy-plan-1', action='implement')):
+            with self.subTest(op=request['op']):
+                self.assertEqual(self.answer(**request), dict(status='refused', reason='antigravity_dialog_unsupported'))
+        self.assertEqual(self.writes(), [], 'Antigravity must not be sent a Pi extension_ui_response line')
+        self.assertEqual(self.session['parked'], {})
+
+    def test_antigravity_refuses_an_answer_op_it_does_not_claim(self):
+        reply = reader.host_antigravity_answer('antigravity', self.sid, self.tmux, self.session,
+                                              dict(op='login_answer', request_id='agy-1'))
+        self.assertEqual(reply, dict(status='refused', reason='unsupported_request'))
+        self.assertEqual(self.writes(), [])
+
+    def test_antigravity_mode_is_fixed_through_both_entry_points(self):
+        self.write_config()
+        through_host = self.answer(op='set_permission_mode', mode='plan')
+        through_settings = reader.host_reply(dict(provider='antigravity', sid=self.sid, op='set_permission_mode',
+                                                  mode='plan'))
+        self.assertEqual(through_host, dict(status='refused', reason='antigravity_mode_fixed'))
+        self.assertEqual(through_settings, dict(status='refused', reason='antigravity_mode_fixed'))
+        self.assertEqual(reader.host_reply(dict(provider='antigravity', sid=self.sid, op='set_permission_mode',
+                                                mode='yolo'))['reason'], 'invalid_permission_mode')
+        self.assertNotIn('permission_mode', reader.host_config('antigravity', self.sid))
+
+    def test_an_antigravity_dialog_step_keeps_the_send_and_the_reply(self):
+        self.session['sends'] = [dict(id='mp-antigravity-3', attempt='a', epoch=0, accepted=False, turn='t-1',
+                                      sha256='x', uuid=None, text='hello')]
+        self.feed(dict(event='step_update',
+                       step_update=dict(conversation_id='conversation-1', step_index=0, state='ACTIVE',
+                                        step_type='question')))
+        self.assertTrue(self.session['sends'][0]['accepted'],
+                        'a dialog step Antigravity sends must leave the message sent')
+        self.feed(dict(event='result', result=dict(conversation_id='conversation-1', status='SUCCESS',
+                                                  response='Lime it is')))
+        self.assertEqual([row['payload']['text'] for row in self.antigravity_events('text.done')], ['Lime it is'])
+        ended = self.antigravity_events('turn.ended')
+        self.assertEqual(ended[-1]['payload']['status'], 'completed')
+
     def antigravity_events(self, kind=None):
         db = reader.message_store_db(self.tmux)
         rows = [json.loads(body) for (body,) in db.execute(
@@ -8301,6 +8619,178 @@ class HostAntigravityTurnTest(HostEventStreamFixture, unittest.TestCase):
         started = self.antigravity_events('turn.started')
         self.assertEqual(len(started), 1)
         self.assertEqual(started[0]['payload']['uuids'], ['mp-antigravity-2'])
+
+    def write_config(self):
+        reader.host_write(reader.host_paths('antigravity', self.sid)['config'],
+                          dict(enabled=True, tmux=self.tmux, cwd=str(self.home), command=['agy']))
+        return reader.host_config('antigravity', self.sid)
+
+    def test_settings_default_to_neon_medium_and_reach_the_launch_argv(self):
+        self.write_config()
+        self.assertEqual(reader.host_settings('antigravity', self.sid), dict(model='neon', effort='medium'))
+        argv = reader.host_antigravity_argv('antigravity', self.sid, ['agy'])
+        self.assertEqual(argv[:3], ['agy', '--model', 'gemini-4-neon-medium'])
+
+    def test_a_model_and_effort_choice_persists_and_reaches_the_launch_argv(self):
+        self.write_config()
+        self.assertEqual(reader.host_reply(dict(provider='antigravity', sid=self.sid, op='set_model', model='hydrogen'))['status'], 'ok')
+        self.assertEqual(reader.host_reply(dict(provider='antigravity', sid=self.sid, op='set_effort', effort='xhigh'))['status'], 'ok')
+        self.assertEqual(reader.host_config('antigravity', self.sid)['model'], 'hydrogen')
+        self.assertEqual(reader.host_settings('antigravity', self.sid), dict(model='hydrogen', effort='xhigh'))
+        argv = reader.host_antigravity_argv('antigravity', self.sid, ['agy'])
+        self.assertEqual(argv[:3], ['agy', '--model', 'gemini-4-hydrogen-xhigh'])
+
+    def test_xhigh_is_saved_as_high_on_a_model_that_does_not_offer_it(self):
+        self.write_config()
+        reader.host_reply(dict(provider='antigravity', sid=self.sid, op='set_model', model='neon'))
+        reader.host_reply(dict(provider='antigravity', sid=self.sid, op='set_effort', effort='xhigh'))
+        self.assertEqual(reader.host_settings('antigravity', self.sid), dict(model='neon', effort='xhigh'))
+        for model, expected in (('carbon', 'gemini-4-carbon-high'), ('argon', 'gemini-4-argon-high'),
+                                ('flash', 'gemini-3.8-flash-high'), ('opus', 'claude-opus-5-5-high'),
+                                ('sonnet', 'claude-sonnet-5-5-high')):
+            self.assertEqual(reader.host_reply(dict(provider='antigravity', sid=self.sid, op='set_model', model=model))['status'], 'ok')
+            self.assertEqual(reader.host_settings('antigravity', self.sid), dict(model=model, effort='high'))
+            argv = reader.host_antigravity_argv('antigravity', self.sid, ['agy'])
+            self.assertEqual(argv[:3], ['agy', '--model', expected])
+            self.assertEqual(reader.host_reply(dict(provider='antigravity', sid=self.sid, op='set_effort', effort='xhigh'))['status'], 'ok')
+            self.assertEqual(reader.host_settings('antigravity', self.sid), dict(model=model, effort='high'))
+
+    def test_an_invalid_model_or_effort_is_refused_and_leaves_the_config_alone(self):
+        self.write_config()
+        self.assertEqual(reader.host_reply(dict(provider='antigravity', sid=self.sid, op='set_model', model='gemini-4-neon-high'))['reason'], 'invalid_model')
+        self.assertEqual(reader.host_reply(dict(provider='antigravity', sid=self.sid, op='set_effort', effort='max'))['reason'], 'invalid_effort')
+        config = reader.host_config('antigravity', self.sid)
+        self.assertNotIn('model', config)
+        self.assertNotIn('effort', config)
+        self.assertEqual(reader.host_settings('antigravity', self.sid), dict(model='neon', effort='medium'))
+
+    def test_a_live_chat_reports_the_change_and_waits_for_its_restart(self):
+        self.write_config()
+        self.session['settings'] = dict(model='neon', effort='medium')
+        self.session['starting_settings'] = dict(self.session['settings'])
+        self.session['applied_settings'] = dict(self.session['settings'])
+        self.session['ready'] = True
+        result = reader.host_handle_request('antigravity', self.sid, self.tmux, self.session, dict(op='set_model', model='carbon'))
+        self.assertEqual(result['status'], 'ok')
+        self.assertEqual(self.session['settings'], dict(model='carbon', effort='medium'))
+        pending = self.antigravity_events('host.settings')
+        self.assertEqual(pending[-1]['payload']['model'], 'carbon')
+        self.assertFalse(pending[-1]['payload']['applied'])
+        self.assertEqual(reader.host_handle_request('antigravity', self.sid, self.tmux, self.session, dict(op='deliver'))['reason'], 'settings_pending')
+        self.session['starting_settings'] = dict(self.session['settings'])
+        self.session['applied_settings'] = dict(self.session['settings'])
+        self.assertEqual(reader.host_handle_request('antigravity', self.sid, self.tmux, self.session, dict(op='deliver'))['reason'], 'invalid_text')
+        self.feed(dict(event='init', conversation_id='conversation-1'))
+        applied = self.antigravity_events('host.settings')
+        self.assertTrue(applied[-1]['payload']['applied'])
+        self.assertEqual(applied[-1]['payload']['model'], 'carbon')
+        self.assertEqual(reader.host_antigravity_argv('antigravity', self.sid, ['agy'])[:3], ['agy', '--model', 'gemini-4-carbon-medium'])
+
+
+class HostCodexEffortTest(HostEventStreamFixture, unittest.TestCase):
+    provider = 'codex'
+
+    def codex_events(self, kind=None):
+        db = reader.message_store_db(self.tmux)
+        rows = [json.loads(body) for (body,) in db.execute(
+            "SELECT body FROM message_events WHERE provider='codex' AND sid=? ORDER BY seq", (self.sid,))]
+        db.close()
+        return [row for row in rows if kind is None or row.get('kind') == kind]
+
+    def write_config(self):
+        reader.host_write(reader.host_paths('codex', self.sid)['config'],
+                          dict(enabled=True, tmux=self.tmux, cwd=str(self.home), command=['codex']))
+
+    def test_a_codex_effort_choice_persists_and_reaches_the_next_turn(self):
+        self.write_config()
+        self.assertEqual(reader.host_settings('codex', self.sid), dict(model='', effort=''))
+        self.assertEqual(reader.host_reply(dict(provider='codex', sid=self.sid, op='set_effort', effort='high'))['status'], 'ok')
+        self.assertEqual(reader.host_config('codex', self.sid)['effort'], 'high')
+        self.assertEqual(reader.host_settings('codex', self.sid), dict(model='', effort='high'))
+        sent = []
+        self.session.update(seq=0, rpc={}, thread='thread-1', codex_tokens={}, state={})
+        with patch.object(reader, 'host_control_send', lambda session, payload: sent.append(payload) or True):
+            self.assertTrue(reader.host_codex_write('codex', self.sid, self.session, 'codex-token-1', 'hello'))
+        turn = [payload for payload in sent if payload.get('method') == 'turn/start'][-1]
+        self.assertEqual(turn['params']['effort'], 'high')
+        self.assertNotIn('model', turn['params'])
+
+    def test_a_live_codex_chat_reports_the_choice_the_next_turn_will_use(self):
+        self.write_config()
+        self.session['settings'] = dict(model='', effort='')
+        self.session['starting_settings'] = dict(self.session['settings'])
+        self.session['ready'] = True
+        result = reader.host_handle_request('codex', self.sid, self.tmux, self.session, dict(op='set_effort', effort='medium'))
+        self.assertEqual(result['status'], 'ok')
+        self.assertEqual(self.session['settings'], dict(model='', effort='medium'))
+        pending = self.codex_events('host.settings')
+        self.assertEqual(pending[-1]['payload']['effort'], 'medium')
+        self.assertFalse(pending[-1]['payload']['applied'])
+        self.assertEqual(reader.host_handle_request('codex', self.sid, self.tmux, self.session, dict(op='set_effort', effort='xhigh'))['reason'], 'invalid_effort')
+        self.assertEqual(reader.host_config('codex', self.sid)['effort'], 'medium')
+
+
+class HostPiEffortTest(HostEventStreamFixture, unittest.TestCase):
+    provider = 'pi'
+
+    def pi_events(self, kind=None):
+        db = reader.message_store_db(self.tmux)
+        rows = [json.loads(body) for (body,) in db.execute(
+            "SELECT body FROM message_events WHERE provider='pi' AND sid=? ORDER BY seq", (self.sid,))]
+        db.close()
+        return [row for row in rows if kind is None or row.get('kind') == kind]
+
+    def write_config(self):
+        reader.host_write(reader.host_paths('pi', self.sid)['config'],
+                          dict(enabled=True, tmux=self.tmux, cwd=str(self.home), command=['pi']))
+
+    def test_the_pi_launch_gains_one_thinking_flag_per_choice(self):
+        self.write_config()
+        self.assertNotIn('--thinking', reader.host_pi_argv('pi', self.sid, ['pi']))
+        self.assertEqual(reader.host_reply(dict(provider='pi', sid=self.sid, op='set_effort', effort='xhigh'))['status'], 'ok')
+        self.assertEqual(reader.host_config('pi', self.sid)['effort'], 'xhigh')
+        self.assertEqual(reader.host_settings('pi', self.sid),
+                         dict(provider='opencode-go', model='deepseek-v4.1-flash', effort='xhigh'))
+        argv = reader.host_pi_argv('pi', self.sid, ['pi'])
+        self.assertEqual(argv.count('--thinking'), 1)
+        self.assertEqual(argv[argv.index('--thinking') + 1], 'xhigh')
+        self.assertEqual(argv[argv.index('--session-id') + 1], self.sid)
+
+    def test_a_live_pi_chat_sends_the_thinking_level_and_persists_it(self):
+        self.write_config()
+        self.session['settings'] = dict(provider='opencode-go', model='deepseek-v4.1-flash', effort='')
+        self.session['starting_settings'] = dict(self.session['settings'])
+        self.session['ready'] = True
+        sent = []
+        with patch.object(reader, 'host_control_send', lambda session, payload: sent.append(payload) or True):
+            result = reader.host_handle_request('pi', self.sid, self.tmux, self.session, dict(op='set_effort', effort='high'))
+        self.assertEqual(result['status'], 'ok')
+        self.assertEqual(sent, [dict(type='set_thinking_level', level='high')])
+        self.assertEqual(self.session['settings'],
+                         dict(provider='opencode-go', model='deepseek-v4.1-flash', effort='high'))
+        applied = self.pi_events('host.settings')
+        self.assertTrue(applied[-1]['payload']['applied'])
+        self.assertEqual(applied[-1]['payload']['effort'], 'high')
+        self.assertEqual(reader.host_config('pi', self.sid)['effort'], 'high')
+        self.assertEqual(reader.host_settings('pi', self.sid),
+                         dict(provider='opencode-go', model='deepseek-v4.1-flash', effort='high'))
+
+    def test_a_pi_thinking_reply_is_logged_without_touching_the_turn(self):
+        reader.host_pi_event('pi', self.sid, self.tmux, self.session,
+                             dict(type='response', command='set_thinking_level', success=True))
+        self.assertEqual(self.pi_events('turn.ended'), [])
+        self.assertEqual(self.session['turn'], 't-1')
+
+    def test_an_out_of_range_pi_effort_is_refused_and_changes_nothing(self):
+        self.write_config()
+        sent = []
+        self.session['ready'] = True
+        with patch.object(reader, 'host_control_send', lambda session, payload: sent.append(payload) or True):
+            self.assertEqual(reader.host_handle_request('pi', self.sid, self.tmux, self.session, dict(op='set_effort', effort='max'))['reason'], 'invalid_effort')
+            self.assertEqual(reader.host_reply(dict(provider='pi', sid=self.sid, op='set_effort', effort='max'))['reason'], 'invalid_effort')
+        self.assertEqual(sent, [])
+        self.assertNotIn('effort', reader.host_config('pi', self.sid))
+        self.assertNotIn('--thinking', reader.host_pi_argv('pi', self.sid, ['pi']))
 
 
 class HostInterruptTest(HostControlFixture, unittest.TestCase):
@@ -9478,6 +9968,308 @@ class MUBO135_ServerReplyOnceTest(unittest.TestCase):
     def test_a_labelled_hax_reply_keeps_one_row_per_message_id(self):
         self.drive('hax-reply-ids.jsonl')
         self.assert_once(True)
+
+
+class MUBO_221_LaunchCommandTest(unittest.TestCase):
+    ARGS = ('reader', 'name', 'sid', 'session', 'cwd', 'mode', 'reader', 'name', 'sid')
+
+    def launch_command(self, provider='antigravity'):
+        source = (ROOT / 'src/agent_host.zig').read_text()
+        start = source.index('pub fn launchCommandFor(')
+        block = source[start:source.index('pub fn resumeCommandFor(', start)]
+        opened = block.index('std.fmt.bufPrint(out, "') + len('std.fmt.bufPrint(out, "')
+        shape = block[opened:block.index('", .{', opened)]
+        holes = shape.split('{s}')
+        self.assertEqual(len(holes) - 1, len(self.ARGS), 'the launch command changed shape')
+        values = dict(reader='~/.multiprompt-runtime/reader.py', name=provider, session='live-abc',
+                      cwd='~/projects', sid='ffffffff-ffff-4fff-bfff-ffffffffffff', mode='')
+        text = holes[0]
+        for index, name in enumerate(self.ARGS):
+            text += values[name] + holes[index + 1]
+        return text
+
+    def run_launch(self, reader_source):
+        home = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, home, True)
+        runtime = home / '.multiprompt-runtime'
+        runtime.mkdir(parents=True)
+        (runtime / 'reader.py').write_text(reader_source)
+        return subprocess.run(['bash', '-c', self.launch_command()],
+                              env=dict(os.environ, HOME=str(home)), capture_output=True, text=True, timeout=30)
+
+    @unittest.skipUnless(os.name == 'posix', 'the launch command runs on the server shell')
+    def test_a_refused_enable_reports_its_reason_and_stops_the_launch(self):
+        self.assertNotIn('>/dev/null', self.launch_command())
+        ran = self.run_launch('import sys\nprint(\'{"status":"refused","reason":"unsupported_provider"}\')\nsys.exit(1)\n')
+        self.assertEqual(ran.returncode, 1)
+        self.assertIn('unsupported_provider', ran.stdout)
+        self.assertNotIn('"started"', ran.stdout)
+
+    @unittest.skipUnless(os.name == 'posix', 'the launch command runs on the server shell')
+    def test_a_started_host_is_the_last_line_the_desktop_reads(self):
+        ran = self.run_launch(
+            'import sys\n'
+            'step = sys.argv[2]\n'
+            'print(\'{"status":"enabled","sid":"x"}\' if step == "enable" else \'{"status":"started","pid":7}\')\n')
+        self.assertEqual(ran.returncode, 0)
+        self.assertEqual(ran.stdout.strip().splitlines()[-1], '{"status":"started","pid":7}')
+
+
+class MUBO_591_LiveActivityTest(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name)
+        patch.object(reader, 'HOME', self.home).start()
+        patch.dict(os.environ, {'PLAN_PICK_LAUNCHES': ''}).start()
+        self.addCleanup(patch.stopall)
+        reader.PLAN_PICK_CACHE.clear()
+
+    def launches(self, *records):
+        path = reader.plan_pick_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(''.join(json.dumps(record) + '\n' for record in records))
+        return path
+
+    def test_every_hosted_provider_names_the_same_short_steps(self):
+        cases = {
+            'claude': [('Read', 'Reading'), ('Grep', 'Searching'), ('Edit', 'Editing'), ('Bash', 'Running command'), ('Agent', 'Delegating')],
+            'codex': [('read_file', 'Reading'), ('grep_search', 'Searching'), ('apply_patch', 'Editing'), ('shell', 'Running command'), ('invoke_subagent', 'Delegating')],
+            'pi': [('read', 'Reading'), ('find_files', 'Searching'), ('edit', 'Editing'), ('run_command', 'Running command'), ('task', 'Delegating')],
+            'hax': [('read_file', 'Reading'), ('search', 'Searching'), ('write_file', 'Editing'), ('terminal', 'Running command'), ('spawn_agent', 'Delegating')],
+            'cursor': [('Read', 'Reading'), ('codebase_search', 'Searching'), ('str_replace', 'Editing'), ('bash', 'Running command'), ('Task', 'Delegating')],
+        }
+        for provider, tools in cases.items():
+            for tool, label in tools:
+                self.assertEqual(reader.step_label(tool, provider), label, (provider, tool))
+        self.assertEqual(reader.step_label('SomeUnknownTool', 'pi'), 'Working')
+        self.assertEqual(reader.step_label(None, 'claude'), 'Working')
+        self.assertEqual(reader.step_label('mcp__fs__read_file', 'codex'), 'Reading')
+
+    def test_a_plan_pick_launch_without_a_finish_is_a_worker_for_this_chat(self):
+        now = 5000000
+        self.launches(
+            dict(at=now - 600, lane='vercel', caller='live-aaa', model='deepseek', cwd='/tmp/orch/lt/w-2839c'),
+            dict(at=now - 900, lane='codex', caller='live-other', model='gpt', cwd='/tmp/orch/lt/w-1000a'),
+            dict(at=now - 800, lane='pi', caller='live-aaa', model='pi-deepseek', task='review the queue'))
+        workers = reader.plan_pick_workers('live-aaa', now)
+        self.assertEqual([worker['source'] for worker in workers], ['plan-pick', 'plan-pick'])
+        self.assertEqual([worker['label'] for worker in workers], ['w-2839c', 'review the queue'])
+        self.assertEqual([worker['lane'] for worker in workers], ['vercel', 'pi'])
+        self.assertEqual([worker['model'] for worker in workers], ['deepseek', 'pi-deepseek'])
+        self.assertEqual([worker['started_at'] for worker in workers], [(now - 600) * 1000, (now - 800) * 1000])
+        self.assertEqual(workers[0]['step'], 'Working')
+
+    def test_finished_stale_and_dead_launches_are_not_workers(self):
+        now = 9000000
+        self.launches(
+            dict(id='done', at=now - 60, caller='live-aaa'),
+            dict(id='done', at=now - 30, event='finish', caller='live-aaa'),
+            dict(id='stale', at=now - 3 * 60 * 60, caller='live-aaa'),
+            dict(id='dead', at=now - 60, caller='live-aaa', pid=4242),
+            dict(id='alive', at=now - 120, caller='live-aaa', pid=os.getpid()))
+        with patch.object(reader, 'plan_pick_alive', side_effect=lambda pid: None if pid is None else pid == os.getpid()):
+            workers = reader.plan_pick_workers('live-aaa', now)
+        self.assertEqual([worker['id'] for worker in workers], ['plan-pick:alive'])
+
+    def test_a_broken_launch_line_is_skipped(self):
+        now = 9000000
+        path = self.launches()
+        path.write_text('not json\n' + json.dumps(dict(at=now - 60, caller='live-aaa')) + '\n')
+        self.assertEqual(len(reader.plan_pick_workers('live-aaa', now)), 1)
+        self.assertEqual(reader.plan_pick_workers('', now), [])
+        self.assertEqual(reader.plan_pick_workers(None, now), [])
+
+    def test_the_snapshot_carries_one_merged_workers_event(self):
+        now = 1700000000
+        session = dict(workers={'tool-1': dict(id='tool-1', source='subagent', harness='pi', model='deepseek-v4',
+                                               label='audit the board', step='Delegating', started_at=1)})
+        self.launches(dict(id='pick', at=now - 60, caller='live-aaa', lane='hax', model='codex'))
+        page = dict(live_snapshot=dict(seq=4, events=[dict(kind='turn.started'), dict(kind='workers.snapshot', payload=dict(workers=[]))], requests=[]),
+                    events=[], next_after=4)
+        with patch.object(reader, 'host_tmux_for', return_value='live-aaa'), \
+                patch.object(reader, 'stored_workers', return_value=list(session['workers'].values())):
+            page = reader.host_workers_page(page, 'pi', 'sid', now=now)
+        self.assertEqual([worker['source'] for worker in page['workers']], ['subagent', 'plan-pick'])
+        self.assertEqual(page['live_snapshot']['workers'], page['workers'])
+        kinds = [event['kind'] for event in page['live_snapshot']['events']]
+        self.assertEqual(kinds, ['turn.started', 'workers.snapshot'])
+        self.assertEqual([worker['harness'] for worker in page['live_snapshot']['events'][1]['payload']['workers']], ['pi', 'hax'])
+
+    def test_an_empty_worker_set_adds_no_event(self):
+        page = dict(live_snapshot=dict(seq=2, events=[dict(kind='turn.started')], requests=[]), events=[], next_after=2)
+        with patch.object(reader, 'host_tmux_for', return_value=None), patch.object(reader, 'stored_workers', return_value=[]):
+            page = reader.host_workers_page(page, 'pi', 'sid', now=1000)
+        self.assertEqual(page['workers'], [])
+        self.assertEqual([event['kind'] for event in page['live_snapshot']['events']], ['turn.started'])
+
+    def test_a_subagent_tool_call_starts_and_finishes_a_worker(self):
+        session = dict(settings=dict(model='sonnet'), workers={})
+        with patch.object(reader, 'worker_event') as published:
+            reader.track_subagent('claude', 'sid', 'live-aaa', session, 'item.started',
+                                  dict(type='tool_call', tool='Task', input=dict(description='audit the board')), 'tool-1')
+            reader.track_subagent('claude', 'sid', 'live-aaa', session, 'item.started',
+                                  dict(type='tool_call', tool='Read', input=dict(file_path='a')), 'tool-2')
+            reader.track_subagent('claude', 'sid', 'live-aaa', session, 'item.done', dict(status='completed'), 'tool-2')
+            reader.track_subagent('claude', 'sid', 'live-aaa', session, 'item.done', dict(status='completed'), 'tool-1')
+        started, finished = [call.args[-1] for call in published.call_args_list]
+        self.assertEqual(len(started), 1)
+        worker = dict(started[0])
+        self.assertIsInstance(worker.pop('started_at'), int)
+        self.assertEqual(worker, dict(id='tool-1', source='subagent', harness='claude', model='sonnet',
+                                     label='audit the board', step='Delegating'))
+        self.assertEqual(finished, [])
+        self.assertEqual(session['workers'], {})
+
+
+class MUBO_590_PiModelContinuityTest(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.addCleanup(patch.stopall)
+        self.home = Path(self.temp.name)
+        patch.object(reader, 'HOME', self.home).start()
+        self.provider = 'pi'
+        self.sid = '59000000-1111-4222-8333-444444444444'
+        self.tmux = 'pi-model-continuity'
+        self.write_config()
+        self.stream = io.BytesIO()
+        self.session = dict(state=reader.host_session_state(self.provider, self.sid))
+        reader.host_session_reset(self.session, types.SimpleNamespace(stdin=self.stream))
+        self.session['ready'] = True
+
+    def write_config(self, **extra):
+        config = dict(enabled=True, provider=self.provider, sid=self.sid, tmux=self.tmux,
+                      cwd=str(self.home), face='custom', login='pi-agent', **extra)
+        reader.host_write(reader.host_paths(self.provider, self.sid)['config'], config)
+        return config
+
+    def sent_rpc(self):
+        return [json.loads(line) for line in self.stream.getvalue().splitlines() if line.strip()]
+
+    def test_pi_codex_choice_persists_live_and_across_restart_idle_stop_and_fresh_start(self):
+        self.assertEqual(reader.host_settings(self.provider, self.sid),
+                         dict(provider='opencode-go', model='deepseek-v4.1-flash', effort=''))
+        self.assertEqual(reader.host_pi_choice(self.provider, self.sid),
+                         ['--provider', 'opencode-go', '--model', 'deepseek-v4.1-flash'])
+        forwarded = []
+
+        def forward(provider, sid, request):
+            forwarded.append(request)
+            return reader.host_handle_request(provider, sid, self.tmux, self.session, request)
+
+        with patch.object(reader, 'host_owned', return_value=True), \
+                patch.object(reader, 'host_request', side_effect=forward):
+            reply = reader.host_reply(dict(op='set_model', provider='pi', sid=self.sid,
+                                           provider_name='openai-codex', model='openai-codex/gpt-6.1-sol'))
+        self.assertEqual(reply, dict(status='ok'))
+        self.assertEqual(forwarded[-1].get('provider_name'), 'openai-codex')
+        self.assertEqual(self.sent_rpc()[-1], dict(type='set_model', provider='openai-codex', modelId='gpt-6.1-sol'))
+        config = reader.host_config(self.provider, self.sid)
+        self.assertEqual((config['model_provider'], config['model']), ('openai-codex', 'gpt-6.1-sol'))
+        self.assertEqual(config['pi_model'], dict(provider='openai-codex', model='gpt-6.1-sol'))
+        self.assertEqual(reader.host_settings(self.provider, self.sid),
+                         dict(provider='openai-codex', model='gpt-6.1-sol', effort=''))
+        argv = reader.host_pi_argv(self.provider, self.sid, ['pi'])
+        self.assertEqual(argv[:6], ['pi', '--mode', 'rpc', '--provider', 'openai-codex', '--model'])
+        self.assertEqual(argv[6], 'gpt-6.1-sol')
+        restarted = dict(state=reader.host_session_state(self.provider, self.sid))
+        reader.host_session_reset(restarted, types.SimpleNamespace(stdin=io.BytesIO()))
+        reader.host_pi_open(self.provider, self.sid, self.tmux, restarted)
+        self.assertEqual(restarted['pi_model'], dict(provider='openai-codex', model='gpt-6.1-sol'))
+        handover = reader.host_paths(self.provider, self.sid)['root'] / 'handover.json'
+        reader.host_write(handover, dict(text='Continue with Codex model.'))
+        state = dict(restarted['state'], fresh_start=dict(phase='reset', file=handover.name))
+        self.assertTrue(reader.host_fresh_prepare(self.provider, self.sid, state))
+        fresh_argv = reader.host_pi_argv(self.provider, self.sid, ['pi'])
+        self.assertEqual(fresh_argv[3:7], ['--provider', 'openai-codex', '--model', 'gpt-6.1-sol'])
+
+    def test_pi_codex_and_deepseek_persist_while_stopped_and_survive_restart(self):
+        with patch.object(reader, 'host_owned', return_value=False):
+            refused = reader.host_reply(dict(op='set_model', provider='pi', sid=self.sid, model='opus'))
+            self.assertEqual(refused, dict(status='refused', reason='invalid_model'))
+            self.assertNotIn('model', reader.host_config(self.provider, self.sid))
+            codex_reply = reader.host_reply(dict(op='set_model', provider='pi', sid=self.sid,
+                                                 provider_name='openai-codex', model='gpt-6.1-sol'))
+            self.assertEqual(codex_reply, dict(status='ok'))
+            self.assertEqual(reader.host_pi_argv(self.provider, self.sid, ['pi'])[3:7],
+                             ['--provider', 'openai-codex', '--model', 'gpt-6.1-sol'])
+            self.assertEqual(reader.host_settings(self.provider, self.sid),
+                             dict(provider='openai-codex', model='gpt-6.1-sol', effort=''))
+            deepseek_reply = reader.host_reply(dict(op='set_model', provider='pi', sid=self.sid,
+                                                    provider_name='opencode-go', model='deepseek-v4.2'))
+            self.assertEqual(deepseek_reply, dict(status='ok'))
+            self.assertEqual(reader.host_pi_argv(self.provider, self.sid, ['pi'])[3:7],
+                             ['--provider', 'opencode-go', '--model', 'deepseek-v4.2'])
+            self.assertEqual(reader.host_settings(self.provider, self.sid),
+                             dict(provider='opencode-go', model='deepseek-v4.2', effort=''))
+            baseten_reply = reader.host_reply(dict(op='set_model', provider='pi', sid=self.sid,
+                                                   provider_name='baseten',
+                                                   model='baseten/deepseek-ai/DeepSeek-V4-Pro-0813'))
+            self.assertEqual(baseten_reply, dict(status='ok'))
+            self.assertEqual(reader.host_pi_argv(self.provider, self.sid, ['pi'])[3:7],
+                             ['--provider', 'baseten', '--model', 'deepseek-ai/DeepSeek-V4-Pro-0813'])
+
+    def test_switching_between_pi_codex_and_pi_deepseek_preserves_history_and_applies_on_restart(self):
+        history = reader.host_paths(self.provider, self.sid)['history']
+        rows = [dict(role='user', text='Keep this history row', id='u1'),
+                dict(role='assistant', text='History stays intact', id='a1')]
+        history.write_text(''.join(json.dumps(dict(type='multiprompt_history', row=row)) + '\n' for row in rows),
+                           encoding='utf-8')
+        reader.host_state_write(self.provider, self.sid, dict(provider=self.provider, sid=self.sid, display_history=True))
+        with patch.object(reader, 'host_owned', return_value=True), \
+                patch.object(reader, 'host_request',
+                             side_effect=lambda p, s, req: reader.host_handle_request(p, s, self.tmux, self.session, req)):
+            self.assertEqual(reader.host_reply(dict(op='set_model', provider='pi', sid=self.sid,
+                                                    provider_name='openai-codex', model='gpt-6.1-sol'))['status'], 'ok')
+            self.assertEqual(reader.host_reply(dict(op='set_model', provider='pi', sid=self.sid,
+                                                    provider_name='opencode-go', model='deepseek-v4.1-flash'))['status'], 'ok')
+            self.assertEqual(reader.host_reply(dict(op='set_model', provider='pi', sid=self.sid,
+                                                    provider_name='openai-codex', model='gpt-6.1-sol'))['status'], 'ok')
+        self.assertEqual(reader.host_pi_argv(self.provider, self.sid, ['pi'])[3:7],
+                         ['--provider', 'openai-codex', '--model', 'gpt-6.1-sol'])
+        kept = reader.host_switch_rows(self.provider, self.sid, self.tmux)
+        self.assertEqual([row['text'] for row in kept], ['Keep this history row', 'History stays intact'])
+
+    def test_switch_ai_round_trip_restores_pi_codex_model_and_history(self):
+        transcript = self.home / 'pi-transcript.jsonl'
+        rows = [dict(role='user', text='First Pi Codex question', id='q1'),
+                dict(role='assistant', text='First Pi Codex answer', id='a1')]
+        transcript.write_text(''.join(json.dumps(dict(type='multiprompt_history', row=row)) + '\n' for row in rows),
+                              encoding='utf-8')
+        with patch.object(reader, 'host_owned', return_value=False):
+            self.assertEqual(reader.host_reply(dict(op='set_model', provider='pi', sid=self.sid,
+                                                    provider_name='openai-codex', model='gpt-6.1-sol'))['status'], 'ok')
+        launch_args = []
+
+        def fake_start(provider, sid):
+            if provider == 'pi':
+                launch_args.append(reader.host_pi_argv(provider, sid, ['pi']))
+            return dict(status='started')
+
+        with patch.object(reader, 'conversation_path', return_value=transcript), \
+                patch.object(reader, 'host_start', side_effect=fake_start), \
+                patch.object(reader, 'start_message_worker'):
+            to_codex = reader.host_reply(dict(op='switch_ai', provider='pi', sid=self.sid, to='codex'))
+            self.assertEqual((to_codex['status'], to_codex['provider']), ('switched', 'codex'))
+            codex_config = reader.host_config('codex', to_codex['sid'])
+            self.assertNotIn('model', codex_config)
+            self.assertEqual(codex_config['pi_model'], dict(provider='openai-codex', model='gpt-6.1-sol'))
+            to_claude = reader.host_reply(dict(op='switch_ai', provider='codex', sid=to_codex['sid'], to='claude'))
+            self.assertEqual((to_claude['status'], to_claude['provider']), ('switched', 'claude'))
+            self.assertNotIn('model', reader.host_config('claude', to_claude['sid']))
+            back_pi = reader.host_reply(dict(op='switch_ai', provider='claude', sid=to_claude['sid'], to='pi'))
+            self.assertEqual((back_pi['status'], back_pi['provider']), ('switched', 'pi'))
+        restored_config = reader.host_config('pi', back_pi['sid'])
+        self.assertEqual((restored_config['model_provider'], restored_config['model']),
+                         ('openai-codex', 'gpt-6.1-sol'))
+        self.assertEqual(reader.host_settings('pi', back_pi['sid']),
+                         dict(provider='openai-codex', model='gpt-6.1-sol', effort=''))
+        self.assertEqual(len(launch_args), 1)
+        self.assertEqual(launch_args[0][3:7], ['--provider', 'openai-codex', '--model', 'gpt-6.1-sol'])
+        restored_rows = reader.host_switch_rows('pi', back_pi['sid'], self.tmux)
+        self.assertTrue(any(row['text'] == 'First Pi Codex question' for row in restored_rows))
+        self.assertTrue(any(row['text'] == 'First Pi Codex answer' for row in restored_rows))
 
 
 def load_tests(loader, tests, pattern):

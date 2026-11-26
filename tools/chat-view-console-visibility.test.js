@@ -92,7 +92,8 @@ test('remote tab connects its shared terminal when Chat View shows the console',
 
 function harness(text) {
   const production = ['shellConsoleVisibilityAllowed', 'shellConsoleShouldBeVisible', 'showShellConsole', 'closeUrlPickerInternal', 'sendLocalChatPromptEx', 'showActiveShellAfterOverlay'].map(name => fn(text, name)).join('\n\n')
-    .replaceAll('@import("native_session.zig")', 'NativeSession');
+    .replaceAll('@import("native_session.zig")', 'NativeSession')
+    .replaceAll('@import("sidebar.zig").isTabHidden', 'isTabHidden');
   const pureTests = text.slice(text.indexOf('test "console visibility rejects'), text.indexOf('\nfn openChatView()', text.indexOf('test "console visibility rejects')));
   return `const std = @import("std");
 const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
@@ -108,7 +109,7 @@ const SW_SHOW = 5;
 const SW_SHOWNOACTIVATE = 4;
 const KEYEVENTF_KEYUP = 2;
 const chatViewShouldShowForTab = @import("chat_view.zig").shouldShow;
-const Shell = struct { workspace: u32 = 0, disconnected: bool = false, hwnd: HANDLE = null, shell_id: u32 = 0, chat_view_on: bool = false, pinned_top: bool = false, native_terminal: bool = false, console_inflight: bool = false };
+const Shell = struct { workspace: u32 = 0, hidden: bool = false, disconnected: bool = false, hwnd: HANDLE = null, shell_id: u32 = 0, chat_view_on: bool = false, pinned_top: bool = false, native_terminal: bool = false, console_inflight: bool = false };
 const NativeSession = struct {
     fn alive(_: u32) bool { return true; }
     fn connect(_: u32) bool { return true; }
@@ -153,6 +154,7 @@ fn IsWindowVisible(_: HANDLE) BOOL { return @intFromBool(visible); }
 fn ShowWindowAsync(hwnd: HANDLE, cmd: i32) BOOL { return ShowWindow(hwnd, cmd); }
 fn verboseLoggingEnabled() bool { return debug_enabled; }
 fn debugLog(line: []const u8) void { @memcpy(log[0..line.len], line); log_len = line.len; }
+fn isTabHidden(idx: u32) bool { return shells[idx].hidden; }
 fn layoutChatControls() void {}
 fn updateBrowserVisibility() void {}
 fn focusActiveShell() void {}
@@ -253,6 +255,17 @@ test "inactive, missing and out-of-range shells never qualify; overlays stay hid
         overlay.* = false;
     }
     _ = showShellConsole(0, SW_SHOW, "terminal");
+    try std.testing.expect(visible);
+}
+test "MUBO-597 workspace-hidden active shell stays hidden until returning" {
+    shells[0].hidden = true;
+    defer shells[0].hidden = false;
+    visible = true;
+    try std.testing.expect(!shellConsoleShouldBeVisible(0));
+    _ = showShellConsole(0, SW_SHOW, "native-session");
+    try std.testing.expect(!visible);
+    shells[0].hidden = false;
+    _ = showShellConsole(0, SW_SHOW, "workspace-return");
     try std.testing.expect(visible);
 }
 test "local Chat View input and Enter keep console hidden without flipping chat state" {

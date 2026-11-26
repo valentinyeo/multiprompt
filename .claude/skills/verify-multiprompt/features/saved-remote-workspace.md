@@ -2,7 +2,7 @@
 
 ## Sub-features
 
-Persisted tab names, tmux session/host identity, active-tab restoration, and console typing focus.
+Persisted tab names, tmux session/host identity, active-tab restoration, and console typing focus. Open shell on VPS 1 and VPS 2 create named sessions in the active workspace folder, or the server home directory when no folder is set.
 
 ## How to get to it (user POV)
 
@@ -14,7 +14,7 @@ The driver seeds the real APPDATA/ZigShell/session.json with two kind=tmux recor
 
 ## Gotchas
 
-The live transports here are running synthetic SSH/tmux stand-in processes, not authenticated server connections. The driver forces Ctrl+1 before focus verification, so it does not independently prove initial active-tab selection. Both tabs use host 0; cross-host restoration remains unexercised.
+The live transports here are running synthetic SSH/tmux stand-in processes, not authenticated server connections. The driver forces Ctrl+1 before focus verification, so it does not independently prove initial active-tab selection. Both tabs use host 0; cross-host restoration remains unexercised. MUBO-597 desktop module tests cover both VPS palette entries, workspace-switch preservation, saved-state round trips and prepared reattachment commands in both terminal modes. Those unit tests do not prove live server attachment or keyboard input after restart; that still needs a Windows journey with real server connections.
 
 
 The production restore path directly calls spawnShellWithSession for saved remote tabs; it no longer queues their initial spawn. A successful spawn is not yet a healthy attachment. Do not infer readiness from a window existing. Isolated APPDATA/LOCALAPPDATA and MULTIPROMPT_NO_LOGIN avoid real workspace/account state. This fixture covers remote restore only, not local console recovery or multi-workspace restoration.

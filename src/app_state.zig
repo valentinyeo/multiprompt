@@ -1230,8 +1230,8 @@ pub var g_chat_ac_class_registered = false;
 pub var g_chat_ac_slots: [8]ChatAcSlot = @splat(.{});
 pub var g_chat_ac_mutex: SpinMutex = .{};
 pub var g_chat_ac_request_id: u32 = 0;
-pub var g_chat_ac_mru: [2][20][201]u8 = .{.{.{0} ** 201} ** 20} ** 2;
-pub var g_chat_ac_mru_count: [2]usize = .{ 0, 0 };
+pub var g_chat_ac_mru: [4][20][201]u8 = .{.{.{0} ** 201} ** 20} ** 4;
+pub var g_chat_ac_mru_count: [4]usize = .{ 0, 0, 0, 0 };
 pub var g_chat_ac_dialog_command: [256]u16 = .{0} ** 256;
 pub var g_chat_ac_dialog_len: usize = 0;
 pub var g_chat_ac_dialog_shell_id: u32 = 0;
@@ -1285,7 +1285,7 @@ pub const CHAT_MAX_BLOCKS = 256;
 pub var g_chat_blocks_storage: [CHAT_MAX_BLOCKS]ChatBlock = undefined;
 pub var g_chat_blocks: []ChatBlock = &g_chat_blocks_storage;
 pub var g_chat_block_count: usize = 0;
-pub var g_chat_rich_fonts: [12]HANDLE = @splat(null);
+pub var g_chat_rich_fonts: [14]HANDLE = @splat(null);
 pub var g_chat_screen: [262144]u16 = undefined;
 pub var g_chat_browser_swap: chat_switch.Pending = .{};
 pub var g_browser_onscreen: browser_onscreen.OnScreen = .{};
@@ -3131,6 +3131,30 @@ pub const WM_APP_CHAT_IMAGE_READY: u32 = WM_APP + 196;
 pub const WM_APP_CHAT_ATTACH: u32 = WM_APP + 197;
 pub const WM_APP_CHAT_ATTACH_FAILED: u32 = WM_APP + 198;
 pub const WM_APP_CHAT_SWITCH_AI: u32 = WM_APP + 225;
+pub const WM_APP_CHAT_HOST_READY: u32 = WM_APP + 227;
+
+pub const HostLaunchKind = enum(u8) { chat, workspace };
+
+pub const HostLaunch = struct {
+    ready: std.atomic.Value(bool) = .init(false),
+    kind: HostLaunchKind = .chat,
+    host: u8 = 0,
+    provider: u8 = 0,
+    group: u32 = 0,
+    user_action: u64 = 0,
+    sid: [36]u8 = @splat(0),
+    sid_len: u8 = 0,
+    session: [64]u8 = @splat(0),
+    session_len: u8 = 0,
+    cwd: [256]u8 = @splat(0),
+    cwd_len: u16 = 0,
+    program: [128]u8 = @splat(0),
+    program_len: u8 = 0,
+    runtime: [96]u8 = @splat(0),
+    runtime_len: u8 = 0,
+};
+
+pub var g_host_launches: [4]HostLaunch = @splat(.{});
 pub const SEARCH_CHAT_ATTACH_OFFSET: usize = 6372;
 pub const SEARCH_CHAT_DICTATION_OFFSET: usize = 6468;
 

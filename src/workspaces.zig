@@ -183,6 +183,7 @@ const otherPillSlot = @import("archive.zig").otherPillSlot;
 const killProcessTree = @import("console.zig").killProcessTree;
 const closeShellRemember = @import("console.zig").closeShellRemember;
 const closeShell = @import("console.zig").closeShell;
+const isRemoteShellKind = @import("console.zig").isRemoteShellKind;
 const switchToShell = @import("console.zig").switchToShell;
 const OTHER_WORKSPACE_NAME = @import("app_state.zig").OTHER_WORKSPACE_NAME;
 const SplitWorkspaceEntry = @import("app_state.zig").SplitWorkspaceEntry;
@@ -4358,7 +4359,7 @@ fn exportSlotSessionFile(slot: u8) bool {
             @memcpy(json_buf[pos .. pos + sf.len], sf);
             pos += sf.len;
         }
-        if (app_state.shells[i].kind == .tmux and app_state.shells[i].tmux_session_len > 0) {
+        if (isRemoteShellKind(app_state.shells[i].kind) and app_state.shells[i].tmux_session_len > 0) {
             const ts_pre = ",\"tmux_session\":\"";
             @memcpy(json_buf[pos .. pos + ts_pre.len], ts_pre);
             pos += ts_pre.len;
@@ -4977,7 +4978,7 @@ pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool 
         }
         const slot = slot_map[src_ws];
 
-        const tmux_name: ?[]const u8 = if (tabs[t].kind == .tmux and tabs[t].tmux_session_len > 0)
+        const tmux_name: ?[]const u8 = if (isRemoteShellKind(tabs[t].kind) and tabs[t].tmux_session_len > 0)
             tabs[t].tmux_session[0..tabs[t].tmux_session_len]
         else
             null;

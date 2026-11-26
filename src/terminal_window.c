@@ -439,7 +439,11 @@ static LRESULT CALLBACK procedure(HWND hwnd, UINT message, WPARAM wp, LPARAM lp)
         case WM_CHAR: case WM_SYSCHAR: {
             if (wp == '\r' || wp == '\t' || wp == '\b' || wp == 27) return 0;
             int mod = modifiers() & ~VTERM_MOD_SHIFT;
-            if ((GetKeyState(VK_SHIFT) < 0) && (mod & VTERM_MOD_CTRL) && (wp == 3 || wp == 22)) return 0;
+            int shift = GetKeyState(VK_SHIFT) < 0;
+            int plain = !shift && (mod & (VTERM_MOD_CTRL | VTERM_MOD_ALT)) == VTERM_MOD_CTRL;
+            if (plain && wp == 22) { mp_terminal_window_paste(hwnd); return 0; }
+            if (plain && wp == 3 && t->selected) { mp_terminal_window_copy(hwnd); return 0; }
+            if (shift && (mod & VTERM_MOD_CTRL) && (wp == 3 || wp == 22)) return 0;
             int repeats = LOWORD(lp); if (!repeats) repeats = 1;
             for (int i = 0; i < repeats; i++) character(t, (WCHAR)wp, mod);
             return 0;

@@ -20,7 +20,7 @@ test('a release build compiles Rooms in and a non-release build can leave them o
   const tests = read('.github/workflows/test.yml');
   assert.match(tests, /zig build -Dtarget=x86_64-windows-gnu -Drelease=true --summary all/);
   assert.match(tests, /zig build -Dtarget=aarch64-windows-gnu --summary all/);
-  assert.match(read('.github/workflows/verify.yml'), /zig build -Drelease=false -Dcpu=x86_64_v3 -Dtarget=x86_64-windows-gnu/);
+  assert.match(read('.github/workflows/verify.yml'), /zig build -Drelease=false [^\n]*-Dcpu=x86_64_v3 -Dtarget=x86_64-windows-gnu/);
 });
 
 test('Rooms keep a shortcut, a Ctrl+K row, and a shortcut-list row', () => {

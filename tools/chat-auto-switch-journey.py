@@ -13,8 +13,9 @@ READER = ROOT / "src/chat_history_reader.py"
 SID = "11111111-2222-4333-8444-555555555555"
 TMUX = "same-chat"
 MESSAGE = "msg-0000-0001"
-ORDER = {"claude": "codex", "codex": "pi", "pi": "claude"}
-RECORDED = {"claude": "claude-usage-limit.jsonl", "codex": "codex-usage-limit.jsonl", "pi": "pi-usage-limit.jsonl"}
+ORDER = {"claude": "codex", "codex": "pi", "pi": "claude", "antigravity": "claude"}
+RECORDED = {"claude": "claude-usage-limit.jsonl", "codex": "codex-usage-limit.jsonl", "pi": "pi-usage-limit.jsonl",
+            "antigravity": "agy-resource-exhausted.ndjson"}
 DIVIDER = "Switched AI automatically: Claude ran out of plan"
 STAYS = "No plan left anywhere"
 
@@ -152,8 +153,22 @@ def run(evidence):
     with tempfile.TemporaryDirectory(prefix="auto-switch-") as directory:
         transcript = prepare(r, directory, "claude")
         config = r["host_read"](r["host_paths"]("claude", SID)["config"])
-        config["auto_switch"] = dict(on=True, order=["claude", "codex", "pi"],
+        config["auto_switch"] = dict(on=True, order=["claude", "codex", "pi", "antigravity"],
                                      empty={"codex": time.time(), "pi": time.time()})
+        r["host_write"](r["host_paths"]("claude", SID)["config"], config)
+        started, seen = plan_out(r, "claude", SID, transcript)
+        followed = r["host_switch_follow"](SID)
+        steps.append(dict(step="land-on-antigravity", from_ai="claude", target="antigravity", skipped="codex,pi",
+                          fixtures=[RECORDED["claude"]], followed=followed,
+                          spawned=[dict(ai=item[0], sid=item[1]) for item in started]))
+        check("Antigravity is the next AI with a plan", seen == [("claude", "antigravity", MESSAGE)], seen)
+        check("the chat lands on Antigravity", followed is not None and followed[0] == "antigravity", followed)
+
+    with tempfile.TemporaryDirectory(prefix="auto-switch-") as directory:
+        transcript = prepare(r, directory, "claude")
+        config = r["host_read"](r["host_paths"]("claude", SID)["config"])
+        config["auto_switch"] = dict(on=True, order=["claude", "codex", "pi", "antigravity"],
+                                     empty={"codex": time.time(), "pi": time.time(), "antigravity": time.time()})
         r["host_write"](r["host_paths"]("claude", SID)["config"], config)
         started, seen = plan_out(r, "claude", SID, transcript)
         steps.append(dict(step="all-plans-empty", from_ai="claude", fixtures=[RECORDED["claude"]],
@@ -161,6 +176,21 @@ def run(evidence):
         check("an all-empty fallback still starts nothing", started == [] and seen == [], started)
         check("the chat stays on its own AI", row(r) == ("claude", SID, "sent"), row(r))
         check("the app says no plan is left anywhere", noticed(r, "claude", SID), "message events")
+
+    with tempfile.TemporaryDirectory(prefix="auto-switch-") as directory:
+        transcript = prepare(r, directory, "antigravity")
+        started, seen = plan_out(r, "antigravity", SID, transcript)
+        followed = r["host_switch_follow"](SID)
+        new = started[0][1] if started else None
+        steps.append(dict(step="antigravity-plan-out", from_ai="antigravity", target=ORDER["antigravity"],
+                          fixtures=[RECORDED["antigravity"]], followed=followed,
+                          spawned=[dict(ai=item[0], sid=item[1]) for item in started]))
+        check("an Antigravity resource-exhausted result starts the next AI once",
+              seen == [("antigravity", "claude", MESSAGE)], seen)
+        check("the chat leaves Antigravity", followed is not None and followed[0] == "claude", followed)
+        check("the used-up Antigravity config is disabled", r["host_config"]("antigravity", SID) is None,
+              r["host_config"]("antigravity", SID))
+        check("the queued message moves off Antigravity", row(r) == ("claude", new, "queued"), row(r))
 
     with tempfile.TemporaryDirectory(prefix="auto-switch-") as directory:
         transcript = prepare(r, directory, "claude")

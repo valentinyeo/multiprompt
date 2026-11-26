@@ -34,7 +34,7 @@ Full procedure and toolchain notes: [openwiki/operations/build-and-install.md](o
 - **Never use Ctrl+Alt shortcuts** (AltGr on US-International layouts).
 - The browser extension targets Chrome and loads unpacked from `extension/`.
 - **The Chat View shows no status elements around messages:** no sending clock, "Sending...", read checks, ETA, model or capacity badges. Only a real send failure may show. Valentin removed these one by one; do not add new ones.
-- **Minimal chat UI:** add a chat or sidebar element only when a ticket asks for it. Tickets filed by Valentin or the design lead need no further yes; a wrong change is rolled back. New actions go into Ctrl+K. Busy state is only the three ticking dots.
+- **Minimal chat UI:** add a chat or sidebar element only when a ticket asks for it. Tickets filed by Valentin or the design lead need no further yes; a wrong change is rolled back. New actions go into Ctrl+K. Busy state is the three ticking dots, one activity line at the end of the stream, and the small activity pill floating at the top of the Chat View.
 - Keep this file under 80 lines.
 
 ## Rules and what enforces them
@@ -45,6 +45,7 @@ Full procedure and toolchain notes: [openwiki/operations/build-and-install.md](o
 | Snapshot regression inputs in `tools/fixtures/<ticket>/`, not Git history. | `tools/check-regression-inputs.mjs` (new reads in PR diffs) |
 | Do not bind PowerShell host-owned variables or name functions after aliases. | `tools/check-powershell-host-names.ps1` |
 | Server-chat native commands use exit codes and retain stderr evidence through `Invoke-ServerNative`. | `tools/verify-server-chat/native.ps1`, `tools/verify-server-chat.test.py` |
+| A hosted program's exit code comes from its own process, never from `$LASTEXITCODE` after a pipeline. | `tools/check-ffmpeg-install.mjs`, `tools/probe-native-version.test.ps1` |
 | Keep palette, tab actions and shortcut documentation aligned. | `tools/palette-rows.test.js`, `tools/shortcuts-doc.test.js` |
 | Keep source feature coverage visible; it never gates a pull request. | `tools/check-feature-coverage.mjs` reports in `maintain-verification.yml` with `continue-on-error: true`; existing gaps belong to Part H, w-2567h |
 | Maintain the feature map weekly; open at most one PR of proven corrections. | `maintain-verification.yml` runs pstack `maintain-verification-skill` with the PR verifier's Claude setup; `tools/publish-verification-maintenance.mjs` checks live coverage and edit scope |

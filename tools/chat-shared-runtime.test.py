@@ -164,6 +164,41 @@ class RuntimeTest(unittest.TestCase):
         self.assertEqual(published.read_text(), body)
         self.assertTrue(os.access(published, os.X_OK))
 
+    def launch_chat(self, reader, sid='2b1f7c54-1c3d-4f6e-9d2a-1c2b3d4e5f60'):
+        return subprocess.run([sys.executable, '-u', str(reader), 'host', 'enable', 'antigravity', sid,
+                               '--tmux', 'live-abc', '--cwd', self.home.name],
+                              capture_output=True, text=True, env=self.env, timeout=30)
+
+    def chat_configs(self):
+        root = Path(self.home.name) / '.local/state/multiprompt/agent-host'
+        return sorted(root.glob('*.config.json')) if root.is_dir() else []
+
+    def test_MUBO_221_a_first_chat_launches_the_runtime_the_desktop_published(self):
+        import hashlib
+        runtime = Path(self.home.name) / '.multiprompt-runtime'
+        older = SOURCE.replace("HOST_PROVIDERS = ('claude', 'codex', 'pi', 'hax', 'cursor', 'antigravity')",
+                              "HOST_PROVIDERS = ('claude', 'codex', 'pi', 'hax', 'cursor')", 1)
+        self.assertNotEqual(older, SOURCE)
+        stale = self.info(older)
+        self.assertEqual(json.loads((runtime / 'active.json').read_text())['sha256'], stale['sha256'])
+        refused = self.launch_chat(runtime / 'reader.py')
+        self.assertIn('unsupported_provider', refused.stdout, 'the older selected reader must still refuse the provider')
+        self.assertEqual(self.chat_configs(), [])
+        info = self.info(SOURCE)
+        published = runtime / (info['sha256'] + '.py')
+        self.assertTrue(published.is_file(), 'the desktop bundle must publish the runtime it reports')
+        self.assertEqual(hashlib.sha256(published.read_bytes()).hexdigest(), published.stem)
+        enabled = self.launch_chat(published)
+        self.assertEqual(json.loads(enabled.stdout.strip().splitlines()[-1])['status'], 'enabled')
+        config = json.loads(self.chat_configs()[0].read_text())
+        self.assertEqual((config['provider'], config['enabled'], config['tmux']), ('antigravity', True, 'live-abc'))
+        self.info(older)
+        self.assertEqual(json.loads((runtime / 'active.json').read_text())['sha256'], stale['sha256'])
+        self.assertIn('unsupported_provider', self.launch_chat(runtime / 'reader.py').stdout)
+        again = self.launch_chat(published)
+        self.assertEqual(json.loads(again.stdout.strip().splitlines()[-1])['status'], 'enabled')
+        self.assertEqual(json.loads(self.chat_configs()[0].read_text())['provider'], 'antigravity')
+
     def helper_bundle(self, version, send, sessions, reader=SOURCE):
         return ("MULTIBOT_APP_VERSION = '%s'\n" % version +
                 "MP_SEND_SOURCE = '%s'\n" % base64.b64encode(send).decode() +

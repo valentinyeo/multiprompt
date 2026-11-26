@@ -1,6 +1,5 @@
 const std = @import("std");
 const transport = @import("room_transport.zig");
-const room_view = @import("room_view.zig");
 
 const allocator = std.heap.page_allocator;
 
@@ -13,7 +12,7 @@ pub const Member = struct {
     session_identity: []const u8,
 };
 
-pub const RequestKind = enum { capabilities, catalog, snapshot, catalog_metadata, events, create, edit, post, status };
+pub const RequestKind = enum { capabilities, catalog, snapshot, catalog_metadata, events, create, edit, post, status, members };
 
 pub fn requestKind(kind: @import("room_journal.zig").Kind) RequestKind {
     return switch (kind) {
@@ -35,11 +34,15 @@ pub const Result = struct {
     }
 };
 
+pub const FailureReason = enum { transport, timeout, cancelled, parse, remote, host_start };
+
 pub const Failure = struct {
     kind: RequestKind,
-    reason: enum { transport, timeout, cancelled, parse, remote },
+    reason: FailureReason,
     code: [64]u8 = @splat(0),
     code_len: usize = 0,
+    detail: [2048]u8 = undefined,
+    detail_len: usize = 0,
     outcome_unknown: bool = false,
 };
 pub const Completion = union(enum) {
@@ -47,6 +50,43 @@ pub const Completion = union(enum) {
     failed: Failure,
     finished: Result,
 };
+
+const ssh_transport_errors = [_][]const u8{
+    "ssh: connect to host",
+    "ssh: Could not resolve hostname",
+    "ssh_exchange_identification",
+    "Connection refused",
+    "Connection timed out",
+    "Network is unreachable",
+    "Host key verification failed",
+    "Permission denied (",
+};
+
+pub fn sshTransportError(stderr: []const u8) bool {
+    for (ssh_transport_errors) |marker| if (std.mem.indexOf(u8, stderr, marker) != null) return true;
+    return false;
+}
+
+pub fn failedReason(timed_out: bool, cancelled: bool, reply_len: usize, stderr: []const u8) FailureReason {
+    if (cancelled) return .cancelled;
+    if (timed_out) return .timeout;
+    if (reply_len == 0 and !sshTransportError(stderr)) return .host_start;
+    return .transport;
+}
+
+pub fn jobReason(job: *transport.Job) FailureReason {
+    if (job.host_start) return .host_start;
+    return failedReason(job.timed_out, job.cancelled.load(.acquire), job.output_len, job.error_text[0..job.error_len]);
+}
+
+test "a room host that dies before its first reply is reported as not started" {
+    try std.testing.expectEqual(FailureReason.host_start, failedReason(false, false, 0, "bash: -c: line 1: syntax error near unexpected token `('"));
+    try std.testing.expectEqual(FailureReason.host_start, failedReason(false, false, 0, ""));
+    try std.testing.expectEqual(FailureReason.transport, failedReason(false, false, 0, "ssh: connect to host example.test port 22: Connection refused"));
+    try std.testing.expectEqual(FailureReason.transport, failedReason(false, false, 12, "partial"));
+    try std.testing.expectEqual(FailureReason.timeout, failedReason(true, false, 0, ""));
+    try std.testing.expectEqual(FailureReason.cancelled, failedReason(false, true, 0, ""));
+}
 
 pub const Controller = struct {
     host: u8,
@@ -56,6 +96,7 @@ pub const Controller = struct {
     host_uuid: [36]u8 = undefined,
     has_host_uuid: bool = false,
     live_send: bool = false,
+    room_features: bool = false,
     job: ?*transport.Job = null,
     kind: RequestKind = .capabilities,
     journal_lock: ?@import("room_journal.zig").Lock = null,
@@ -122,6 +163,8 @@ pub const Controller = struct {
         }
         self.kind = kind;
         self.job = job;
+        var log: [128]u8 = undefined;
+        @import("diagnostics.zig").syncLog(std.fmt.bufPrint(&log, "[rooms] request sent kind={s} slot={d}", .{ @tagName(kind), self.host }) catch unreachable);
         return true;
     }
 
@@ -135,8 +178,15 @@ pub const Controller = struct {
         defer entry.deinit();
         const record = entry.record();
         if (record.kind != kind or record.revision != revision or !std.mem.eql(u8, record.command_id, command_id) or !std.mem.eql(u8, record.room_id, room_id) or (record.state != .prepared and record.state != .uncertain)) return error.WrongCommand;
+        const previous = record.state;
         try journal.updateLocked(&guard, command_id, .uncertain, "");
-        if (!self.launchBytes(requestKind(kind), record.request)) return error.LaunchRefused;
+        if (!self.launchBytes(requestKind(kind), record.request)) {
+            if (journal.mayRollBackLaunch(previous)) journal.restorePrepared(&guard, command_id, previous) catch |err| {
+                var log: [128]u8 = undefined;
+                @import("diagnostics.zig").syncLog(std.fmt.bufPrint(&log, "[rooms] refused launch stays uncertain: {s}", .{@errorName(err)}) catch unreachable);
+            };
+            return error.LaunchRefused;
+        }
         self.journal_lock = guard;
     }
 
@@ -162,6 +212,11 @@ pub const Controller = struct {
     pub fn events(self: *Controller, room_id: []const u8, after: u64) bool {
         if (!self.has_host_uuid) return false;
         return self.launch(.events, .{ .op = "events", .host_uuid = self.host_uuid[0..], .room_id = room_id, .after = after, .limit = 100 });
+    }
+
+    pub fn fetchMembers(self: *Controller) bool {
+        if (!self.has_host_uuid or !self.room_features) return false;
+        return self.launch(.members, .{ .op = "members", .host_uuid = self.host_uuid[0..], .slot = self.host });
     }
 
     pub fn status(self: *Controller, sid: []const u8) bool {
@@ -192,10 +247,6 @@ pub const Controller = struct {
     pub fn edit(self: *Controller, command_id: []const u8, room_id: []const u8, revision: u64, name: []const u8, members: []const Member) bool {
         if (!self.has_host_uuid) return false;
         return self.launchTypedPrepared(.edit, command_id, room_id, revision, .{ .op = "edit", .host_uuid = self.host_uuid[0..], .command_id = command_id, .room_id = room_id, .expected_revision = revision, .name = name, .members = members });
-    }
-
-    pub fn restart(_: *Controller) room_view.ActionResult {
-        return .unsupported;
     }
 
     fn roomJobCleanup(job: *transport.Job, thread: std.Thread) void {
@@ -247,7 +298,7 @@ pub const Controller = struct {
             self.journal_lock = null;
         }
         const mutation = isMutation(self.kind);
-        if (!job.success) return .{ .failed = .{ .kind = self.kind, .reason = if (job.cancelled.load(.acquire)) .cancelled else if (job.timed_out) .timeout else .transport, .outcome_unknown = mutation } };
+        if (!job.success) return .{ .failed = .{ .kind = self.kind, .reason = jobReason(job), .detail = job.error_text, .detail_len = job.error_len, .outcome_unknown = mutation } };
         var parsed = std.json.parseFromSlice(std.json.Value, allocator, job.output[0..job.output_len], .{ .allocate = .alloc_always }) catch return .{ .failed = .{ .kind = self.kind, .reason = .parse, .outcome_unknown = mutation } };
         if (parsed.value != .object) {
             parsed.deinit();
@@ -265,8 +316,15 @@ pub const Controller = struct {
                     @memcpy(failure.code[0..failure.code_len], code.string);
                 }
             }
+            if (parsed.value.object.get("message")) |detail| {
+                if (detail == .string and detail.string.len <= failure.detail.len) {
+                    failure.detail_len = detail.string.len;
+                    @memcpy(failure.detail[0..failure.detail_len], detail.string);
+                }
+            }
             parsed.deinit();
             if (failure.code_len == 0) return .{ .failed = .{ .kind = self.kind, .reason = .parse, .outcome_unknown = mutation } };
+            if (std.mem.eql(u8, failure.code[0..failure.code_len], "runtime_republish_failed")) failure.reason = .host_start;
             return .{ .failed = failure };
         }
         if (ok != .bool or parsed.value.object.get("result") == null) {
@@ -285,5 +343,4 @@ test "room controller pins remote UUID before catalog operations" {
     try std.testing.expectEqualStrings("10000000-0000-4000-8000-000000000001", &controller.host_uuid);
     try std.testing.expect(!controller.bindHost("20000000-0000-4000-8000-000000000002"));
     try std.testing.expect(!controller.live_send);
-    try std.testing.expectEqual(room_view.ActionResult.unsupported, controller.restart());
 }

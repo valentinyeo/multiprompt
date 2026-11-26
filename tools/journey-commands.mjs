@@ -47,6 +47,13 @@ const rows = [
   ['Chat permission mode: Accept edits', 'SEARCH_CHAT_MODE_EDITS_OFFSET', 'accept edits'],
   ['Sidebar: hide', 'SEARCH_SIDEBAR_HIDE_OFFSET', 'hide sidebar'],
   ['Sidebar: expand', 'SEARCH_HIDESIDEBAR_OFFSET', 'show sidebar'],
+  ['Reopen closed tab', 'SEARCH_REOPEN_OFFSET', 'reopen closed tab'],
+  ['chat view select all', 'SEARCH_CHAT_SELECT_ALL_OFFSET', 'chat view select all'],
+];
+
+const roomRows = [
+  ['New room', 'new_room_target'],
+  ['Edit room', 'edit_room_target'],
 ];
 
 export function commandCatalog(read = file => fs.readFileSync(path.join(root, 'src', file), 'utf8')) {
@@ -67,6 +74,12 @@ export function commandCatalog(read = file => fs.readFileSync(path.join(root, 's
   });
   for (const [, symbol, name] of palette.matchAll(/if \(target == (SEARCH_NEW_\w+_OFFSET)\) return "([^"\n]+)";/g)) {
     commands[name.toLowerCase()] = { name, query: name, target: offsets.get(symbol) };
+  }
+  const room = read('room_frontend.zig');
+  for (const [name, symbol] of roomRows) {
+    const target = Number(room.match(new RegExp(`pub const ${symbol}: usize = (\\d+);`))?.[1]);
+    if (!target) throw new Error(`Unknown room palette target ${symbol}`);
+    commands[name.toLowerCase()] = { name, query: name.toLowerCase(), target };
   }
   return commands;
 }

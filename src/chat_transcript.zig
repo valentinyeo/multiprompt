@@ -32,6 +32,13 @@ pub const Identity = struct {
         return providerAgentLabel(if (self.agent != 0) self.agent else 1);
     }
 
+    pub fn agentId(self: Identity) u8 {
+        if (self.agent != 0) return self.agent;
+        if (self.pi) return 3;
+        if (self.codex) return 2;
+        return 1;
+    }
+
     pub fn checked(self: Identity) ?@import("session_identity.zig").Session {
         return @import("session_identity.zig").Session.checked(self);
     }

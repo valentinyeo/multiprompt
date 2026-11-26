@@ -122,6 +122,7 @@ fn pollFonts() void {
     .replaceAll('@import("focus.zig").', '')
     .replaceAll('@import("sidebar.zig").thawSidebarOrder()', 'thawSidebarOrder()')
     .replaceAll('@import("sidebar.zig").freezeSidebarOrder()', 'freezeSidebarOrder()')
+    .replaceAll('@import("sidebar.zig").isTabHidden', 'isTabHidden')
     .replaceAll('@import("chat_composer.zig").closeChatView', 'closeChatView')
     .replaceAll('@import("chat_composer.zig").fullWidthShouldResizeConsole', 'fullWidthShouldResizeConsole')
     .replaceAll('@import("native_session.zig").restyle', 'nativeRestyle')

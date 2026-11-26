@@ -1,0 +1,1 @@
+Typing /model in Antigravity opens the model picker

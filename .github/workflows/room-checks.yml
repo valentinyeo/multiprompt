@@ -2,6 +2,11 @@ name: Room safety
 
 on:
   workflow_dispatch:
+    inputs:
+      baseline:
+        description: Also reproduce the reliability failures before MUBO-533
+        type: boolean
+        default: false
   schedule:
     - cron: '17 3 * * *'
 permissions:
@@ -14,9 +19,14 @@ concurrency:
 jobs:
   room-safety:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        if: inputs.baseline
+        with:
+          ref: a6d438d0138cc466ace3a6317c1d99a733c20507
+          path: room-baseline
       - name: Lint GitHub workflows
         uses: raven-actions/actionlint@3d39aea434753780c3b3d4a1a31c854b4dbf49d7
         with:
@@ -32,18 +42,104 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.12'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Reproduce Python reliability failures before the fix
+        if: inputs.baseline
+        shell: bash
+        run: |
+          mkdir -p room-baseline/tools/fixtures/MUBO-533
+          cp tools/room-reliability.test.js tools/room-routing.test.py tools/room_bridge_test.py tools/room_service_test.py room-baseline/tools/
+          cp tools/fixtures/MUBO-533/* room-baseline/tools/fixtures/MUBO-533/
+          for test in room_bridge_test.py room-routing.test.py; do
+            if (cd room-baseline && timeout 90s python "tools/$test" -v) > "room-check-results/before-$test.log" 2>&1; then
+              cat "room-check-results/before-$test.log"
+              exit 1
+            fi
+          done
+          for name in test_member_catalog_includes_unopened_claude_chats_with_shown_names test_real_runtime_install_with_reader_symlink_supports_live_rooms test_host_stderr_is_retained_for_the_room_error test_old_runtime_explains_how_to_recover; do
+            grep -E "^(FAIL|ERROR): $name " room-check-results/before-room_bridge_test.py.log
+          done
+          for name in test_displayed_name_selects_stable_member_and_alias_still_works test_post_admits_without_a_history_reader test_host_schedule_completes_offline_work_once_without_room_requests test_empty_and_failed_turns_publish_no_answer_once_and_allow_resend test_agents_see_the_same_ordered_conversation; do
+            grep -E "^(FAIL|ERROR): $name " room-check-results/before-room-routing.test.py.log
+          done
       - name: Run room tests
+        if: ${{ !cancelled() }}
+        env:
+          LEGACY_ROOM_ROOT: ${{ inputs.baseline && format('{0}/room-baseline', github.workspace) || '' }}
         shell: bash
         run: |
           set -o pipefail
           export HOME
           HOME=$(mktemp -d "$RUNNER_TEMP/room-home.XXXXXX")
           status=0
-          for test in tools/room_service_test.py tools/room_bridge_test.py tools/room-routing.test.py tools/room-checks/protocol.test.py; do
+          for test in tools/room_service_test.py tools/room_bridge_test.py tools/room-routing.test.py tools/room-checks/protocol.test.py tools/runtime-fingerprint.test.py; do
             echo "Running $test"
-            python "$test" -v 2>&1 | tee "room-check-results/$(basename "$test").log" || status=1
+            timeout 90s python "$test" -v 2>&1 | tee "room-check-results/$(basename "$test").log" || status=1
           done
           exit "$status"
+      - name: Reject interrupted-answer loss with the production regression
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          control=$(mktemp -d "$RUNNER_TEMP/room-reply-control.XXXXXX")
+          mkdir -p "$control/src" "$control/tools"
+          cp src/room_bridge.py src/room_service.py "$control/src/"
+          cp tools/room-routing.test.py "$control/tools/"
+          python - "$control/src/room_bridge.py" <<'PY'
+          import pathlib, sys
+          path = pathlib.Path(sys.argv[1])
+          source = path.read_text()
+          changed = source.replace('answered = bool(reply.strip())', "answered = payload.get('status') == 'completed' and bool(reply.strip())")
+          if source == changed:
+              raise SystemExit('missing negative-control mutation')
+          path.write_text(changed)
+          PY
+          if timeout 90s python "$control/tools/room-routing.test.py" RoutingTest.test_ended_turn_preserves_text_and_identity_once_across_collection_and_restart -v > room-check-results/interrupted-loss-control.log 2>&1; then
+            cat room-check-results/interrupted-loss-control.log
+            exit 1
+          fi
+          grep -E "^FAIL: .*status='interrupted'.*text='Bravo says BROADCAST534'" room-check-results/interrupted-loss-control.log
+      - name: Run room driver regressions and negative controls
+        if: ${{ !cancelled() }}
+        run: |
+          set -o pipefail
+          timeout 180s pwsh -NoProfile -File tools/rooms-driver.test.ps1 2>&1 | tee room-check-results/driver.log
+      - name: Prove the disposable lost-receipt boundary
+        if: ${{ !cancelled() }}
+        run: |
+          set -o pipefail
+          timeout 60s python tools/rooms-drop-receipt.test.py -v 2>&1 | tee room-check-results/drop-receipt.log
+      - name: Run canonical room process tests
+        if: ${{ !cancelled() }}
+        run: |
+          set -o pipefail
+          timeout 240s node --test tools/room-agent-replies.test.js 2>&1 | tee room-check-results/canonical.log
+      - name: Install Zig 0.16.0
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/setup-zig
+      - name: Reproduce desktop reliability failures before the fix
+        if: inputs.baseline && !cancelled()
+        shell: bash
+        run: |
+          if (cd room-baseline && timeout 120s node --test tools/room-reliability.test.js) > room-check-results/before-desktop.log 2>&1; then
+            cat room-check-results/before-desktop.log
+            exit 1
+          fi
+          for name in 'refresh survives restart' 'shown-name mentions' 'fresh-profile room discovery' 'unavailable creation reports' 'room picker inserts'; do
+            grep -E "not ok [0-9]+ - $name" room-check-results/before-desktop.log
+          done
+      - name: Run desktop room regression harnesses
+        if: ${{ !cancelled() }}
+        run: |
+          set -o pipefail
+          timeout 240s node --test tools/room-reliability.test.js tools/room-reply-grouping.test.js tools/room-creation-focus.test.js tools/rooms-release.test.js 2>&1 | tee room-check-results/desktop.log
+      - name: Check source limits and timers
+        if: ${{ !cancelled() }}
+        run: |
+          node tools/check-file-size.mjs
+          node tools/check-timer-ratchet.mjs
       - name: Add logs to summary
         if: always()
         shell: bash
@@ -63,3 +159,12 @@ jobs:
           name: room-safety-results
           path: room-check-results/
           if-no-files-found: error
+
+  desktop-compile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: ./.github/actions/setup-zig
+      - name: Compile the desktop app with Rooms enabled
+        run: zig build -Dtarget=x86_64-windows-gnu -Drooms-preview=true --summary all

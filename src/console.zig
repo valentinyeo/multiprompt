@@ -1662,13 +1662,11 @@ pub fn appendWideAscii(buf: []u16, pos: *usize, text: []const u8) bool {
     return true;
 }
 
-fn appendWideRemoteShellSingleQuoted(buf: []u16, pos: *usize, value: []const u8) bool {
-    if (!appendWideAscii(buf, pos, "'")) return false;
-    for (value) |c| {
+pub fn appendRemotePythonScript(buf: []u16, pos: *usize, script: []const u8) bool {
+    if (!appendWideAscii(buf, pos, "python3 -u -c '")) return false;
+    for (script) |c| {
         if (c == '\'') {
             if (!appendWideAscii(buf, pos, "'\\''")) return false;
-        } else if (c == '"') {
-            if (!appendWideAscii(buf, pos, "\\\"")) return false;
         } else {
             if (pos.* >= buf.len - 1) return false;
             buf[pos.*] = @intCast(c);
@@ -1676,6 +1674,20 @@ fn appendWideRemoteShellSingleQuoted(buf: []u16, pos: *usize, value: []const u8)
         }
     }
     return appendWideAscii(buf, pos, "'");
+}
+
+test "room and chat python bootstraps use the same single-quoted command line" {
+    var want: [256]u16 = undefined;
+    var chat: [256]u16 = undefined;
+    var chat_pos: usize = 0;
+    try std.testing.expect(appendRemotePythonScript(&chat, &chat_pos, "import base64,sys;exec(x())"));
+    const chat_len = try std.unicode.utf8ToUtf16Le(&want, "python3 -u -c 'import base64,sys;exec(x())'");
+    try std.testing.expectEqualSlices(u16, want[0..chat_len], chat[0..chat_pos]);
+    var room: [256]u16 = undefined;
+    var room_pos: usize = 0;
+    try std.testing.expect(appendRemotePythonScript(&room, &room_pos, "b=types.ModuleType('room_bridge')"));
+    const room_len = try std.unicode.utf8ToUtf16Le(&want, "python3 -u -c 'b=types.ModuleType('\\''room_bridge'\\'')'");
+    try std.testing.expectEqualSlices(u16, want[0..room_len], room[0..room_pos]);
 }
 
 fn appendWideDecimal(buf: []u16, pos: *usize, value: u32) bool {
@@ -1746,7 +1758,7 @@ fn minttyFontHeightFromConsoleHeight() u32 {
     return @intCast(@max(@divTrunc(h * 3, 5), 10));
 }
 
-fn makeCmdLine(kind: ShellKind, buf: []u16, tmux_session: ?[]const u8, startup_cmd: ?[]const u8, zsb_shell_id: u32, new_session: bool) ?[*:0]u16 {
+fn makeCmdLine(kind: ShellKind, buf: []u16, tmux_session: ?[]const u8, startup_cmd: ?[]const u8, zsb_shell_id: u32, new_session: bool, cwd: ?[]const u8) ?[*:0]u16 {
     var pos: usize = 0;
 
     if (kind == .cmd) {
@@ -1798,6 +1810,17 @@ fn makeCmdLine(kind: ShellKind, buf: []u16, tmux_session: ?[]const u8, startup_c
             }
             if (!appendWideAscii(buf, &pos, "\"")) return null;
         }
+    } else if ((kind == .vps or kind == .vps2) and tmux_session != null) {
+        if (!appendSshPrefix(buf, &pos, @import("native_session.zig").hostFor(kind), app_state.g_mobile_mode)) return null;
+        var command_buf: [2048]u8 = undefined;
+        const command = @import("native_session.zig").remoteShellCommand(&command_buf, kind, tmux_session, zsb_shell_id, new_session, cwd) orelse return null;
+        if (!appendWideAscii(buf, &pos, " \"")) return null;
+        for (command) |c| {
+            if (c == '"') {
+                if (!appendWideAscii(buf, &pos, "\\\"")) return null;
+            } else if (!appendWideAscii(buf, &pos, &.{c})) return null;
+        }
+        if (!appendWideAscii(buf, &pos, "\"")) return null;
     } else if (startup_cmd) |cmd| {
         const prefix: []const u8 = switch (kind) {
             .pwsh => "pwsh.exe -NoExit -Command \"",
@@ -1959,10 +1982,10 @@ pub fn spawnBackgroundRemoteShell(host: u8, workspace: u8, kind: ShellKind, tmux
     return spawnShellWithSession(kind, tmux_session, null, null);
 }
 
-fn spawnNativeShell(kind: ShellKind, tmux_session: ?[]const u8, shell_id: u32, title_id: u32, idx: u32, pending_chat_view: bool, background_workspace: ?u8) bool {
-    const creating_session = kind == .tmux and (app_state.g_pending_resurrect_len > 0 or app_state.g_pending_tmux_cmd_len > 0);
+fn spawnNativeShell(kind: ShellKind, tmux_session: ?[]const u8, shell_id: u32, title_id: u32, idx: u32, pending_chat_view: bool, background_workspace: ?u8, cwd: ?[]const u8, new_session: bool) bool {
+    const creating_session = new_session or (kind == .tmux and (app_state.g_pending_resurrect_len > 0 or app_state.g_pending_tmux_cmd_len > 0));
     const native = @import("native_session.zig");
-    const opened = native.open(kind, tmux_session, shell_id, false) orelse {
+    const opened = native.open(kind, tmux_session, shell_id, new_session, cwd) orelse {
         debugLog("spawnShell refused: native open");
         return false;
     };
@@ -2005,7 +2028,7 @@ fn spawnNativeShell(kind: ShellKind, tmux_session: ?[]const u8, shell_id: u32, t
         .tmux_host = opened.host,
         .spawn_tick = GetTickCount64(),
         .ssh_reconnect = .{
-            .restored_session = app_state.g_restoring and kind == .tmux and tmux_session != null and tmux_session.?.len > 0 and !creating_session,
+            .restored_session = app_state.g_restoring and isRemoteShellKind(kind) and tmux_session != null and tmux_session.?.len > 0 and !creating_session,
             .creating_session = creating_session,
         },
         .full_width = false,
@@ -2023,6 +2046,13 @@ fn spawnNativeShell(kind: ShellKind, tmux_session: ?[]const u8, shell_id: u32, t
         @memcpy(app_state.shells[idx].tmux_identity[0..identity.len], identity);
         app_state.shells[idx].tmux_identity_len = @intCast(identity.len);
     }
+    if (isRemoteShellKind(kind)) {
+        if (cwd) |dir| {
+            const len = @min(dir.len, app_state.shells[idx].cached_cwd.len - 1);
+            @memcpy(app_state.shells[idx].cached_cwd[0..len], dir[0..len]);
+            app_state.shells[idx].cached_cwd_len = @intCast(len);
+        }
+    }
     setDefaultName(&app_state.shells[idx], kind, shell_id);
     app_state.shells[idx].chat_view_on = @import("chat_view.zig").forSession(app_state.shells[idx].tmux_session[0..app_state.shells[idx].tmux_session_len], pending_chat_view);
     if (background_workspace) |workspace| {
@@ -2032,12 +2062,12 @@ fn spawnNativeShell(kind: ShellKind, tmux_session: ?[]const u8, shell_id: u32, t
     app_state.shell_count += 1;
     if (!app_state.g_restoring) {
         if (tmux_session) |session| {
-            @import("archive.zig").cancelPendingSessionKill(app_state.g_pending_tmux_host, session);
+            @import("archive.zig").cancelPendingSessionKill(app_state.shells[idx].tmux_host, session);
             app_state.g_tmux_closed.reopenEverywhere(session);
         }
     }
     if (!app_state.g_restoring and background_workspace == null) app_state.shells[idx].last_active = nowFileTime();
-    if (app_state.shells[idx].chat_view_on or app_state.g_chat_active) {
+    if (app_state.shells[idx].chat_view_on or (app_state.g_chat_active and !app_state.g_restoring)) {
         app_state.shells[idx].console_inflight = false;
     } else if (!native.connect(shell_id)) native.ready(shell_id, false);
     registerShellExitWait(idx);
@@ -2049,13 +2079,26 @@ fn spawnNativeShell(kind: ShellKind, tmux_session: ?[]const u8, shell_id: u32, t
     return true;
 }
 
-pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[]const u8, startup_cmd: ?[]const u8) bool {
+pub fn spawnShellWithSession(kind: ShellKind, saved_session: ?[]const u8, cwd: ?[]const u8, startup_cmd: ?[]const u8) bool {
     if (app_state.g_account_locked) return false;
     const pending_chat_view = app_state.g_pending_chat_view;
     app_state.g_pending_chat_view = false;
     const background_workspace = app_state.g_pending_background_workspace;
+    var tmux_session = saved_session;
+    var session_buf: [64]u8 = undefined;
+    var folder_buf: [256]u8 = undefined;
+    var folder_len: u32 = 0;
+    var remote_cwd = cwd;
+    const new_session = (kind == .vps or kind == .vps2) and saved_session == null and app_state.g_pending_spawn_cmd_len == 0;
+    if (new_session) {
+        var random: [16]u8 = undefined;
+        if (BCryptGenRandom(null, &random, random.len, 0x00000002) < 0) return false;
+        tmux_session = std.fmt.bufPrint(&session_buf, "term-{s}", .{std.fmt.bytesToHex(random, .lower)}) catch return false;
+        const workspace = background_workspace orelse @import("command_palette.zig").activeWorkspaceSlot();
+        if (remote_cwd == null and @import("command_palette.zig").workspaceFolderCurrent(workspace, &folder_buf, &folder_len)) remote_cwd = folder_buf[0..folder_len];
+    }
     if (tmux_session) |session| {
-        if (findLocalTmuxTab(app_state.g_pending_tmux_host, session)) |existing| {
+        if (findLocalTmuxTab(@import("native_session.zig").hostFor(kind), session)) |existing| {
             if (!app_state.g_restoring and background_workspace == null) {
                 if (app_state.g_focus_user_action_tick != 0) switchToShellByUser(existing) else switchToShell(existing);
             }
@@ -2080,7 +2123,7 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
         if (app_state.g_single_window) @import("workspaces.zig").switchToWorkspace(app_state.g_active_workspace) else app_state.g_sidebar_view = null;
     }
     const idx = app_state.shell_count;
-    if (isRemoteShellKind(kind) and app_state.g_shared_server_connection) return spawnNativeShell(kind, tmux_session, shell_id, title_id, idx, pending_chat_view, background_workspace);
+    if (isRemoteShellKind(kind) and app_state.g_shared_server_connection) return spawnNativeShell(kind, tmux_session, shell_id, title_id, idx, pending_chat_view, background_workspace, remote_cwd, new_session);
 
     var si = std.mem.zeroes(STARTUPINFOW);
     si.cb = @sizeOf(STARTUPINFOW);
@@ -2090,8 +2133,8 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
 
     var pi = std.mem.zeroes(PROCESS_INFORMATION);
     var cmd_buf: [2048]u16 = undefined;
-    const creating_session = kind == .tmux and (app_state.g_pending_resurrect_len > 0 or app_state.g_pending_tmux_cmd_len > 0);
-    const cmd_ptr = makeCmdLine(kind, &cmd_buf, tmux_session, startup_cmd, shell_id, false) orelse {
+    const creating_session = new_session or (kind == .tmux and (app_state.g_pending_resurrect_len > 0 or app_state.g_pending_tmux_cmd_len > 0));
+    const cmd_ptr = makeCmdLine(kind, &cmd_buf, tmux_session, startup_cmd, shell_id, new_session, remote_cwd) orelse {
         debugLog("spawnShell refused: command line");
         return false;
     };
@@ -2107,7 +2150,7 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
 
     var cwd_wide: [512]u16 = @splat(0);
     var cwd_ptr: ?LPCWSTR = null;
-    if (cwd) |c| {
+    if (if (isRemoteShellKind(kind)) null else cwd) |c| {
         for (c, 0..) |byte, ci| {
             if (ci >= 511) break;
             cwd_wide[ci] = @intCast(byte);
@@ -2252,10 +2295,10 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
         .group_id = 0,
         .selected = false,
         .favicon_path_len = 0,
-        .tmux_host = app_state.g_pending_tmux_host,
+        .tmux_host = @import("native_session.zig").hostFor(kind),
         .spawn_tick = if (isRemoteShellKind(kind)) GetTickCount64() else 0,
         .ssh_reconnect = .{
-            .restored_session = app_state.g_restoring and kind == .tmux and tmux_session != null and tmux_session.?.len > 0 and !creating_session,
+            .restored_session = app_state.g_restoring and isRemoteShellKind(kind) and tmux_session != null and tmux_session.?.len > 0 and !creating_session,
             .creating_session = creating_session,
         },
         .full_width = false,
@@ -2273,6 +2316,13 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
         @memcpy(app_state.shells[idx].tmux_identity[0..identity.len], identity);
         app_state.shells[idx].tmux_identity_len = @intCast(identity.len);
     }
+    if (isRemoteShellKind(kind)) {
+        if (remote_cwd) |dir| {
+            const len = @min(dir.len, app_state.shells[idx].cached_cwd.len - 1);
+            @memcpy(app_state.shells[idx].cached_cwd[0..len], dir[0..len]);
+            app_state.shells[idx].cached_cwd_len = @intCast(len);
+        }
+    }
     setDefaultName(&app_state.shells[idx], kind, shell_id);
     app_state.shells[idx].chat_view_on = @import("chat_view.zig").forSession(app_state.shells[idx].tmux_session[0..app_state.shells[idx].tmux_session_len], pending_chat_view);
     if (background_workspace) |workspace| {
@@ -2282,7 +2332,7 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
     app_state.shell_count += 1;
     if (!app_state.g_restoring) {
         if (tmux_session) |session| {
-            @import("archive.zig").cancelPendingSessionKill(app_state.g_pending_tmux_host, session);
+            @import("archive.zig").cancelPendingSessionKill(app_state.shells[idx].tmux_host, session);
             app_state.g_tmux_closed.reopenEverywhere(session);
         }
     }
@@ -2399,7 +2449,7 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
     defer app_state.g_pending_tmux_identity = previous_identity;
     app_state.g_pending_tmux_host = saved_tmux_host;
     defer app_state.g_pending_tmux_host = 0;
-    _ = makeCmdLine(kind, &cmd_buf, tmux_slice, null, shell_id, saved_ssh_reconnect.create_session) orelse return false;
+    _ = makeCmdLine(kind, &cmd_buf, tmux_slice, null, shell_id, saved_ssh_reconnect.create_session, saved_cwd[0..saved_cwd_len]) orelse return false;
     var sid_buf: [16]u8 = undefined;
     setEnvironmentAscii(L("ZIGSHELL_SHELL_ID"), std.fmt.bufPrint(&sid_buf, "{d}", .{shell_id}) catch return false);
     var browser_buf: [640]u8 = undefined;
@@ -3377,6 +3427,27 @@ pub fn finishStartupShell(job: *StartupShell) void {
     _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
 }
 
+test "MUBO-597 both VPS command lines create in the workspace and restore the exact session" {
+    const previous_identity = app_state.g_pending_tmux_identity;
+    defer app_state.g_pending_tmux_identity = previous_identity;
+    app_state.g_pending_tmux_identity = null;
+    for ([_]ShellKind{ .vps, .vps2 }) |kind| {
+        var wide: [2048]u16 = undefined;
+        const line = makeCmdLine(kind, &wide, "term-example", null, 597, true, "~/projects/example") orelse return error.NoCommand;
+        const command = try std.unicode.utf16LeToUtf8Alloc(std.testing.allocator, std.mem.span(line));
+        defer std.testing.allocator.free(command);
+        try std.testing.expect(std.mem.indexOf(u8, command, tmuxSshTarget(if (kind == .vps2) TMUX_HOST_UK else TMUX_HOST_DE)) != null);
+        try std.testing.expect(std.mem.indexOf(u8, command, "tmux new-session -A -s 'term-example' -c \\\"$PWD\\\"") != null);
+        try std.testing.expect(std.mem.indexOf(u8, command, "/'projects/example' 2>/dev/null || cd;") != null);
+        const restored = makeCmdLine(kind, &wide, "term-example", null, 598, false, "/wrong/workspace") orelse return error.NoCommand;
+        const attached = try std.unicode.utf16LeToUtf8Alloc(std.testing.allocator, std.mem.span(restored));
+        defer std.testing.allocator.free(attached);
+        try std.testing.expect(std.mem.indexOf(u8, attached, "tmux attach -t '=term-example'") != null);
+        try std.testing.expect(std.mem.indexOf(u8, attached, "new-session") == null);
+        try std.testing.expect(std.mem.indexOf(u8, attached, "wrong/workspace") == null);
+    }
+}
+
 test "cmd tab starts system cmd" {
     const win = @import("win32.zig");
     var system_dir: [32768]u16 = undefined;
@@ -3390,7 +3461,7 @@ test "cmd tab starts system cmd" {
     try std.testing.expect(appendWideAscii(&expected, &pos, "\\cmd.exe\""));
     for ([_]?[]const u8{ null, "echo ready" }) |startup| {
         var buf: [32780]u16 = undefined;
-        const line = makeCmdLine(.cmd, &buf, null, startup, 0, false) orelse return error.NoCmdLine;
+        const line = makeCmdLine(.cmd, &buf, null, startup, 0, false, null) orelse return error.NoCmdLine;
         const text = std.mem.span(line);
         try std.testing.expect(std.mem.startsWith(u16, text, expected[0..pos]));
         var suffix: [64]u16 = undefined;

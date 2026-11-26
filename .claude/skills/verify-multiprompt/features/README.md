@@ -16,6 +16,7 @@ Read the matching feature before driving. [Recent changes coverage](../coverage.
 - [Emergency lane](emergency-lane.md).
 - [Service route receipt](service-route-receipt.md).
 - [Test CLI checks](verify-cli.md).
+- [Chat text formatting](chat-text-formatting.md).
 - [Agent feedback wishes](agent-feedback.md).
 - [Multi Bot session verbs and server slots](mp-sessions-slots.md).
 
@@ -30,6 +31,7 @@ Start with one feature, then pick a named journey. The area files keep the refer
 - [Command palette](palette.md).
 - [Browser pane](browser-pane.md).
 - [Workspaces and rooms](workspaces-rooms.md).
+- [Rooms](rooms.md): create, add live members, broadcast, mention one chat and compare all reply views, with video and per-step failures.
 - [Shortcuts](shortcuts.md).
 - [Settings and appearance](settings-appearance.md).
 - [Notifications and Inbox](notifications-inbox.md).
@@ -69,7 +71,7 @@ For a standalone run, dispatch `gh workflow run verify.yml -f feature=<stem>`, i
 
 Each runnable recipe declares `Source files:` with comma-separated production paths or `*` patterns. Unit-test files run through Tests, not unrelated desktop journeys. PR selection runs the union of matching journeys, without a model picker, capped at eight per pull request. Tool and workflow paths select only the journeys that own them. A changed feature map selects its own journey. Unmapped files never substitute the full suite. A source file that more than five maps list, such as `src/main.zig` or `src/command_palette.zig`, is shared core and selects no journey by itself; when nothing is selected for a `src/` change, `appearance` runs as the one smoke journey. Journeys dropped over the cap are named in the verdict.
 
-The nightly master run and each release run every runnable recipe, including the formerly manual recipes. `Verify on:` retains the legacy smoke-set metadata. Reconnect and diagnostic recipes without a `Driving it with control.ps1` heading keep their separate workflows. The shared control driver remains a separate concern.
+The nightly master run and each release run every runnable recipe, including the formerly manual recipes, except Rooms. Rooms runs only through changed-file selection or explicit dispatch while Features repairs it. `Verify on:` retains the legacy smoke-set metadata. Reconnect and diagnostic recipes without a `Driving it with control.ps1` heading keep their separate workflows. The shared control driver remains a separate concern.
 
 Every baseline recipe below is implemented by `control.ps1 -Feature <stem>` with the remaining identity/evidence arguments supplied by the workflow. Named keys mean actual SendInput key down/up events, not posted app messages. Query text is typed through the same input path. Search plus arrow navigation is necessary because the app paints its own palette rows. Browser-pane-locked targets an ownership-checked empty browser strip with real mouse input; workspace-focus also clicks workspace pills.
 
@@ -169,12 +171,13 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Session caret](session-caret.md): console and Chat View carets blink while typing and return after focus steal.
 - [Composer buttons](composer-buttons.md): one-line and six-line working drafts retain equally round, bottom-aligned attach, microphone and Send controls.
 - [Chat View](chat-view.md): open, close and reopen the native transcript through Alt+C; pair the real desktop evidence with a separate synthetic-envelope Windows painter image, without claiming live agent delivery.
-- [Antigravity chats](antigravity-chats.md): start a new Antigravity chat from Ctrl+K, switch an existing Claude chat to Antigravity with its row, name and history intact, read the fixture agent's reply, reach Switch AI from the tab's right-click menu, refuse a switch while a reply is being written, and switch the same chat back to Claude with every row kept.
+- [Antigravity chats](antigravity-chats.md): start a new Antigravity chat from Ctrl+K, switch an existing Claude chat to Antigravity with its row, name and history intact, read the fixture agent's reply, reload the fresh Antigravity history and keep its first reply visible, reach Switch AI from the tab's right-click menu, refuse a switch while a reply is being written, and switch the same chat back to Claude with every row kept.
 - [Appearance](appearance.md): choose Dark then Light through Themes and prove visible and saved changes.
 
 The five baseline UI areas are sessions, workspace organization, Inbox, command palette and globally persisted appearance. Session open additionally covers local agent-bridge requests and saved background tabs, with observed failed SSH recorded as a boundary. Real remote/provider and authenticated browser paths still need the exact prerequisites in their owning operation recipe; the browser recovery journey deliberately has no extension attached.
 
 - [Live chat pane](live-chat-pane.md): run the pane selftest with a live chat identity and keep both chats' pages separate.
+- [Queued messages tray](chat-queued-messages.md): a Linux-proof map for the card above the message box, with Send now, Edit, Delete and the collapse chevron; it names the Windows journeys that must stay green.
 
 ### SSH reconnect maps
 

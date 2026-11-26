@@ -271,7 +271,7 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
             pos += sf.len;
         }
 
-        if (app_state.shells[i].kind == .tmux and app_state.shells[i].tmux_session_len > 0) {
+        if (isRemoteShellKind(app_state.shells[i].kind) and app_state.shells[i].tmux_session_len > 0) {
             const ts_pre = ",\"tmux_session\":\"";
             @memcpy(json_buf[pos .. pos + ts_pre.len], ts_pre);
             pos += ts_pre.len;
@@ -427,7 +427,7 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
             pos += 1;
         }
 
-        if (app_state.shells[i].kind == .tmux and app_state.shells[i].tmux_host != 0) {
+        if (isRemoteShellKind(app_state.shells[i].kind) and app_state.shells[i].tmux_host != 0) {
             const hp = ",\"tmux_host\":";
             @memcpy(json_buf[pos .. pos + hp.len], hp);
             pos += hp.len;
@@ -671,11 +671,12 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
         @memcpy(json_buf[pos .. pos + cfp.len], cfp);
         pos += cfp.len;
     }
-    for (0..2) |a| for (0..app_state.g_chat_ac_mru_count[a]) |i| {
+    const mru_agents = [_][]const u8{ "claude", "codex", "antigravity", "pi" };
+    for (mru_agents, 0..) |agent_name, a| for (0..app_state.g_chat_ac_mru_count[a]) |i| {
         const name = std.mem.sliceTo(&app_state.g_chat_ac_mru[a][i], 0);
         if (name.len == 0 or pos + name.len * 2 + 64 >= json_buf.len) continue;
         var key_buf: [48]u8 = undefined;
-        const key = std.fmt.bufPrint(&key_buf, ",\"chat_ac_{s}_{d}\":\"", .{ if (a == 0) @as([]const u8, "claude") else "codex", i }) catch continue;
+        const key = std.fmt.bufPrint(&key_buf, ",\"chat_ac_{s}_{d}\":\"", .{ agent_name, i }) catch continue;
         @memcpy(json_buf[pos .. pos + key.len], key);
         pos += key.len;
         appendJsonEscaped(&json_buf, &pos, name);
@@ -1006,7 +1007,7 @@ pub fn preserveFailedRemoteSavedTab(tab: *const SavedTab) ?u32 {
     if (tab.tmux_session_len > 0) {
         @memcpy(shell.tmux_session[0..tab.tmux_session_len], tab.tmux_session[0..tab.tmux_session_len]);
         shell.tmux_session_len = tab.tmux_session_len;
-        shell.ssh_reconnect.restored_session = tab.kind == .tmux;
+        shell.ssh_reconnect.restored_session = isRemoteShellKind(tab.kind);
     }
     if (tab.cwd_len > 0) {
         @memcpy(shell.cached_cwd[0..tab.cwd_len], tab.cwd[0..tab.cwd_len]);
@@ -1415,7 +1416,7 @@ pub fn spawnSavedTab(tab: *const SavedTab, claude_resume: workspace_snooze.Claud
     }
     const tabs = [_]SavedTab{tab.*};
     const t: usize = 0;
-    const tmux_name: ?[]const u8 = if (tabs[t].kind == .tmux and tabs[t].tmux_session_len > 0)
+    const tmux_name: ?[]const u8 = if (isRemoteShellKind(tabs[t].kind) and tabs[t].tmux_session_len > 0)
         tabs[t].tmux_session[0..tabs[t].tmux_session_len]
     else
         null;
@@ -1466,6 +1467,9 @@ pub fn spawnSavedTab(tab: *const SavedTab, claude_resume: workspace_snooze.Claud
     defer app_state.g_pending_tmux_identity = previous_identity;
     app_state.g_pending_tmux_host = tabs[t].tmux_host;
     defer app_state.g_pending_tmux_host = 0;
+    const previous_workspace = app_state.g_pending_background_workspace;
+    app_state.g_pending_background_workspace = if (app_state.g_restoring) tabs[t].workspace else previous_workspace;
+    defer app_state.g_pending_background_workspace = previous_workspace;
     const ok = if (reclaimed)
         true
     else if (tmux_name != null)
@@ -1767,12 +1771,13 @@ pub fn restoreSession() u32 {
     app_state.clean_chat = json_reader.boolTrue(json, "clean_chat");
     const chat_font = json_reader.uint(json, "chat_font_pt");
     if (chat_font >= 10 and chat_font <= 28) app_state.g_chat_font_pt = @intCast(chat_font);
-    for (0..2) |a| {
+    const mru_agents = [_][]const u8{ "claude", "codex", "antigravity", "pi" };
+    for (mru_agents, 0..) |agent_name, a| {
         var i: usize = 20;
         while (i > 0) {
             i -= 1;
             var key_buf: [48]u8 = undefined;
-            const key = std.fmt.bufPrint(&key_buf, "chat_ac_{s}_{d}", .{ if (a == 0) @as([]const u8, "claude") else "codex", i }) catch continue;
+            const key = std.fmt.bufPrint(&key_buf, "chat_ac_{s}_{d}", .{ agent_name, i }) catch continue;
             var name: [201]u8 = .{0} ** 201;
             const n = json_reader.copyString(json, key, &name);
             if (n > 0) chat_complete.promoteRecent(&app_state.g_chat_ac_mru[a], &app_state.g_chat_ac_mru_count[a], name[0..n]);

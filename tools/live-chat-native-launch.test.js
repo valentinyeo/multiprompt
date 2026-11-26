@@ -20,7 +20,7 @@ function body(source, name) {
 
 test('a new live chat on the shared server connection runs its start command', () => {
   const palette = read('src/command_palette.zig');
-  for (const name of ['spawnHostedChatSession', 'spawnWorkspaceSessionAt']) {
+  for (const name of ['spawnHostedChatNow', 'openWorkspaceTab']) {
     const spawn = body(palette, name);
     const started = spawn.indexOf('live.starting(');
     assert.ok(started >= 0, `${name} marks the chat as starting`);
@@ -28,7 +28,7 @@ test('a new live chat on the shared server connection runs its start command', (
     assert.ok(launch > started, `${name} must run the start command for a native live chat`);
   }
   const consoleSource = read('src/console.zig');
-  assert.match(body(consoleSource, 'spawnNativeShell'), /chat_view_on or app_state\.g_chat_active/, 'live chats still open no terminal');
+  assert.match(body(consoleSource, 'spawnNativeShell'), /if \(app_state\.shells\[idx\]\.chat_view_on or \(app_state\.g_chat_active and !app_state\.g_restoring\)\) \{\s*app_state\.shells\[idx\]\.console_inflight = false;\s*\} else if \(!native\.connect\(shell_id\)\) native\.ready\(shell_id, false\);/, 'live chats open no terminal, but restored shells connect behind the current chat');
 });
 
 test('the start command runs once over the shared connection and reports failure in the chat', () => {

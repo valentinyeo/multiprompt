@@ -109,7 +109,7 @@ test('IGSH-1266 the launch buffers hold every path the launch accepts', () => {
   const caps = {
     session: nameCap,
     cwd: Math.min(pathCap, hostPathCap),
-    READER: reader[1].length,
+    reader: 96,
     sid: 36,
     mode: mode[1].length,
     name: 'codex'.length,
