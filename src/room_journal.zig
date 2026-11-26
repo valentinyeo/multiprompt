@@ -454,7 +454,14 @@ test "a launch refusal rolls a first attempt back to prepared and leaves an earl
 test "a refused first launch rewinds to prepared across a journal restart while an uncertain retry keeps its exact body" {
     var scope = testScope();
     scope.account_digest = @splat('b');
-    @memcpy(&scope.store_uuid, "10000000-0000-4000-8000-000000000002");
+    var dir_buf: [512]u8 = undefined;
+    const dir = @import("session.zig").getSessionDir(&dir_buf) orelse return error.InvalidPath;
+    file_io.win32MakeDir(dir);
+    var path_buf: [700]u8 = undefined;
+    const path = try pathFor(scope, &path_buf);
+    var wide_buf: [800]u16 = undefined;
+    const wide_path = file_io.win32WidePath(&wide_buf, path) orelse return error.InvalidPath;
+    _ = w.DeleteFileW(wide_path.ptr);
     try prepare(scope, .post, test_command, test_room, 3, test_request, &[_]Binding{});
     var guard = try lock(scope);
     defer guard.deinit();
@@ -471,10 +478,6 @@ test "a refused first launch rewinds to prepared across a journal restart while 
     try std.testing.expectEqual(State.uncertain, retry.record().state);
     try std.testing.expectEqualStrings("", retry.record().evidence);
     try std.testing.expectEqualStrings(test_request, retry.record().request);
-    var path_buf: [700]u8 = undefined;
-    const path = try pathFor(scope, &path_buf);
-    var wide_buf: [800]u16 = undefined;
-    const wide_path = file_io.win32WidePath(&wide_buf, path) orelse return error.InvalidPath;
     _ = w.DeleteFileW(wide_path.ptr);
     try std.testing.expect(null == try load(scope));
 }
