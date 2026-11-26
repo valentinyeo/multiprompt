@@ -35,7 +35,7 @@ One logical chat address, at most two pending switch requests, five successful s
 
 ## Coverage and sync
 
-Last reviewed source/model sync commit is `793597b04`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
+Last reviewed source/model sync commit is `1d7910249`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
 
 MUBO-585 puts Antigravity in `HOST_AUTO_SWITCH_ORDER`, so a chat whose plan runs out can land on Antigravity and a chat already on Antigravity can move off it. `HOST_AUTO_SWITCH_TRIGGERS` and `host_usage_limit` already read the Antigravity `result` event, so the detector is unchanged; the saved order, the native probe's `FollowOrder` steps, `tools/chat-auto-switch.test.js` and the chat-auto-switch journey change instead. The TLC provider set and bounds stay at three providers, so the model does not explore Antigravity as a target. Reader and auto-switch test hashes move; the model, bounds, decision table, replays and mutation controls are unchanged. Hosted CI must rerun the full self-test and native replay.
 
