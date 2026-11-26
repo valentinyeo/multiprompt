@@ -761,6 +761,9 @@ pub fn sendChatPrompt() void {
             .model => {
                 if (shell.ai_agent == 3) {
                     chatPiModelPicker();
+                } else if (shell.ai_agent == 8) {
+                    clearChatModelCommand();
+                    @import("plus_menu.zig").open();
                 } else {
                     showHeaderNoticeAscii("Model picker is coming soon", 4000, false);
                 }
