@@ -1,5 +1,5 @@
 {
-  "sync_commit": "49eccbd291141994f859ffc595f5c267003815d2",
+  "sync_commit": "MERGE_HEAD_SHA",
   "files": {
     "src/chat_history_reader.py": "7a3798faadd3686561fb722393204bb1341e435be4737a425371eb3d49c5ec80",
     "tools/chat-switch-ai.test.js": "f76247efe7728588ab8a06303de56890acb4d367353636aca220df3386989b0a",

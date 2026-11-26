@@ -75,7 +75,7 @@ test('the sign-in page check is service-filtered, bounded and Linux-only', () =>
 });
 
 test('heavy workflows run nightly and manually, not on pull requests', () => {
-  const allowed = new Set(['test.yml', 'gitleaks.yml', 'no-comments.yml', 'pr-verifier.yml', 'emergency-lane.yml', 'chat-delivery-formal.yml', 'chat-switch-ai-formal.yml', 'chat-auto-switch.yml', 'ci-repair-receipt.yml', 'verify-cli.yml', 'service-route-receipt.yml', 'signin-page.yml', 'mp-sessions-slots.yml', 'agent-feedback.yml', 'chat-queued-messages.yml']);
+  const allowed = new Set(['test.yml', 'gitleaks.yml', 'no-comments.yml', 'pr-verifier.yml', 'emergency-lane.yml', 'chat-delivery-formal.yml', 'chat-switch-ai-formal.yml', 'chat-auto-switch.yml', 'ci-repair-receipt.yml', 'verify-cli.yml', 'service-route-receipt.yml', 'signin-page.yml', 'mp-sessions-slots.yml', 'agent-feedback.yml', 'chat-queued-messages.yml', 'chat-text-formatting.yml']);
   for (const file of fs.readdirSync(path.join(root, '.github/workflows')).filter(file => file.endsWith('.yml'))) {
     const source = fs.readFileSync(path.join(root, '.github/workflows', file), 'utf8');
     if (/^  pull_request:/m.test(source)) assert.ok(allowed.has(file), file);

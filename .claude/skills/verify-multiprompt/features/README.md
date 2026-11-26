@@ -16,6 +16,7 @@ Read the matching feature before driving. [Recent changes coverage](../coverage.
 - [Emergency lane](emergency-lane.md).
 - [Service route receipt](service-route-receipt.md).
 - [Test CLI checks](verify-cli.md).
+- [Chat text formatting](chat-text-formatting.md).
 - [Agent feedback wishes](agent-feedback.md).
 - [Multi Bot session verbs and server slots](mp-sessions-slots.md).
 
