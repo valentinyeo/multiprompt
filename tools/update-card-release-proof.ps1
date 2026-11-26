@@ -136,35 +136,45 @@ function Test-Card-Legacy-Blue($Colour) {
 function Card-Legacy-Restart($Picture) {
     $bottom = $Picture.Height - 1
     $top = [Math]::Max(0, $Picture.Height - 320)
-    $right = [Math]::Min($Picture.Width - 1, 399)
+    $right = [Math]::Min($Picture.Width - 1, 260)
+    $rows = [int[]]::new($bottom + 1)
+    for ($y = $top; $y -le $bottom; $y++) {
+        $count = 0
+        for ($x = 0; $x -le $right; $x++) {
+            if (Test-Card-Legacy-Blue $Picture.GetPixel($x, $y)) { $count += 1 }
+        }
+        $rows[$y] = $count
+    }
+    $buttonTop = -1
+    $buttonBottom = -1
+    $tallest = 0
+    $scan = -1
+    for ($y = $top; $y -le $bottom + 1; $y++) {
+        if ($y -le $bottom -and $rows[$y] -ge 60) { if ($scan -lt 0) { $scan = $y }; continue }
+        if ($scan -ge 0 -and $y - $scan -gt $tallest) { $tallest = $y - $scan; $buttonTop = $scan; $buttonBottom = $y - 1 }
+        $scan = -1
+    }
+    if ($buttonTop -lt 0) { return $null }
+    $height = $buttonBottom - $buttonTop + 1
+    $band = [Math]::Max(3, [int]($height / 2))
     $columns = [int[]]::new($right + 1)
     for ($x = 0; $x -le $right; $x++) {
         $count = 0
-        for ($y = $top; $y -le $bottom; $y++) {
-            $colour = $Picture.GetPixel($x, $y)
-            if (Test-Card-Legacy-Blue $colour) { $count += 1 }
+        for ($y = $buttonTop; $y -le $buttonBottom; $y++) {
+            if (Test-Card-Legacy-Blue $Picture.GetPixel($x, $y)) { $count += 1 }
         }
         $columns[$x] = $count
     }
     $left = -1
-    $scan = -1
     $width = 0
-    for ($x = 0; $x -le $right; $x++) {
-        if ($columns[$x] -ge 10) { if ($scan -lt 0) { $scan = $x }; continue }
+    $scan = -1
+    for ($x = 0; $x -le $right + 1; $x++) {
+        if ($x -le $right -and $columns[$x] -ge $band) { if ($scan -lt 0) { $scan = $x }; continue }
         if ($scan -ge 0 -and $x - $scan -gt $width) { $width = $x - $scan; $left = $scan }
         $scan = -1
     }
-    if ($scan -ge 0 -and $right + 1 - $scan -gt $width) { $width = $right + 1 - $scan; $left = $scan }
     if ($left -lt 0) { return $null }
     $buttonRight = $left + $width - 1
-    $middle = $left + [int]($width / 2)
-    $buttonTop = -1
-    $buttonBottom = -1
-    for ($y = $top; $y -le $bottom; $y++) {
-        $colour = $Picture.GetPixel($middle, $y)
-        if (Test-Card-Legacy-Blue $colour) { if ($buttonTop -lt 0) { $buttonTop = $y }; $buttonBottom = $y }
-    }
-    if ($buttonTop -lt 0) { return $null }
     $label = 0
     for ($y = $buttonTop; $y -le $buttonBottom; $y++) {
         for ($x = $left; $x -le $buttonRight; $x++) {
@@ -172,7 +182,7 @@ function Card-Legacy-Restart($Picture) {
             if ($colour.R -ge 200 -and $colour.G -ge 200 -and $colour.B -ge 200) { $label += 1 }
         }
     }
-    return @{ left = $left; top = $buttonTop; right = $buttonRight; bottom = $buttonBottom; width = $width; height = $buttonBottom - $buttonTop + 1; labelInk = $label }
+    return @{ left = $left; top = $buttonTop; right = $buttonRight; bottom = $buttonBottom; width = $width; height = $height; labelInk = $label }
 }
 function Assert-Card-Image([string]$Name, [string]$File, $Geometry) {
     $picture = New-Object Drawing.Bitmap($File)
