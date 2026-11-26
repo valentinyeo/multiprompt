@@ -23,6 +23,7 @@ New-Item -ItemType Directory -Force $scratch | Out-Null
 $script:watcher = [IO.FileSystemWatcher]::new($scratch)
 $script:app = $null
 $result = @{ observations = @(); cases = @(); driverErrors = @() }
+function Trace-Step([string]$Label) {}
 function Press([int[]]$Keys, [string]$Label) { $script:presses += $Label }
 function Focus-Control([IntPtr]$Control) {}
 function Clear-Clipboard { return $true }

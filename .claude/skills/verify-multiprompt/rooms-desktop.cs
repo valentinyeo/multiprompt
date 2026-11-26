@@ -23,6 +23,13 @@ public static class RoomsDesktop {
     [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point point);
     [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] static extern void mouse_event(uint flags, uint x, uint y, uint data, UIntPtr extra);
+    [DllImport("user32.dll", SetLastError=true)] static extern bool OpenClipboard(IntPtr hwnd);
+    [DllImport("user32.dll", SetLastError=true)] static extern bool CloseClipboard();
+    [DllImport("user32.dll", SetLastError=true)] static extern bool EmptyClipboard();
+    [DllImport("user32.dll", SetLastError=true)] static extern IntPtr GetClipboardData(uint format);
+    [DllImport("user32.dll")] static extern bool IsClipboardFormatAvailable(uint format);
+    [DllImport("kernel32.dll", SetLastError=true)] static extern IntPtr GlobalLock(IntPtr handle);
+    [DllImport("kernel32.dll", SetLastError=true)] static extern bool GlobalUnlock(IntPtr handle);
     static bool OnScreenFrame(int left, int top, int right, int bottom) {
         return right > left && bottom > top && left < GetSystemMetrics(0) && top < GetSystemMetrics(1) && right > 0 && bottom > 0;
     }
@@ -38,6 +45,29 @@ public static class RoomsDesktop {
     public static bool Responding(IntPtr hwnd, int milliseconds) {
         IntPtr result;
         return IsWindow(hwnd) && SendMessageTimeout(hwnd, 0x0000, IntPtr.Zero, IntPtr.Zero, 3, (uint)milliseconds, out result) != IntPtr.Zero;
+    }
+    static bool ClipboardOpen(int milliseconds) {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        while (true) {
+            if (OpenClipboard(IntPtr.Zero)) return true;
+            if (clock.ElapsedMilliseconds >= milliseconds) return false;
+            System.Threading.Thread.Sleep(20);
+        }
+    }
+    public static bool ClipboardClear(int milliseconds) {
+        if (!ClipboardOpen(milliseconds)) return false;
+        try { return EmptyClipboard(); } finally { CloseClipboard(); }
+    }
+    public static string ClipboardText(int milliseconds) {
+        if (!IsClipboardFormatAvailable(13)) return "";
+        if (!ClipboardOpen(milliseconds)) return "";
+        try {
+            var data = GetClipboardData(13);
+            if (data == IntPtr.Zero) return "";
+            var pointer = GlobalLock(data);
+            if (pointer == IntPtr.Zero) return "";
+            try { return Marshal.PtrToStringUni(pointer) ?? ""; } finally { GlobalUnlock(data); }
+        } finally { CloseClipboard(); }
     }
     public static IntPtr[] Children(IntPtr parent, string className) {
         var found = new List<IntPtr>();

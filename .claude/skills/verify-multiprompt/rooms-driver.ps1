@@ -45,6 +45,10 @@ $hostsFile = "$env:SystemRoot/System32/drivers/etc/hosts"
 $hostsOriginal = [IO.File]::ReadAllBytes($hostsFile)
 $watcher = $null
 $clock = [Diagnostics.Stopwatch]::StartNew()
+function Trace-Step([string]$Label) {
+    Write-Host ('[rooms-trace] {0,7:N1}s {1}' -f $clock.Elapsed.TotalSeconds, $Label)
+    [Console]::Out.Flush()
+}
 function Save($Value, [string]$Path) { [IO.File]::WriteAllText($Path, ($Value | ConvertTo-Json -Depth 30), [Text.UTF8Encoding]::new($false)) }
 function Copy-Debug([string]$Name) {
     if (Test-Path "$settings/debug.log") { Copy-Item "$settings/debug.log" "$Evidence/$Name-debug.log" -Force -ErrorAction SilentlyContinue }
@@ -95,19 +99,26 @@ function Doctor {
     Save @{ pid = $app.Id; hwnd = $main.ToInt64(); exe = $app.Path; sha256 = $ExpectedHash; visible = $true } "$Evidence/doctor.json"
 }
 function Press([int[]]$Keys, [string]$Label) {
+    Trace-Step "press start: $Label"
     Doctor
     [void](Wait-For "the owned desktop answers window messages before $Label" { [RoomsDesktop]::Responding($main, 500) } 10)
-    if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $main) }
+    if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) {
+        Trace-Step "press needs the owned desktop in front: $Label"
+        [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $main)
+    }
     if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { throw 'Refusing input outside the owned app' }
     $actions.Add(@{ input = $Label; keys = $Keys; seconds = $clock.Elapsed.TotalSeconds })
     [ChatDeliveryDesktop]::Chord($Keys)
+    Trace-Step "press done: $Label"
 }
 function Type-Text([string]$Text) {
+    Trace-Step "type start: $Text"
     Doctor
     [void](Wait-For 'the owned desktop answers window messages before typing' { [RoomsDesktop]::Responding($main, 500) } 10)
     if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { throw 'Refusing typing outside the owned app' }
     $actions.Add(@{ input = 'type'; text = $Text; seconds = $clock.Elapsed.TotalSeconds })
     foreach ($letter in $Text.ToCharArray()) { [ChatDeliveryDesktop]::Character($letter) }
+    Trace-Step "type done: $Text"
 }
 $journeyCommands = $null
 function Invoke-JourneyCommand {
@@ -134,11 +145,13 @@ function Invoke-JourneyCommand {
     }
     $rowsPattern = '\[palette\] rows chars=' + $query.Length + ' count=\d+ ids=([^\r\n]+)'
     $confirmPattern = if ($null -eq $target) { '\[palette\] confirm target=\d+' } else { '\[palette\] confirm target=' + [regex]::Escape([string]$target) + '(?![0-9])' }
-    for ($attempt = 1; $attempt -le 3; $attempt++) {
+    for ($attempt = 1; $attempt -le 2; $attempt++) {
+        Trace-Step "palette $attempt open: $query"
         Press @(0x1B) 'Escape: dismiss overlay before the palette command'
         $offset = (Read-Shared "$settings/debug.log").Length
         Press @(0x11, 0x4B) 'Ctrl+K: open palette'
-        if (-not (Wait-Or { (Read-After $offset) -match '\[palette\] ready chars=0 count=\d+ target=\d+' } 10)) { continue }
+        if (-not (Wait-Or { (Read-After $offset) -match '\[palette\] ready chars=0 count=\d+ target=\d+' } 30)) { throw "Timed out: the palette never reported ready for $query" }
+        Trace-Step "palette $attempt ready: $query"
         Type-Text $query
         $ids = Wait-Or {
             $rows = [regex]::Matches((Read-After $offset), $rowsPattern)
@@ -146,12 +159,17 @@ function Invoke-JourneyCommand {
             $found = @($rows[$rows.Count - 1].Groups[1].Value.Trim() -split ' ' | Where-Object { $_ })
             if (-not $found.Count -or ($null -ne $target -and $found -notcontains $target)) { return $null }
             ,$found
-        } 10
-        if ($null -eq $ids) { continue }
+        } 30
+        if ($null -eq $ids) { throw "Timed out: palette rows for $query" }
+        Trace-Step "palette $attempt rows: $query ids=$($ids -join ' ')"
         $index = if ($null -eq $target) { 0 } else { [Array]::IndexOf($ids, $target) }
         for ($i = 0; $i -lt $index; $i++) { Press @(0x28) "Down: row for $query" }
         Press @(0x0D) "Enter: $query"
-        if (Wait-Or { (Read-After $offset) -match $confirmPattern } 10) { return }
+        if (Wait-Or { (Read-After $offset) -match $confirmPattern } 20) {
+            Trace-Step "palette $attempt confirmed: $query"
+            return
+        }
+        Trace-Step "palette $attempt missed its confirm: $query"
     }
     throw "Timed out: palette confirms $query"
 }
@@ -171,18 +189,24 @@ function Open-Room([string]$Name) {
     if (-not (Room-Window)) { throw "Opening $Name did not show its room view" }
 }
 function Focus-Control([IntPtr]$Control) {
+    Trace-Step 'focus start: owned control'
     Doctor
+    [void](Wait-For 'the owned desktop answers window messages before it takes focus' { [RoomsDesktop]::Responding($main, 500) } 10)
     if (-not [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $Control)) { throw 'Cannot focus owned control' }
+    Trace-Step 'focus done: owned control'
 }
 function Snapshot([string]$Name) {
+    Trace-Step "snapshot start: $Name"
     $raw = Invoke-ServerNative -FilePath $ssh -Arguments @('-F', "$settings/ssh-key/config", 'remote-1', "python3 $repo/.claude/skills/verify-multiprompt/rooms-snapshot.py") -Evidence $Evidence -Name ($Name + '-snapshot') -TimeoutSeconds 120
     $state = ($raw -join "`n") | ConvertFrom-Json
     Save $state "$Evidence/$Name-state.json"
+    Trace-Step "snapshot done: $Name"
     return $state
 }
 function Room-Data($State) { ,@($State.rooms | ForEach-Object { $_.tables.rooms } | Where-Object { $_.name -ceq 'Rooms534' }) }
 function Room-Events($State) { @($State.rooms | ForEach-Object { $_.tables.events } | ForEach-Object { $_.body | ConvertFrom-Json }) }
 function Shot([string]$Name) {
+    Trace-Step "screenshot start: $Name"
     Doctor
     $bitmap = [Drawing.Bitmap]::new([ChatDeliveryDesktop]::GetSystemMetrics(0), [ChatDeliveryDesktop]::GetSystemMetrics(1))
     $graphics = [Drawing.Graphics]::FromImage($bitmap)
@@ -190,6 +214,7 @@ function Shot([string]$Name) {
     $text = Invoke-ServerNative -FilePath $ocr -Arguments @("$Evidence/$Name.png", 'stdout', '--psm', '11') -Evidence $Evidence -Name ("$Name-ocr") -TimeoutSeconds 120
     $text = ($text -join ' ') -replace '\s+', ' '
     [IO.File]::WriteAllText("$Evidence/$Name-visible.txt", $text)
+    Trace-Step "screenshot done: $Name"
     return $text
 }
 function Save-Variant([Drawing.Bitmap]$Source, [int]$Skip, [int]$Scale, [int]$Threshold, [bool]$Light) {
@@ -379,29 +404,34 @@ function Saved-Tabs($Saved) {
     return @($Saved.tabs)
 }
 function Read-Clipboard {
-    try { return [Windows.Forms.Clipboard]::GetText() } catch { return '' }
+    return [RoomsDesktop]::ClipboardText(2000)
 }
 function Clear-Clipboard {
-    try { [Windows.Forms.Clipboard]::Clear(); return $true } catch { return $false }
+    return [RoomsDesktop]::ClipboardClear(2000)
 }
 function Copy-Chat([string]$Name, [int]$Attempts = 4, [int]$ReadSeconds = 4) {
+    Trace-Step "copy start: $Name"
     for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
         if (-not (Wait-Or { Clear-Clipboard } 10)) { throw 'Timed out: clipboard available for this copy' }
         Invoke-JourneyCommand 'chat view select all'
         Press @(0x11, 0x43) "Ctrl+C: copy visible chat messages (attempt $attempt)"
         $script:copy_attempts += 1
+        Trace-Step "copy read: $Name attempt $attempt"
         $text = Wait-Or { $value = Read-Clipboard; if ($value) { $value } } $ReadSeconds
         if ($text) {
             [IO.File]::WriteAllText("$Evidence/$Name.txt", $text)
+            Trace-Step "copy kept: $Name attempt $attempt"
             Press @(0x1B) 'Escape: return to composer'
             return $text
         }
         [void]$watcher.WaitForChanged([IO.WatcherChangeTypes]::All, 250)
     }
     [IO.File]::WriteAllText("$Evidence/$Name-empty-copy.txt", "$($script:copy_attempts) bounded Ctrl+C attempts produced no clipboard text")
+    Trace-Step "copy empty: $Name"
     return $null
 }
 function Copy-Chat-Until([string]$Name, [string]$Wanted, [scriptblock]$Check, [int]$Seconds = 45, [int]$Attempts = 4, [int]$ReadSeconds = 4) {
+    Trace-Step "copy-until start: $Wanted"
     $script:copy_attempts = 0
     $script:copy_ever_read = $false
     $failure = $null
@@ -425,6 +455,7 @@ function Save-RoomMembers([string]$Label) {
     } 30)
 }
 function Open-Member([string]$Name) {
+    Trace-Step "open member start: $Name"
     Invoke-JourneyCommand $Name -Session
     if (-not @(Visible-Children 'ZigShellChatTranscript').Count) { Press @(0x12, 0x43) 'Alt+C: open member Chat View' }
     [void](Wait-For 'member composer' { $windows = @(Visible-Children 'Edit'); if ($windows.Count -eq 1) { $windows[0] } })
@@ -437,8 +468,10 @@ function Open-Member([string]$Name) {
         $tab = $tabs[$index]
         $tab.PSObject.Properties['name'] -and $tab.name -ceq $Name -and $tab.PSObject.Properties['ai_agent'] -and $tab.ai_agent -eq 1 -and $tab.PSObject.Properties['csid'] -and $tab.csid -like 'a1b2c3d4-0534-*'
     })
+    Trace-Step "open member done: $Name"
 }
 function Send-Text([string]$Text, [switch]$Room, [switch]$AllowKeptDraft) {
+    Trace-Step "send start: $Text"
     $parent = if ($Room) { Room-Window } else { $main }
     $edit = Wait-For 'one visible composer' { $windows = @(Visible-Children 'Edit' $parent); if ($windows.Count -eq 1) { $windows[0] } }
     Focus-Control $edit
@@ -457,12 +490,14 @@ function Send-Text([string]$Text, [switch]$Room, [switch]$AllowKeptDraft) {
     if ($AllowKeptDraft) {
         $sendDeadline = [Diagnostics.Stopwatch]::StartNew()
         while ($sendDeadline.Elapsed.TotalSeconds -lt 5) {
-            if ([ChatDeliveryDesktop]::Text($edit) -ceq '') { return }
+            if ([ChatDeliveryDesktop]::Text($edit) -ceq '') { break }
             [void]$watcher.WaitForChanged([IO.WatcherChangeTypes]::All, 200)
         }
+        Trace-Step "send done: $Text"
         return
     }
     [void](Wait-For 'composer clears after send' { [ChatDeliveryDesktop]::Text($edit) -ceq '' } 15)
+    Trace-Step "send done: $Text"
 }
 function Release-Replies([string]$Marker) {
     [void](Invoke-ServerNative -FilePath $ssh -Arguments @('-F', "$settings/ssh-key/config", 'remote-1', "python3 $repo/.claude/skills/verify-multiprompt/rooms-release.py $Marker") -Evidence $Evidence -Name ("release-$Marker") -TimeoutSeconds 120)
@@ -497,7 +532,7 @@ function Restart-Desktop {
 try {
     if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows') { throw 'Use GitHub Windows only' }
     if ((Get-FileHash $Exe -Algorithm SHA256).Hash -ine $ExpectedHash -or -not [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Exe)).Contains("MPVERSION=$ExpectedVersion;")) { throw 'Executable checksum/version mismatch' }
-    Add-Type -AssemblyName System.Drawing, System.Windows.Forms, System.Security
+    Add-Type -AssemblyName System.Drawing, System.Security
     Add-Type -Path "$PSScriptRoot/../../../tools/verify-chat-delivery/desktop.cs"
     Add-Type -Path "$PSScriptRoot/../../../tools/verify-chat-delivery/job.cs"
     Add-Type -Path "$PSScriptRoot/rooms-desktop.cs"
