@@ -42,12 +42,24 @@ jobs:
       - name: Queued message actions in the shared store
         run: python3 tools/chat-history-reader-test.py MUBO_594_QueuedMessageActionsTest -v
       - name: Record the proof
+        if: always()
+        shell: bash
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          JOB_STATUS: ${{ job.status }}
         run: |
-          mkdir -p evidence
-          printf '{"revision":"%s","zig":"chat_queue","reader":"MUBO_594_QueuedMessageActionsTest"}\n' "$GITHUB_SHA" > evidence/chat-queued-messages.json
+          mkdir -p "$RUNNER_TEMP/evidence"
+          node -e '
+            const fs = require("node:fs");
+            const parts = { zig: "zig test src/chat_queue.zig", reader: "MUBO_594_QueuedMessageActionsTest" };
+            const exitCode = process.env.JOB_STATUS === "success" ? 0 : 1;
+            const summary = { head_sha: process.env.HEAD_SHA, revision: process.env.HEAD_SHA, exit_code: exitCode, parts };
+            fs.writeFileSync(process.argv[1], JSON.stringify(summary, null, 2) + "\n");
+            console.log(JSON.stringify(summary));
+          ' "$RUNNER_TEMP/evidence/summary.json"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
           name: chat-queued-messages
-          path: evidence/chat-queued-messages.json
+          path: ${{ runner.temp }}/evidence/
           if-no-files-found: error

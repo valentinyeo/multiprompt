@@ -25,9 +25,9 @@ gh workflow run chat-queued-messages.yml --ref <branch>
 
 1. `zig test src/chat_queue.zig` runs the tray model, single-line shortening, six-row cap, header-only collapse, docked-above-the-composer geometry and the Send now / Edit / Delete / chevron hit boxes.
 2. `python3 tools/chat-history-reader-test.py MUBO_594_QueuedMessageActionsTest -v` lists queued messages from the shared store and proves edit in place, cancel-and-hand-back, delete, send-now promotion and the idempotent repeat of each.
-3. It writes `evidence/chat-queued-messages.json` naming the revision and both checks.
+3. It writes `summary.json` into the `chat-queued-messages` artifact, naming the head revision, the exit code and both checks. The PR verifier reads that file as this feature's CI receipt.
 
-Observable proof: the tests exit 0 and the artifact names this revision. The painted card and clicks need the paired Windows transcript journeys below.
+Observable proof: the tests exit 0, the run's head revision matches the pull request head, and the artifact's `summary.json` names the same revision. The painted card and clicks need the paired Windows transcript journeys below.
 
 ### Windows desktop pairing
 
