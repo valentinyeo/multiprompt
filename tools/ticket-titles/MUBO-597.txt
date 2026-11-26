@@ -1,0 +1,1 @@
+VPS shells open in workspace root and survive restarts

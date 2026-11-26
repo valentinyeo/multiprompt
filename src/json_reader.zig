@@ -171,6 +171,15 @@ test "local avatar identity survives session parsing without using tab names" {
     try std.testing.expect(std.mem.allEqual(u8, &tabs[1].avatar_local_id, 0));
 }
 
+test "MUBO-597 legacy VPS kinds restore on their own hosts without a saved host field" {
+    const parsed = try parse(std.testing.allocator, "{\"tabs\":[{\"kind\":\"vps\",\"name\":\"One\"},{\"kind\":\"vps2\",\"name\":\"Two\"}]}");
+    defer parsed.deinit();
+    var tabs: [2]@import("app_state.zig").SavedTab = undefined;
+    try std.testing.expectEqual(@as(u32, 2), sessionTabs(parsed.value, &tabs, 9));
+    try std.testing.expectEqual(@import("app_state.zig").TMUX_HOST_DE, tabs[0].tmux_host);
+    try std.testing.expectEqual(@import("app_state.zig").TMUX_HOST_UK, tabs[1].tmux_host);
+}
+
 test "SOFT-3002 saved tmux tab without a session name restores instead of vanishing" {
     const parsed = try parse(std.testing.allocator, "{\"tabs\":[{\"kind\":\"tmux\",\"name\":\"server work\",\"tmux_host\":1,\"shell_id\":7,\"used\":1700000000}]}");
     defer parsed.deinit();
@@ -238,7 +247,11 @@ pub fn sessionTabs(root: std.json.Value, tabs: anytype, max_workspaces: u8) u32 
         tab.pid = @truncate(uint(obj, "pid"));
         tab.group_id = @truncate(uint(obj, "group_id"));
         tab.starred_group_id = @truncate(uint(obj, "starred_group_id"));
-        tab.tmux_host = @truncate(uint(obj, "tmux_host"));
+        tab.tmux_host = switch (tab.kind) {
+            .vps => @import("app_state.zig").TMUX_HOST_DE,
+            .vps2 => @import("app_state.zig").TMUX_HOST_UK,
+            else => @truncate(uint(obj, "tmux_host")),
+        };
         const workspace = uint(obj, "workspace");
         tab.workspace = if (workspace < max_workspaces) @intCast(workspace) else 0;
         tab.last_used = uint(obj, "used");

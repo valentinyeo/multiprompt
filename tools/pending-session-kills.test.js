@@ -138,6 +138,7 @@ const SessionIdentity = @import("session_identity.zig").Session;
 const app_state = struct {
     var g_restoring = false;
     var g_pending_tmux_host: u8 = 0;
+    var shells: [1]struct { tmux_host: u8 = 0 } = .{.{}};
     var g_tmux_closed: @import("tmux_closed.zig").Closed = .{};
     var g_pending_session_kills: session_kills.Queue = .{};
     var g_pending_session_kill_mutex = struct {
@@ -180,22 +181,27 @@ test "actual worker finishes only its own cancelled token" {
     try std.testing.expectEqualStrings("replacement", std.mem.sliceTo(&replacement.identity.sid, 0));
 }
 fn spawnAccepted(tmux_session: ?[]const u8) void {
+    const idx: u32 = 0;
 ${reopen}
 }
-test "only explicit accepted reopen cancels end and clears tombstone" {
-    app_state.g_pending_session_kills = .{};
+test "only explicit accepted reopen cancels end and clears tombstone on either shell host" {
     defer app_state.g_tmux_closed.entries.deinit(std.testing.allocator);
-    try app_state.g_tmux_closed.close(std.testing.allocator, 0, "queued", 1);
-    _ = app_state.g_pending_session_kills.add(SessionIdentity.remote(0, "queued", "", 2).?).?;
-    app_state.g_restoring = true;
-    spawnAccepted("queued");
-    try std.testing.expect(app_state.g_tmux_closed.contains(0, "queued"));
-    const pending = app_state.g_pending_session_kills.begin(0).?;
-    app_state.g_pending_session_kills.finish(pending.token, .retry);
-    app_state.g_restoring = false;
-    spawnAccepted("queued");
-    try std.testing.expect(!app_state.g_tmux_closed.contains(0, "queued"));
-    try std.testing.expect(app_state.g_pending_session_kills.begin(0) == null);
+    for ([_]u8{ 0, 1 }) |host| {
+        app_state.g_pending_session_kills = .{};
+        app_state.shells[0].tmux_host = host;
+        app_state.g_pending_tmux_host = 1 - host;
+        try app_state.g_tmux_closed.close(std.testing.allocator, host, "queued", 1);
+        _ = app_state.g_pending_session_kills.add(SessionIdentity.remote(host, "queued", "", 2).?).?;
+        app_state.g_restoring = true;
+        spawnAccepted("queued");
+        try std.testing.expect(app_state.g_tmux_closed.contains(host, "queued"));
+        const pending = app_state.g_pending_session_kills.begin(0).?;
+        app_state.g_pending_session_kills.finish(pending.token, .retry);
+        app_state.g_restoring = false;
+        spawnAccepted("queued");
+        try std.testing.expect(!app_state.g_tmux_closed.contains(host, "queued"));
+        try std.testing.expect(app_state.g_pending_session_kills.begin(0) == null);
+    }
 }
 test "production queue controls" { std.testing.refAllDecls(session_kills); }
 `, ['session_kills.zig', 'tmux_identity.zig', 'tmux_closed.zig', 'json_reader.zig', 'session_layout.zig', 'account_hosts.zig', 'fixtures/issue-415-frequent.json', 'archive_rules.zig', 'voice_filter.zig', 'frequent.zig']);
