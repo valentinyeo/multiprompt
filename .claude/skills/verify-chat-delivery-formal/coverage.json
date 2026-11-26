@@ -1,5 +1,5 @@
 {
-  "sync_commit": "MERGE_HEAD_SHA",
+  "sync_commit": "ebe5fd75567212ba1b09c381172389f896db15ae",
   "files": {
     "src/chat_echo.zig": "70d7981d5e20f22c5bc487ac2970a259094cb07fa36ab39c16af5b672d4c0d88",
     "src/chat_send.zig": "520d260b38b01d8e4f6b660f74b2695dd26e387c323151e47690a648ccad84d2",
