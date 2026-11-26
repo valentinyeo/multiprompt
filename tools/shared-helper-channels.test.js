@@ -51,7 +51,7 @@ test('session list poll and autocomplete ride the shared server connection when 
   const vps = read('src/vps.zig');
   assert.match(vps, /if \(app_state\.g_shared_server_connection\) \{\s+if \(app_state\.g_vps_channels\[host\]\.alive\) closeVpsChannelUnlocked\(host\);\s+return sharedChannelRequest\(&g_shared_poll_channels\[host\], host, VPS_CHANNEL_LOOP_SCRIPT, "", buf, VPS_CHANNEL_SENTINEL\);/);
   assert.match(vps, /if \(app_state\.g_shared_server_connection\) \{\s+if \(app_state\.g_ac_channels\[host\]\.alive\) closeAcChannelUnlocked\(host\);\s+const n = sharedChannelRequest\(&g_shared_ac_channels\[host\], host, AC_SERVE_SCRIPT,/);
-  assert.match(vps, /slot\.\* = chat_transport\.openCommand\(host, command\);/);
+  assert.match(vps, /slot\.\* = chat_transport\.openCommandWait\(host, command, 15_000\);/);
   assert.match(read('src/chat_transport.zig'), /packet\(host, \.\{ \.channel = channel\.id, \.command = channel\.command, \.data = line \}\)/);
 });
 
