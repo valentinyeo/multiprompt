@@ -98,12 +98,15 @@ with tempfile.TemporaryDirectory() as directory:
     prepare(runtime)
     config = runtime['host_read'](runtime['host_paths']('claude', sid)['config'])
     first = runtime['host_auto_switch_target']('claude', config)[0]
-    config['auto_switch'] = dict(on=True, order=['claude', 'codex', 'pi'], empty={'claude': time.time()})
+    config['auto_switch'] = dict(on=True, order=['claude', 'codex', 'pi', 'antigravity'], empty={'claude': time.time()})
     second = runtime['host_auto_switch_target']('codex', config)[0]
-    config['auto_switch'] = dict(on=True, order=['claude', 'codex', 'pi'],
+    config['auto_switch'] = dict(on=True, order=['claude', 'codex', 'pi', 'antigravity'],
                                  empty={'claude': time.time(), 'codex': time.time()})
     third = runtime['host_auto_switch_target']('pi', config)[0]
-    results['FollowOrder'] = (first, second, third) == ('codex', 'pi', None)
+    config['auto_switch'] = dict(on=True, order=['claude', 'codex', 'pi', 'antigravity'],
+                                 empty={name: time.time() for name in ('claude', 'codex', 'pi', 'antigravity')})
+    fourth = runtime['host_auto_switch_target']('antigravity', config)[0]
+    results['FollowOrder'] = (first, second, third, fourth) == ('codex', 'pi', 'antigravity', None)
 with tempfile.TemporaryDirectory() as directory:
     runtime = load(directory)
     prepare(runtime)
