@@ -1,6 +1,6 @@
 const std = @import("std");
 
-pub const Agent = enum { claude, codex, antigravity, other };
+pub const Agent = enum { claude, codex, pi, antigravity, other };
 pub const Mode = enum { slash, dollar, file };
 pub const Token = struct { mode: Mode, start: usize, end: usize };
 pub const Entry = struct { kind: u8, name: []const u8, hint: []const u8, desc: []const u8 };
@@ -265,12 +265,42 @@ test "SOFT-3086 mid-message slash completion inserts text without changing send 
     const token = tokenAtCaret(text, 8, .claude).?;
     const applied = applyAccept(text, token, wide[0..n], &output);
     try std.testing.expectEqualSlices(u16, w("why /review  ?"), output[0..applied.len]);
-    for ([_]Agent{ .claude, .codex, .antigravity, .other }) |agent| {
+    for ([_]Agent{ .claude, .codex, .pi, .antigravity, .other }) |agent| {
         for ([_][]const u16{ w("why /review ?"), w("why /review"), w(" /review"), w("why\n/review") }) |message| {
             try std.testing.expect(!endsInTriggerToken(message, agent));
         }
         try std.testing.expect(endsInTriggerToken(w("/review"), agent));
     }
+}
+
+test "MUBO-589 pi slash triggers at start, mid-sentence, and inserts slash commands" {
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    const start_tok = tokenAtCaret(w("/val"), 4, .pi).?;
+    try std.testing.expectEqual(Mode.slash, start_tok.mode);
+    try std.testing.expectEqual(@as(usize, 0), start_tok.start);
+    try std.testing.expectEqual(@as(usize, 4), start_tok.end);
+    const mid_tok = tokenAtCaret(w("run /boa"), 8, .pi).?;
+    try std.testing.expectEqual(Mode.slash, mid_tok.mode);
+    try std.testing.expectEqual(@as(usize, 4), mid_tok.start);
+    try std.testing.expectEqual(@as(usize, 8), mid_tok.end);
+    const file_tok = tokenAtCaret(w("ask @bot"), 8, .pi).?;
+    try std.testing.expectEqual(Mode.file, file_tok.mode);
+    try std.testing.expectEqual(@as(usize, 4), file_tok.start);
+    try std.testing.expect(tokenAtCaret(w("$skill"), 6, .pi) == null);
+    try std.testing.expect(endsInTriggerToken(w("/valentin-mode"), .pi));
+    try std.testing.expect(!endsInTriggerToken(w("please /valentin-mode"), .pi));
+    var buf: [128]u8 = undefined;
+    try std.testing.expectEqualStrings("/valentin-mode ", insertionFor(.pi, .slash, .{ .kind = 'S', .name = "valentin-mode", .hint = "", .desc = "" }, &buf));
+    try std.testing.expectEqualStrings("/board-drain ", insertionFor(.pi, .slash, .{ .kind = 'J', .name = "board-drain", .hint = "", .desc = "" }, &buf));
+    try std.testing.expectEqualStrings("/model ", insertionFor(.pi, .slash, .{ .kind = 'B', .name = "model", .hint = "<provider/model>", .desc = "" }, &buf));
+    try std.testing.expectEqualStrings("/login ", insertionFor(.pi, .slash, .{ .kind = 'B', .name = "login", .hint = "<provider>", .desc = "" }, &buf));
+    try std.testing.expectEqualStrings("@dir/", insertionFor(.pi, .file, .{ .kind = 'D', .name = "dir", .hint = "", .desc = "" }, &buf));
+    var wide: [64]u16 = undefined;
+    const ins = insertionFor(.pi, .slash, .{ .kind = 'S', .name = "valentin-mode", .hint = "", .desc = "" }, &buf);
+    const n = try std.unicode.utf8ToUtf16Le(&wide, ins);
+    var out: [128]u16 = undefined;
+    const applied = applyAccept(w("use /val now"), tokenAtCaret(w("use /val now"), 8, .pi).?, wide[0..n], &out);
+    try std.testing.expectEqualSlices(u16, w("use /valentin-mode  now"), out[0..applied.len]);
 }
 
 test "antigravity slash triggers at start, mid-sentence, and inserts slash commands" {
