@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { checkZigDownload, readWorkflows } from './check-zig-download.mjs';
 
 test('every checked-in workflow installs Zig through the shared action', () => {
@@ -20,4 +21,27 @@ test('an inline PowerShell download fails', () => {
 test('a job that calls the action is clean', () => {
   const source = `      - uses: ./.github/actions/setup-zig\n        with:\n          version: '0.16.0'\n`;
   assert.deepEqual(checkZigDownload({ '.github/workflows/journey.yml': source }), []);
+});
+
+test('every verify step that runs zig also installs it on the tagged path', () => {
+  const workflow = fs.readFileSync(new URL('../.github/workflows/verify.yml', import.meta.url), 'utf8');
+  const verify = workflow.split('\n  verify:\n')[1];
+  const steps = verify.split(/\n      - (?=name:|uses:)/).slice(1);
+  const condition = (text) => (/\n        if: ([^\n]+)/.exec(text) || [])[1] || '';
+  const install = steps.find((step) => step.startsWith('name: Install Zig 0.16.0'));
+  assert.ok(install, 'the verify job installs Zig');
+  const installed = condition(install);
+  assert.match(installed, /env\.RELEASE_TAG == ''/, 'the branch path always installs Zig');
+  const covered = (term) => installed.includes(term);
+  const missing = [];
+  for (const step of steps) {
+    const name = step.split('\n')[0].replace('name: ', '');
+    if (!/\bzig (cc|build|test)\b/.test(step)) continue;
+    const when = condition(step);
+    if (when.includes("RELEASE_TAG == ''")) continue;
+    const terms = when.match(/env\.[A-Za-z_]+ == '[^']*'/g) || [];
+    assert.ok(terms.length, `${name} runs zig unconditionally`);
+    if (!terms.some(covered)) missing.push(name);
+  }
+  assert.deepEqual(missing, [], 'these steps run zig on the tagged path without installing it');
 });

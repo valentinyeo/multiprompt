@@ -35,6 +35,8 @@ const Host = struct {
     outgoing: std.ArrayList(Packet) = .empty,
     outgoing_bytes: usize = 0,
     wake: w.HANDLE = null,
+    ready: w.HANDLE = null,
+    progress: w.HANDLE = null,
     retry_at: u64 = 0,
     next_id: u32 = 0,
     channels: std.ArrayList(*Channel) = .empty,
@@ -143,6 +145,7 @@ fn abortBoot(b: Boot) void {
 }
 
 fn handshakeWorker(b: Boot) void {
+    defer _ = w.SetEvent(b.host.ready);
     const deadline = w.GetTickCount64() + 15_000;
     var ready: [15]u8 = undefined;
     var ready_len: usize = 0;
@@ -177,7 +180,9 @@ fn handshakeWorker(b: Boot) void {
     b.host.output = b.output;
     b.host.running = true;
     b.host.starting = false;
+    const ready_event = b.host.ready;
     b.host.mutex.unlock();
+    if (ready_event != null) _ = w.SetEvent(ready_event);
     idle_budget.bump(.thread_spawn);
     const thread = std.Thread.spawn(.{}, receive, .{b.host}) catch {
         lock(b.host);
@@ -196,6 +201,11 @@ fn handshakeWorker(b: Boot) void {
 fn bootHost(host: *Host, index: u8) bool {
     if (host.wake == null) host.wake = w.CreateEventW(null, 0, 0, null);
     if (host.wake == null) return false;
+    if (host.ready == null) host.ready = w.CreateEventW(null, 0, 0, null);
+    if (host.ready == null) return false;
+    _ = w.ResetEvent(host.ready);
+    if (host.progress == null) host.progress = w.CreateEventW(null, 0, 0, null);
+    if (host.progress == null) return false;
     var cmd: [2048]u16 = undefined;
     var pos: usize = 0;
     const console = @import("console.zig");
@@ -331,6 +341,20 @@ pub fn openCommand(index: u8, command: []const u8) ?*Channel {
     return channel;
 }
 
+pub fn openCommandWait(index: u8, command: []const u8, timeout_ms: u32) ?*Channel {
+    if (openCommand(index, command)) |channel| return channel;
+    if (index >= hosts.len) return null;
+    const host = &hosts[index];
+    lock(host);
+    const starting = host.starting;
+    const ready = host.ready;
+    const running = host.running;
+    host.mutex.unlock();
+    if (starting and w.WaitForSingleObject(ready, timeout_ms) != 0) return null;
+    if (!starting and !running) return null;
+    return openCommand(index, command);
+}
+
 pub fn openTerminal(index: u8, hwnd: w.HANDLE, message: u32, user: usize) ?*Channel {
     const channel = open(index, false) orelse return null;
     lock(channel.host);
@@ -390,6 +414,22 @@ pub fn read(channel: *Channel, bytes: []u8, wait: bool) ?usize {
     }
 }
 
+pub fn readWithin(channel: *Channel, bytes: []u8, timeout_ms: u32) ?usize {
+    const host = channel.host;
+    const deadline = w.GetTickCount64() + timeout_ms;
+    while (true) {
+        const n = read(channel, bytes, false) orelse return null;
+        if (n > 0) return n;
+        const now = w.GetTickCount64();
+        if (now >= deadline) return null;
+        lock(host);
+        const progress = host.progress;
+        host.mutex.unlock();
+        if (progress == null) return null;
+        _ = w.WaitForSingleObject(progress, @intCast(@min(deadline - now, 50)));
+    }
+}
+
 pub fn cancel(channel: *Channel) void {
     const host = channel.host;
     lock(host);
@@ -426,13 +466,31 @@ pub fn shutdown() void {
     }
 }
 
+pub fn kick(index: u8) void {
+    if (open(index, false)) |channel| close(channel);
+}
+
+pub fn waitReady(index: u8, timeout_ms: u32) bool {
+    if (index >= hosts.len) return false;
+    const host = &hosts[index];
+    lock(host);
+    const already = host.running;
+    const ready = host.ready;
+    host.mutex.unlock();
+    if (already) return true;
+    if (ready == null or w.WaitForSingleObject(ready, timeout_ms) != 0) return false;
+    lock(host);
+    const running = host.running;
+    host.mutex.unlock();
+    return running;
+}
+
 pub fn respawn(index: u8) void {
     if (index >= hosts.len or state.g_chat_history_channels_closing.load(.acquire)) return;
     const host = &hosts[index];
     lock(host);
     defer host.mutex.unlock();
-    if ((host.running or host.starting) and host.process != null) _ = w.TerminateProcess(host.process, 0);
-    host.starting = false;
+    if (host.running and host.process != null) _ = w.TerminateProcess(host.process, 0);
 }
 
 fn rejectTerminal(channel: *Channel) bool {
@@ -472,6 +530,7 @@ fn dispatch(host: *Host, line: []const u8) bool {
         }
         channel.bytes.appendSlice(a, bytes) catch return false;
         if (!channel.terminal) channel.bytes.append(a, '\n') catch return false;
+        if (host.progress != null) _ = w.SetEvent(host.progress);
         notify(channel);
         return true;
     }

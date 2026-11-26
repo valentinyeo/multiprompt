@@ -545,29 +545,21 @@ test "ISSUE-511 reused id ignores late exit for live replacement" {
 `, '');
 });
 
-test('ISSUE-501 production probe worker handles host indices BatchMode failure and abandoned ownership', async () => {
+test('ISSUE-501 production probe worker handles host indices channel failure and abandoned ownership', async () => {
   const worker = body('sshProbeThread').replaceAll('@import("console.zig")', 'probeConsole').replaceAll('@import("vps.zig")', 'probeVps');
   const code = probeRuntime('').replace('fn sshProbeThread(_: *SshProbeJob) void {}', worker) + `
 var capture_count: usize = 0;
 var capture_ok = true;
 var listing_ok = true;
-const probeConsole = struct {
-    fn appendSshExe(buf: anytype, pos: *usize) bool { return appendWideAscii(buf, pos, "ssh "); }
-    fn appendWideAscii(buf: anytype, pos: *usize, text: []const u8) bool {
-        for (text) |c| { buf[pos.*] = c; pos.* += 1; }
-        return true;
-    }
-    fn tmuxSshTarget(host: u8) []const u8 { return if (host == 1) "1" else "0"; }
-};
 const probeVps = struct {
-    fn sshOneShotCaptureInput(cmd: []const u8, output: []u8, _: ?*anyopaque, timeout: u32) struct { len: usize, success: bool, exit_code: u32 } {
-        std.debug.assert(std.mem.indexOf(u8, cmd, "-o BatchMode=yes") != null);
-        std.debug.assert(std.mem.indexOf(u8, cmd, "-o ConnectTimeout=5") != null);
-        std.debug.assert(timeout == 10000);
+    fn captureSharedCommand(host: u8, cmd: []const u8, output: []u8, sentinel: []const u8) ?usize {
+        std.debug.assert(host == 1);
+        std.debug.assert(std.mem.indexOf(u8, cmd, "tmux list-clients") != null);
+        std.debug.assert(std.mem.eql(u8, sentinel, "@@MP_PROBE_END@@"));
         capture_count += 1;
         const result = if (!capture_ok) "Permission denied" else if (listing_ok) "session\\n@@I session|1700:123:$7\\n@@S session\\n@@LS_OK@@\\n@@MP_LIVE@@\\n" else "@@MP_LIVE@@\\n";
         @memcpy(output[0..result.len], result);
-        return .{ .len = result.len, .success = capture_ok, .exit_code = if (capture_ok) 0 else 255 };
+        return if (capture_ok) result.len else null;
     }
 };
 fn workerJob() !*SshProbeJob {
@@ -1110,10 +1102,9 @@ test "ISSUE-511 tick waits for confirming gone" {
 
 test('ISSUE-511 remote shell probe recognizes no-server but rejects unknown listing failures', { skip: process.platform === 'win32' ? 'The POSIX tmux probe is exercised on GitHub Linux test-vps; Windows runs pure-state and desktop coverage' : false }, () => {
   const line = body('sshProbeThread').split('\n').find(line => line.includes('tmux list-clients'));
-  const literal = line.match(/, ("(?:\\.|[^"\\])*")\)\) continue;/);
+  const literal = line.match(/const command = ("(?:\\.|[^"\\])*");/);
   assert.ok(literal, 'remote probe command literal');
-  const windowsArgument = JSON.parse(literal[1]).trim();
-  const command = windowsArgument.slice(1, -1).replaceAll('\\"', '"');
+  const command = JSON.parse(literal[1]);
   const prefix = 'tmux() { if [ "$1" = list-clients ]; then return 1; fi; printf \'%s\\n\' "$MP_LISTING"; return "$MP_STATUS"; }; ';
   for (const [listing, status, complete] of [
     ['@@S work\n@@S other', 0, true],

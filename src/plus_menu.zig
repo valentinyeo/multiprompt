@@ -16,16 +16,20 @@ const L = startup.L;
 const RGB = startup.RGB;
 const uiScaled = drawing.uiScaled;
 
-pub const Item = enum(usize) { attach, model_opus, model_sonnet, model_haiku, model_fable, model_sol, model_terra, model_luna, model_astra, effort_low, effort_medium, effort_high, mode_ask, mode_edits, mode_plan, mode_bypass };
+pub const Item = enum(usize) { attach, model_opus, model_sonnet, model_haiku, model_fable, model_sol, model_terra, model_luna, model_astra, model_neon, model_carbon, model_argon, model_hydrogen, model_flash, model_agy_opus, model_agy_sonnet, effort_low, effort_medium, effort_high, effort_xhigh, mode_ask, mode_edits, mode_plan, mode_bypass };
 const ITEM_COUNT = std.meta.tags(Item).len;
 
 const Section = struct { title: ?[]const u8, items: []const Item };
+
+const antigravity_models = [_]Item{ .model_neon, .model_carbon, .model_argon, .model_hydrogen, .model_flash, .model_agy_opus, .model_agy_sonnet };
+const antigravity_efforts = [_]Item{ .effort_low, .effort_medium, .effort_high, .effort_xhigh };
 
 const sections = [_]Section{
     .{ .title = null, .items = &.{.attach} },
     .{ .title = "Model", .items = &.{ .model_opus, .model_sonnet, .model_haiku, .model_fable } },
     .{ .title = "Model", .items = &.{ .model_sol, .model_terra, .model_luna, .model_astra } },
-    .{ .title = "Effort", .items = &.{ .effort_low, .effort_medium, .effort_high } },
+    .{ .title = "Model", .items = &antigravity_models },
+    .{ .title = "Effort", .items = &.{ .effort_low, .effort_medium, .effort_high, .effort_xhigh } },
     .{ .title = "Permission level", .items = &.{ .mode_ask, .mode_edits, .mode_plan, .mode_bypass } },
 };
 
@@ -46,9 +50,17 @@ fn label(item: Item) []const u8 {
         .model_terra => "Terra",
         .model_luna => "Luna",
         .model_astra => "Astra",
+        .model_neon => "Neon",
+        .model_carbon => "Carbon",
+        .model_argon => "Argon",
+        .model_hydrogen => "Hydrogen",
+        .model_flash => "Flash",
+        .model_agy_opus => "Opus",
+        .model_agy_sonnet => "Sonnet",
         .effort_low => "Low",
         .effort_medium => "Medium",
         .effort_high => "High",
+        .effort_xhigh => "XHigh",
         .mode_ask => "Ask",
         .mode_edits => "Accept edits",
         .mode_plan => "Plan",
@@ -151,6 +163,58 @@ test "IGSH-1521 plus menu rows fit above the plus button and hit independently" 
     std.debug.print("IGSH-1521 plus menu geometry verified at four heights\n", .{});
 }
 
+test "MUBO-582 antigravity rows show, fit and tick the live choice" {
+    try std.testing.expectEqualSlices(Item, &.{ .model_neon, .model_carbon, .model_argon, .model_hydrogen, .model_flash, .model_agy_opus, .model_agy_sonnet }, sections[3].items);
+    try std.testing.expectEqualStrings("Neon", label(.model_neon));
+    try std.testing.expectEqualStrings("Flash", label(.model_flash));
+    try std.testing.expectEqualStrings("Opus", label(.model_agy_opus));
+    try std.testing.expectEqualStrings("XHigh", label(.effort_xhigh));
+    var state: State = .{};
+    state.shown[@intFromEnum(Item.attach)] = true;
+    markAntigravity(&state, .{ .model = .carbon, .effort = .xhigh });
+    for (antigravity_models) |item| try std.testing.expect(state.shown[@intFromEnum(item)]);
+    for (antigravity_efforts) |item| try std.testing.expect(state.shown[@intFromEnum(item)]);
+    try std.testing.expect(state.active[@intFromEnum(Item.model_carbon)]);
+    try std.testing.expect(state.active[@intFromEnum(Item.effort_xhigh)]);
+    try std.testing.expect(!state.active[@intFromEnum(Item.model_neon)]);
+    try std.testing.expect(!state.active[@intFromEnum(Item.effort_high)]);
+    for ([_]i32{ 360, 480, 640, 900 }) |height| {
+        const bounds = RECT{ .left = 0, .top = 0, .right = 700, .bottom = height };
+        const anchor = RECT{ .left = 20, .top = height - 60, .right = 52, .bottom = height - 28 };
+        const g = geometry(bounds, anchor, &state.shown);
+        try std.testing.expect(g.panel.top >= bounds.top);
+        try std.testing.expect(g.panel.bottom <= anchor.top);
+        try std.testing.expect(g.section_shown[3] and g.section_shown[4] and !g.section_shown[1] and !g.section_shown[2]);
+        for (antigravity_models) |item| {
+            const cell = g.cells[@intFromEnum(item)];
+            try std.testing.expect(cell.bottom > cell.top and cell.right > cell.left);
+            try std.testing.expect(cell.left >= g.panel.left and cell.right <= g.panel.right);
+            try std.testing.expect(cell.top >= g.panel.top and cell.bottom <= g.panel.bottom);
+            try std.testing.expectEqual(@as(?Item, item), hitItem(&g, &state.shown, @divTrunc(cell.left + cell.right, 2), @divTrunc(cell.top + cell.bottom, 2)));
+        }
+        for (antigravity_efforts) |item| {
+            const cell = g.cells[@intFromEnum(item)];
+            try std.testing.expectEqual(@as(?Item, item), hitItem(&g, &state.shown, @divTrunc(cell.left + cell.right, 2), @divTrunc(cell.top + cell.bottom, 2)));
+        }
+    }
+}
+
+test "MUBO-582 claude and codex menus keep their own rows" {
+    try std.testing.expectEqualSlices(Item, &.{ .model_opus, .model_sonnet, .model_haiku, .model_fable }, sections[1].items);
+    try std.testing.expectEqualSlices(Item, &.{ .model_sol, .model_terra, .model_luna, .model_astra }, sections[2].items);
+    try std.testing.expectEqualSlices(Item, &.{ .effort_low, .effort_medium, .effort_high, .effort_xhigh }, sections[4].items);
+    var claude: State = .{};
+    markClaude(&claude, .{ .model = .opus, .effort = .medium }, &.{});
+    try std.testing.expect(claude.active[@intFromEnum(Item.model_opus)]);
+    try std.testing.expect(!claude.shown[@intFromEnum(Item.effort_xhigh)]);
+    for (antigravity_models) |item| try std.testing.expect(!claude.shown[@intFromEnum(item)]);
+    var codex: State = .{};
+    markCodex(&codex, .{ .model = .sol, .effort = .high });
+    try std.testing.expect(codex.active[@intFromEnum(Item.model_sol)]);
+    try std.testing.expect(!codex.shown[@intFromEnum(Item.effort_low)] and !codex.shown[@intFromEnum(Item.effort_xhigh)]);
+    for (antigravity_models) |item| try std.testing.expect(!codex.shown[@intFromEnum(item)]);
+}
+
 fn shrink(rc: RECT, by: i32) RECT {
     return .{ .left = rc.left + by, .top = rc.top + by, .right = rc.right - by, .bottom = rc.bottom - by };
 }
@@ -237,6 +301,42 @@ fn modelOf(selected: chat_live.Settings, status: []const u16) chat_live.Model {
     return if (selected.model != .unknown) selected.model else modelFromStatus(status);
 }
 
+fn markAntigravity(state: *State, selected: chat_live.Settings) void {
+    for (antigravity_models) |item| state.shown[@intFromEnum(item)] = true;
+    for (antigravity_efforts) |item| state.shown[@intFromEnum(item)] = true;
+    state.active[@intFromEnum(Item.model_neon)] = selected.model == .neon;
+    state.active[@intFromEnum(Item.model_carbon)] = selected.model == .carbon;
+    state.active[@intFromEnum(Item.model_argon)] = selected.model == .argon;
+    state.active[@intFromEnum(Item.model_hydrogen)] = selected.model == .hydrogen;
+    state.active[@intFromEnum(Item.model_flash)] = selected.model == .flash;
+    state.active[@intFromEnum(Item.model_agy_opus)] = selected.model == .opus;
+    state.active[@intFromEnum(Item.model_agy_sonnet)] = selected.model == .sonnet;
+    state.active[@intFromEnum(Item.effort_low)] = selected.effort == .low;
+    state.active[@intFromEnum(Item.effort_medium)] = selected.effort == .medium;
+    state.active[@intFromEnum(Item.effort_high)] = selected.effort == .high;
+    state.active[@intFromEnum(Item.effort_xhigh)] = selected.effort == .xhigh;
+}
+
+fn markCodex(state: *State, selected: chat_live.Settings) void {
+    for ([_]Item{ .model_sol, .model_terra, .model_luna, .model_astra }) |item| state.shown[@intFromEnum(item)] = true;
+    state.active[@intFromEnum(Item.model_sol)] = selected.model == .sol;
+    state.active[@intFromEnum(Item.model_terra)] = selected.model == .terra;
+    state.active[@intFromEnum(Item.model_luna)] = selected.model == .luna;
+    state.active[@intFromEnum(Item.model_astra)] = selected.model == .astra;
+}
+
+fn markClaude(state: *State, selected: chat_live.Settings, status: []const u16) void {
+    for ([_]Item{ .model_opus, .model_sonnet, .model_haiku, .model_fable, .effort_low, .effort_medium, .effort_high }) |item| state.shown[@intFromEnum(item)] = true;
+    const model = modelOf(selected, status);
+    state.active[@intFromEnum(Item.model_opus)] = model == .opus;
+    state.active[@intFromEnum(Item.model_sonnet)] = model == .sonnet;
+    state.active[@intFromEnum(Item.model_haiku)] = model == .haiku;
+    state.active[@intFromEnum(Item.model_fable)] = model == .fable;
+    state.active[@intFromEnum(Item.effort_low)] = selected.effort == .low;
+    state.active[@intFromEnum(Item.effort_medium)] = selected.effort == .medium;
+    state.active[@intFromEnum(Item.effort_high)] = selected.effort == .high;
+}
+
 fn snapshot(state: *State) void {
     state.* = .{};
     state.shown[@intFromEnum(Item.attach)] = true;
@@ -245,25 +345,15 @@ fn snapshot(state: *State) void {
     chat_send.chatModeCapturePicker();
     const session = @import("chat_session.zig");
     const selected: chat_live.Settings = chat_live.settings(app_state.shells[app_state.active_shell].shell_id) orelse .{};
-    if (session.chatSettingsEligible() and session.chatSettingsCodex()) {
-        for ([_]Item{ .model_sol, .model_terra, .model_luna, .model_astra }) |item| state.shown[@intFromEnum(item)] = true;
-        state.active[@intFromEnum(Item.model_sol)] = selected.model == .sol;
-        state.active[@intFromEnum(Item.model_terra)] = selected.model == .terra;
-        state.active[@intFromEnum(Item.model_luna)] = selected.model == .luna;
-        state.active[@intFromEnum(Item.model_astra)] = selected.model == .astra;
-    } else if (session.chatSettingsEligible()) {
-        for ([_]Item{ .model_opus, .model_sonnet, .model_haiku, .model_fable, .effort_low, .effort_medium, .effort_high }) |item| state.shown[@intFromEnum(item)] = true;
-        const status: []const u16 = if (session.chatHistoryEntry(session.chatFileIdentity())) |entry| entry.history.status.model[0..entry.history.status.model_len] else &.{};
-        const model = modelOf(selected, status);
-        state.active[@intFromEnum(Item.model_opus)] = model == .opus;
-        state.active[@intFromEnum(Item.model_sonnet)] = model == .sonnet;
-        state.active[@intFromEnum(Item.model_haiku)] = model == .haiku;
-        state.active[@intFromEnum(Item.model_fable)] = model == .fable;
-        state.active[@intFromEnum(Item.effort_low)] = selected.effort == .low;
-        state.active[@intFromEnum(Item.effort_medium)] = selected.effort == .medium;
-        state.active[@intFromEnum(Item.effort_high)] = selected.effort == .high;
-    }
     const identity = session.chatFileIdentityForShell(app_state.active_shell);
+    if (session.chatSettingsEligible() and std.mem.eql(u8, identity.provider(), "antigravity")) {
+        markAntigravity(state, selected);
+    } else if (session.chatSettingsEligible() and session.chatSettingsCodex()) {
+        markCodex(state, selected);
+    } else if (session.chatSettingsEligible()) {
+        const status: []const u16 = if (session.chatHistoryEntry(session.chatFileIdentity())) |entry| entry.history.status.model[0..entry.history.status.model_len] else &.{};
+        markClaude(state, selected, status);
+    }
     if (std.mem.eql(u8, identity.provider(), "claude") and chat_send.chatModePickerAvailable()) {
         for ([_]Item{ .mode_ask, .mode_edits, .mode_plan, .mode_bypass }) |item| state.shown[@intFromEnum(item)] = true;
         state.active[@intFromEnum(Item.mode_ask)] = selected.mode == .manual;

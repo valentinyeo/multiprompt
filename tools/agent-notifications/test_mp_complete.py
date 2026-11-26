@@ -160,6 +160,55 @@ class Completion(unittest.TestCase):
             settings["skillOverrides"] = {"hello:current": "off"}
             self.assertEqual(complete.project_and_plugins(home, settings), [])
 
+    def test_antigravity_returns_skills_workspace_and_builtins(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(complete, "HOME", Path(tmp)):
+            home = Path(tmp)
+            project = home / "projects/demo/sub"
+            project.mkdir(parents=True)
+            entries = {
+                home / ".gemini/antigravity-cli/skills/valentin-mode/SKILL.md":
+                    "---\nname: valentin-mode\ndescription: Load standing rules\ndisable-model-invocation: true\n---\n",
+                home / ".agents/skills/poteto-mode/SKILL.md":
+                    "---\nname: poteto-mode\ndescription: Pstack driver\ndisable-model-invocation: true\n---\n",
+                home / ".agents/skills/architect/SKILL.md":
+                    "---\nname: architect\ndescription: Shape the fix\n---\n",
+                home / ".gemini/config/skills/config-skill/SKILL.md":
+                    "---\nname: config-skill\ndescription: From config\n---\n",
+                home / ".gemini/skills/gemini-skill/SKILL.md":
+                    "---\nname: gemini-skill\ndescription: From gemini\n---\n",
+                home / ".agents/skills/hidden-skill/SKILL.md":
+                    "---\nname: hidden-skill\ndescription: Hidden\nuser-invocable: false\n---\n",
+                home / "projects/demo/.agents/skills/repo-agent-skill/SKILL.md":
+                    "---\nname: repo-agent-skill\ndescription: Repo agent skill\n---\n",
+                home / "projects/demo/.agent/skills/repo-dotagent-skill/SKILL.md":
+                    "---\nname: repo-dotagent-skill\ndescription: Repo dotagent skill\n---\n",
+                home / "projects/demo/.claude/skills/repo-claude-skill/SKILL.md":
+                    "---\nname: repo-claude-skill\ndescription: Repo claude skill\n---\n",
+                home / "projects/demo/.claude/commands/ship.md":
+                    "---\ndescription: Ship command\n---\n",
+            }
+            for path, content in entries.items():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content, encoding="utf-8")
+            response = complete.request(f"23\tslash\tantigravity\t-\t{project}\t\n")
+            lines = response.splitlines()
+            self.assertTrue(lines[0].startswith("@mp\t23\tslash\tok\t"))
+            self.assertEqual(lines[-1], "@@MP_END@@")
+            parsed = {parts[1]: (parts[0], parts[3]) for parts in (line.split("\t") for line in lines[1:-1])}
+            self.assertEqual(parsed["valentin-mode"], ("S", "Load standing rules"))
+            self.assertEqual(parsed["poteto-mode"], ("S", "Pstack driver"))
+            self.assertEqual(parsed["architect"], ("S", "Shape the fix"))
+            self.assertEqual(parsed["config-skill"], ("S", "From config"))
+            self.assertEqual(parsed["gemini-skill"], ("S", "From gemini"))
+            self.assertEqual(parsed["repo-agent-skill"], ("J", "Repo agent skill"))
+            self.assertEqual(parsed["repo-dotagent-skill"], ("J", "Repo dotagent skill"))
+            self.assertEqual(parsed["repo-claude-skill"], ("J", "Repo claude skill"))
+            self.assertEqual(parsed["ship"], ("J", "Ship command"))
+            self.assertNotIn("hidden-skill", parsed)
+            for builtin in ("compact", "plan", "goal", "schedule", "browser", "grill-me", "teamwork", "learn", "boost"):
+                self.assertEqual(parsed[builtin][0], "B")
+                self.assertTrue(parsed[builtin][1])
+
 
 if __name__ == "__main__":
     unittest.main()

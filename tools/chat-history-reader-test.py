@@ -5400,8 +5400,10 @@ def track_fixture_hosts(test):
     test.host_children = []
     spawn = reader.host_spawn
 
-    def tracked(provider, sid, *args, **kwargs):
-        child = spawn(provider, sid, *args, **kwargs)
+    def tracked(provider, sid, source=None):
+        if source is None:
+            source = getattr(test, 'host_source', None)
+        child = spawn(provider, sid, source)
         if child is not None and provider == test.provider and sid == test.sid:
             test.host_children.append(child)
         return child
@@ -5432,6 +5434,176 @@ def stop_fixture_host_loop(test, thread, session):
     thread.join(timeout=10)
     test.assertTrue(started, 'fixture host loop did not initialize')
     test.assertFalse(thread.is_alive(), 'fixture host loop outlived its HOME patch')
+
+
+class MUBO_221_AntigravityHistoryRetentionTest(unittest.TestCase):
+    provider = 'antigravity'
+    tmux = 'live-antigravity-retention'
+    text = 'fresh chat question'
+    reply = 'All good'
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name)
+        self.addCleanup(patch.stopall)
+        patch.object(reader, 'HOME', self.home).start()
+        patch.object(reader, 'MESSAGE_WORKER_IDLE_SECONDS', 0.1).start()
+        patch.dict(os.environ, dict(HOME=str(self.home))).start()
+        self.sid = str(uuid.uuid4())
+        self.host_source = None
+        self.host_children = []
+        track_fixture_hosts(self)
+        self.agent = self.home / 'agy-stand-in.py'
+        self.agent.write_text((ROOT / 'tools/fixtures/MUBO-221/agy-stand-in.py').read_text(encoding='utf-8'), encoding='utf-8')
+        self.stream = ROOT / 'tools/fixtures/SOFT-3050/agy-stream.ndjson'
+        self.addCleanup(self.stop_hosts)
+
+    def stop_hosts(self):
+        try:
+            reader.host_stop(self.provider, self.sid, force=True)
+        finally:
+            for child in self.host_children:
+                stop_fixture_process(child)
+            reader.host_reap_agent(self.provider, self.sid)
+
+    def paths(self):
+        return reader.host_paths(self.provider, self.sid)
+
+    def enable(self):
+        reply = reader.host_cli(['enable', self.provider, self.sid, '--tmux', self.tmux, '--cwd', str(self.home)])
+        self.assertEqual(reply.get('status'), 'enabled', reply)
+        config = reader.host_read(self.paths()['config'])
+        config['command'] = [sys.executable, str(self.agent), str(self.stream)]
+        reader.host_write(self.paths()['config'], config)
+
+    def events(self):
+        db = reader.message_store_db(self.tmux)
+        try:
+            return [json.loads(body) for (body,) in db.execute('SELECT body FROM message_events WHERE provider=? AND sid=? ORDER BY seq', (self.provider, self.sid))]
+        finally:
+            db.close()
+
+    def evidence(self):
+        errors = self.paths()['errors']
+        log = self.paths()['log']
+        return ('events=%s log=%s stderr=%s' % (json.dumps(self.events())[-1500:],
+                                               log.read_text(encoding='utf-8')[-1000:] if log.exists() else '',
+                                               errors.read_text(encoding='utf-8')[-1000:] if errors.exists() else ''))
+
+    def wait_for(self, predicate, timeout=90):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            value = predicate()
+            if value:
+                return value
+            time.sleep(0.05)
+        self.fail('timed out waiting for the antigravity host; ' + self.evidence())
+
+    def lock_free(self):
+        handle = reader.host_lock(self.provider, self.sid)
+        if handle is None:
+            return False
+        handle.close()
+        return True
+
+    def ready(self):
+        return [event for event in self.events()
+                if event.get('kind') == 'host.status' and (event.get('payload') or {}).get('state') == 'ready']
+
+    def send(self):
+        self.start()
+        self.wait_for(self.ready)
+        store = dict(message_protocol=1, provider=self.provider, sid=self.sid, tmux=self.tmux)
+        token = 'mubo221' + uuid.uuid4().hex
+        submitted = reader.message_store_request(dict(store, op='message_submit', message_id=token, text=self.text, origin='human'))
+        self.assertEqual(submitted['message']['state'], 'queued')
+        reader.message_store_request(dict(store, op='message_dispatch'))
+        self.wait_for(lambda: [event for event in self.events() if event.get('kind') == 'text.done'])
+        return token
+
+    def fetch(self):
+        query = dict(id=7, provider=self.provider, sid=self.sid, tmux=self.tmux, cwd=str(self.home),
+                     cached_sid='', inode=0, offset=0, follow=True, source_offsets=True)
+        wire = reader.response(query)
+        lines = wire.splitlines()
+        self.assertEqual(lines[-1], reader.END)
+        fields = lines[0].split('\t')
+        return fields, [json.loads(line) for line in lines[1:-1]], wire
+
+    def read(self):
+        fields, rows, wire = self.fetch()
+        self.assertEqual(fields[:4], ['@mp', '7', 'history', 'ok'], wire)
+        return fields, rows
+
+    def messages(self, rows):
+        return [(row['role'], row['text'], row.get('id')) for row in rows if row.get('role') in ('user', 'assistant')]
+
+    def pre_fix_source(self):
+        call = '    host_history_claim(provider, sid, session)\n'
+        source = (ROOT / 'src/chat_history_reader.py').read_text(encoding='utf-8')
+        self.assertEqual(source.count(call), 1, 'the host loop claim call moved; the pre-fix baseline no longer removes it')
+        scope = dict(__name__='mubo221_prefix_reader')
+        exec(compile(source.replace(call, ''), 'reader-before-host-history-claim', 'exec'), scope)
+        return scope['READER_SOURCE']
+
+    def start(self):
+        started = reader.host_cli(['start', self.provider, self.sid])
+        self.assertIn(started.get('status'), ('started', 'already'), started)
+
+    def test_a_fresh_antigravity_chat_keeps_its_reply_across_full_reloads(self):
+        self.enable()
+        token = self.send()
+        fields, rows = self.read()
+        messages = self.messages(rows)
+        self.assertEqual([(role, text) for role, text, _ in messages], [('user', self.text), ('assistant', self.reply)], rows)
+        self.assertEqual(messages[0][2], token)
+        self.assertTrue(messages[1][2])
+        self.assertEqual(len({identity for _, _, identity in messages}), len(messages))
+        self.assertTrue(reader.host_session_state(self.provider, self.sid).get('display_history'))
+        self.assertTrue(self.paths()['history'].is_file())
+        for _ in range(2):
+            self.assertEqual(self.read(), (fields, rows))
+        self.assertEqual(self.messages(self.read()[1]), messages)
+
+    def test_an_existing_unset_antigravity_chat_rebuilds_its_rows_on_host_start(self):
+        self.enable()
+        token = self.send()
+        self.read()
+        reader.host_stop(self.provider, self.sid, force=True)
+        self.wait_for(lambda: not reader.host_owned(self.provider, self.sid) and self.lock_free())
+        self.paths()['history'].unlink()
+        state = reader.host_read(self.paths()['state']) or {}
+        state.pop('display_history', None)
+        reader.host_write(self.paths()['state'], state)
+        self.assertEqual(self.fetch()[0][3], 'missing')
+        self.start()
+        self.wait_for(lambda: self.paths()['history'].is_file() and self.read()[1])
+        messages = self.messages(self.read()[1])
+        self.assertEqual([(role, text) for role, text, _ in messages], [('user', self.text), ('assistant', self.reply)], messages)
+        self.assertEqual(messages[0][2], token)
+        self.assertEqual(len({identity for _, _, identity in messages}), len(messages))
+        self.assertTrue(reader.host_session_state(self.provider, self.sid).get('display_history'))
+        self.assertEqual(len([event for event in self.events() if event.get('kind') == 'text.done']), 1)
+
+    def test_a_fresh_chat_without_the_host_claim_serves_no_history_and_the_claim_restores_it(self):
+        self.enable()
+        self.host_source = self.pre_fix_source()
+        token = self.send()
+        fields, rows, wire = self.fetch()
+        self.assertIn(fields[3], ('missing', 'ok'), wire)
+        self.assertEqual(self.messages(rows), [], wire)
+        self.assertFalse(reader.host_session_state(self.provider, self.sid).get('display_history'))
+        self.assertFalse(self.paths()['history'].is_file())
+        reader.host_stop(self.provider, self.sid, force=True)
+        self.wait_for(lambda: not reader.host_owned(self.provider, self.sid) and self.lock_free())
+        self.host_source = None
+        self.start()
+        self.wait_for(lambda: self.paths()['history'].is_file() and self.read()[1])
+        messages = self.messages(self.read()[1])
+        self.assertEqual([(role, text) for role, text, _ in messages], [('user', self.text), ('assistant', self.reply)], messages)
+        self.assertEqual(messages[0][2], token)
+        self.assertTrue(reader.host_session_state(self.provider, self.sid).get('display_history'))
 
 
 class FixtureLifecycleTest(unittest.TestCase):
@@ -8302,6 +8474,72 @@ class HostAntigravityTurnTest(HostEventStreamFixture, unittest.TestCase):
         self.assertEqual(len(started), 1)
         self.assertEqual(started[0]['payload']['uuids'], ['mp-antigravity-2'])
 
+    def write_config(self):
+        reader.host_write(reader.host_paths('antigravity', self.sid)['config'],
+                          dict(enabled=True, tmux=self.tmux, cwd=str(self.home), command=['agy']))
+        return reader.host_config('antigravity', self.sid)
+
+    def test_settings_default_to_neon_medium_and_reach_the_launch_argv(self):
+        self.write_config()
+        self.assertEqual(reader.host_settings('antigravity', self.sid), dict(model='neon', effort='medium'))
+        argv = reader.host_antigravity_argv('antigravity', self.sid, ['agy'])
+        self.assertEqual(argv[:3], ['agy', '--model', 'gemini-4-neon-medium'])
+
+    def test_a_model_and_effort_choice_persists_and_reaches_the_launch_argv(self):
+        self.write_config()
+        self.assertEqual(reader.host_reply(dict(provider='antigravity', sid=self.sid, op='set_model', model='hydrogen'))['status'], 'ok')
+        self.assertEqual(reader.host_reply(dict(provider='antigravity', sid=self.sid, op='set_effort', effort='xhigh'))['status'], 'ok')
+        self.assertEqual(reader.host_config('antigravity', self.sid)['model'], 'hydrogen')
+        self.assertEqual(reader.host_settings('antigravity', self.sid), dict(model='hydrogen', effort='xhigh'))
+        argv = reader.host_antigravity_argv('antigravity', self.sid, ['agy'])
+        self.assertEqual(argv[:3], ['agy', '--model', 'gemini-4-hydrogen-xhigh'])
+
+    def test_xhigh_is_saved_as_high_on_a_model_that_does_not_offer_it(self):
+        self.write_config()
+        reader.host_reply(dict(provider='antigravity', sid=self.sid, op='set_model', model='neon'))
+        reader.host_reply(dict(provider='antigravity', sid=self.sid, op='set_effort', effort='xhigh'))
+        self.assertEqual(reader.host_settings('antigravity', self.sid), dict(model='neon', effort='xhigh'))
+        for model, expected in (('carbon', 'gemini-4-carbon-high'), ('argon', 'gemini-4-argon-high'),
+                                ('flash', 'gemini-3.8-flash-high'), ('opus', 'claude-opus-5-5-high'),
+                                ('sonnet', 'claude-sonnet-5-5-high')):
+            self.assertEqual(reader.host_reply(dict(provider='antigravity', sid=self.sid, op='set_model', model=model))['status'], 'ok')
+            self.assertEqual(reader.host_settings('antigravity', self.sid), dict(model=model, effort='high'))
+            argv = reader.host_antigravity_argv('antigravity', self.sid, ['agy'])
+            self.assertEqual(argv[:3], ['agy', '--model', expected])
+            self.assertEqual(reader.host_reply(dict(provider='antigravity', sid=self.sid, op='set_effort', effort='xhigh'))['status'], 'ok')
+            self.assertEqual(reader.host_settings('antigravity', self.sid), dict(model=model, effort='high'))
+
+    def test_an_invalid_model_or_effort_is_refused_and_leaves_the_config_alone(self):
+        self.write_config()
+        self.assertEqual(reader.host_reply(dict(provider='antigravity', sid=self.sid, op='set_model', model='gemini-4-neon-high'))['reason'], 'invalid_model')
+        self.assertEqual(reader.host_reply(dict(provider='antigravity', sid=self.sid, op='set_effort', effort='max'))['reason'], 'invalid_effort')
+        config = reader.host_config('antigravity', self.sid)
+        self.assertNotIn('model', config)
+        self.assertNotIn('effort', config)
+        self.assertEqual(reader.host_settings('antigravity', self.sid), dict(model='neon', effort='medium'))
+
+    def test_a_live_chat_reports_the_change_and_waits_for_its_restart(self):
+        self.write_config()
+        self.session['settings'] = dict(model='neon', effort='medium')
+        self.session['starting_settings'] = dict(self.session['settings'])
+        self.session['applied_settings'] = dict(self.session['settings'])
+        self.session['ready'] = True
+        result = reader.host_handle_request('antigravity', self.sid, self.tmux, self.session, dict(op='set_model', model='carbon'))
+        self.assertEqual(result['status'], 'ok')
+        self.assertEqual(self.session['settings'], dict(model='carbon', effort='medium'))
+        pending = self.antigravity_events('host.settings')
+        self.assertEqual(pending[-1]['payload']['model'], 'carbon')
+        self.assertFalse(pending[-1]['payload']['applied'])
+        self.assertEqual(reader.host_handle_request('antigravity', self.sid, self.tmux, self.session, dict(op='deliver'))['reason'], 'settings_pending')
+        self.session['starting_settings'] = dict(self.session['settings'])
+        self.session['applied_settings'] = dict(self.session['settings'])
+        self.assertEqual(reader.host_handle_request('antigravity', self.sid, self.tmux, self.session, dict(op='deliver'))['reason'], 'invalid_text')
+        self.feed(dict(event='init', conversation_id='conversation-1'))
+        applied = self.antigravity_events('host.settings')
+        self.assertTrue(applied[-1]['payload']['applied'])
+        self.assertEqual(applied[-1]['payload']['model'], 'carbon')
+        self.assertEqual(reader.host_antigravity_argv('antigravity', self.sid, ['agy'])[:3], ['agy', '--model', 'gemini-4-carbon-medium'])
+
 
 class HostInterruptTest(HostControlFixture, unittest.TestCase):
     def test_interrupt_writes_the_control_request_and_ends_the_turn_as_interrupted(self):
@@ -9478,6 +9716,51 @@ class MUBO135_ServerReplyOnceTest(unittest.TestCase):
     def test_a_labelled_hax_reply_keeps_one_row_per_message_id(self):
         self.drive('hax-reply-ids.jsonl')
         self.assert_once(True)
+
+
+class MUBO_221_LaunchCommandTest(unittest.TestCase):
+    ARGS = ('reader', 'name', 'sid', 'session', 'cwd', 'mode', 'reader', 'name', 'sid')
+
+    def launch_command(self, provider='antigravity'):
+        source = (ROOT / 'src/agent_host.zig').read_text()
+        start = source.index('pub fn launchCommandFor(')
+        block = source[start:source.index('pub fn resumeCommandFor(', start)]
+        opened = block.index('std.fmt.bufPrint(out, "') + len('std.fmt.bufPrint(out, "')
+        shape = block[opened:block.index('", .{', opened)]
+        holes = shape.split('{s}')
+        self.assertEqual(len(holes) - 1, len(self.ARGS), 'the launch command changed shape')
+        values = dict(reader='~/.multiprompt-runtime/reader.py', name=provider, session='live-abc',
+                      cwd='~/projects', sid='ffffffff-ffff-4fff-bfff-ffffffffffff', mode='')
+        text = holes[0]
+        for index, name in enumerate(self.ARGS):
+            text += values[name] + holes[index + 1]
+        return text
+
+    def run_launch(self, reader_source):
+        home = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, home, True)
+        runtime = home / '.multiprompt-runtime'
+        runtime.mkdir(parents=True)
+        (runtime / 'reader.py').write_text(reader_source)
+        return subprocess.run(['bash', '-c', self.launch_command()],
+                              env=dict(os.environ, HOME=str(home)), capture_output=True, text=True, timeout=30)
+
+    @unittest.skipUnless(os.name == 'posix', 'the launch command runs on the server shell')
+    def test_a_refused_enable_reports_its_reason_and_stops_the_launch(self):
+        self.assertNotIn('>/dev/null', self.launch_command())
+        ran = self.run_launch('import sys\nprint(\'{"status":"refused","reason":"unsupported_provider"}\')\nsys.exit(1)\n')
+        self.assertEqual(ran.returncode, 1)
+        self.assertIn('unsupported_provider', ran.stdout)
+        self.assertNotIn('"started"', ran.stdout)
+
+    @unittest.skipUnless(os.name == 'posix', 'the launch command runs on the server shell')
+    def test_a_started_host_is_the_last_line_the_desktop_reads(self):
+        ran = self.run_launch(
+            'import sys\n'
+            'step = sys.argv[2]\n'
+            'print(\'{"status":"enabled","sid":"x"}\' if step == "enable" else \'{"status":"started","pid":7}\')\n')
+        self.assertEqual(ran.returncode, 0)
+        self.assertEqual(ran.stdout.strip().splitlines()[-1], '{"status":"started","pid":7}')
 
 
 def load_tests(loader, tests, pattern):

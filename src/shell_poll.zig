@@ -535,6 +535,13 @@ test "IGSH-901 restored tab names survive the folder name of a restart" {
     try std.testing.expect(!restoredNameStaysForCwd(false, github, ""));
 }
 
+test "MUBO-221 generated live-chat session IDs never overwrite a named default tab during poll" {
+    try std.testing.expect(!shouldAdoptTmuxSessionFallbackName("live-54de9", "Antigravity".len));
+    try std.testing.expect(shouldAdoptTmuxSessionFallbackName("live-54de9", 0));
+    try std.testing.expect(shouldAdoptTmuxSessionFallbackName("verify-agent", "VPS 1".len));
+    try std.testing.expect(shouldAdoptTmuxSessionFallbackName("term-123", "Terminal".len));
+}
+
 fn lastPathSegment(path: []const u16) struct { start: usize, end: usize } {
     var last_sep: ?usize = null;
     for (path, 0..) |c, i| {
@@ -1302,6 +1309,11 @@ fn cwdMatchesCachedU16(live: []const u16, cached: []const u8) bool {
 pub fn restoredNameStaysForCwd(hold: bool, live_cwd: []const u16, cached_cwd: []const u8) bool {
     if (!hold) return false;
     return cached_cwd.len == 0 or cwdMatchesCachedU16(live_cwd, cached_cwd);
+}
+
+pub fn shouldAdoptTmuxSessionFallbackName(tmux_session: []const u8, current_name_len: usize) bool {
+    if (@import("chat_view.zig").isLive(tmux_session) and current_name_len > 0) return false;
+    return true;
 }
 
 fn applyCwdSegmentName(shell: *Shell, cwd: []const u16, agent: AgentName) bool {
@@ -2134,6 +2146,7 @@ pub fn pollShellNames() void {
                 continue;
             }
             const ts = app_state.shells[i].tmux_session[0..app_state.shells[i].tmux_session_len];
+            if (!shouldAdoptTmuxSessionFallbackName(ts, app_state.shells[i].name_len)) continue;
             var ts_u16: [64]u16 = undefined;
             for (0..ts.len) |j| {
                 ts_u16[j] = ts[j];

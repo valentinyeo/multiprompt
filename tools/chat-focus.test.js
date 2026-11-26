@@ -257,3 +257,16 @@ test('ISSUE-716 feature registration, PR journey, public docs and user changelog
   assert.equal(changelog, 'IGSH-716 Multiprompt: after a restart the chat box sometimes has no focus and Alt+Q does nothing');
   assert.doesNotMatch(changelog, /\.zig|WM_APP|ISSUE-|JSON/);
 });
+
+test('MUBO-221 a deferred launch keeps the user action so the new chat takes the caret', () => {
+  const palette = read('src/command_palette.zig');
+  const launch = read('src/app_state.zig');
+  const record = launch.slice(launch.indexOf('pub const HostLaunch = struct {'));
+  assert.match(record.slice(0, record.indexOf('};')), /user_action: u64 = 0,/, 'the launch record carries the action that armed it');
+  const arm = body(palette, 'hostLaunchArm');
+  assert.match(arm, /\.user_action = app_state\.g_focus_user_action_tick/, 'the arming message records the user action');
+  const finish = body(palette, 'finishHostLaunch');
+  assert.match(finish, /app_state\.g_focus_user_action_tick = focusAuthorizingTick\(launch\.user_action, GetTickCount64\(\)\);/, 'the completion re-authorizes the focus the user asked for');
+  assert.match(finish, /defer app_state\.g_focus_user_action_tick = prior_action;/, 'the completion restores the action it found');
+  assert.ok(finish.indexOf('focusAuthorizingTick') < finish.indexOf('spawnHostedChatNow('), 'the authorization must cover the spawn that switches to the tab');
+});

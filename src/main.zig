@@ -3919,7 +3919,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             };
             switch (item) {
                 .attach => _ = PostMessageW(hwnd, WM_APP_CHAT_ATTACH, 0, 0),
-                .model_opus, .model_sonnet, .model_haiku, .model_fable, .model_sol, .model_terra, .model_luna, .model_astra, .effort_low, .effort_medium, .effort_high => {
+                .model_opus, .model_sonnet, .model_haiku, .model_fable, .model_sol, .model_terra, .model_luna, .model_astra, .model_neon, .model_carbon, .model_argon, .model_hydrogen, .model_flash, .model_agy_opus, .model_agy_sonnet, .effort_low, .effort_medium, .effort_high, .effort_xhigh => {
                     const setting: @import("chat_live.zig").Setting = switch (item) {
                         .model_opus => .{ .model = .opus },
                         .model_sonnet => .{ .model = .sonnet },
@@ -3929,9 +3929,17 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         .model_terra => .{ .model = .terra },
                         .model_luna => .{ .model = .luna },
                         .model_astra => .{ .model = .astra },
+                        .model_neon => .{ .model = .neon },
+                        .model_carbon => .{ .model = .carbon },
+                        .model_argon => .{ .model = .argon },
+                        .model_hydrogen => .{ .model = .hydrogen },
+                        .model_flash => .{ .model = .flash },
+                        .model_agy_opus => .{ .model = .opus },
+                        .model_agy_sonnet => .{ .model = .sonnet },
                         .effort_low => .{ .effort = .low },
                         .effort_medium => .{ .effort = .medium },
-                        else => .{ .effort = .high },
+                        .effort_high => .{ .effort = .high },
+                        else => .{ .effort = .xhigh },
                     };
                     if (@import("chat_send.zig").chatSetLiveSetting(setting)) @import("chat_send.zig").chatSettingNotice(setting) else showHeaderNoticeAscii("Could not change chat settings", 4000, true);
                 },
@@ -3991,6 +3999,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         app_state.WM_APP_CHAT_SWITCH_AI => {
             @import("command_palette.zig").finishSwitchAi(lp);
+            return 0;
+        },
+        app_state.WM_APP_CHAT_HOST_READY => {
+            @import("command_palette.zig").finishHostLaunch(wp);
             return 0;
         },
         app_state.WM_APP_PI_MODEL_RESULT => {
