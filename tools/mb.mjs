@@ -6,7 +6,7 @@ import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isAbsolute, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { run as layoutRun, resolveTabHost, needsLayoutHosts } from './mp-layout.mjs';
+import { run as layoutRun, resolveTabHost, needsLayoutHosts, PROVIDERS } from './mp-layout.mjs';
 
 const DEFAULT_URL = 'https://account.multiprompt.dev';
 const LAYOUT_FEATURES = 'groups,bot_appearance,bot_palette8,workspace_color,bot_photo';
@@ -14,7 +14,7 @@ const USAGE = `usage: mb <command> [options]
 
 commands:
   list [--json]
-  open --kind shell|chat --tmux <name> --workspace <name> [--group <group>] [--title <text>] [--host N] [--folder DIR] [--star] [--face N] [--color N] [--photo FILE]
+  open --kind shell|chat --tmux <name> --workspace <name> [--group <group>] [--title <text>] [--host N] [--folder DIR] [--provider claude|codex|pi|antigravity|hax] [--star] [--face N] [--color N] [--photo FILE]
   close <name> [--host N]
   archive <name> [--host N] [--json]
   unarchive <name> [--host N] [--json]
@@ -304,7 +304,7 @@ async function open(ctx, flags) {
     if (flags.group) args.push('--group', flags.group);
     if (flags.host !== undefined) args.push('--host', String(flags.host));
     if (flags.provider) args.push('--provider', flags.provider);
-    if (flags.model === 'claude' || flags.model === 'hax') args.push('--provider', flags.model);
+    else if (PROVIDERS.includes(flags.model)) args.push('--provider', flags.model);
     const code = await layoutRun(args, { env: ctx.env, fetch: ctx.fetch, out: ctx.out, err: line => ctx.err(line.replace(/^mp-layout: /, 'mb: ')), tmux: ctx.tmux, runtime: ctx.runtime, lock: ctx.lock, resolveFolder: ctx.resolveFolder });
     if (code !== 0) return code;
     if (flags.face !== undefined || flags.color !== undefined || flags.photo) return style(ctx, { ...flags, _: [name] });
@@ -901,7 +901,7 @@ async function applyRoster(ctx, file, dry) {
   if (result.changed) for (const runner of plan.opened) {
     if (runner.kind !== 'shell') continue;
     const host = runner.host;
-    owners.sessions[`${host}:${runner.name.toLowerCase()}`] = { owner: 'mb', name: runner.name, session: runner.name, host, kind: runner.kind, command: runner.command, model: runner.model, workspace: runner.workspace, provider: runner.model === 'claude' || runner.model === 'hax' ? runner.model : null, sid: null };
+    owners.sessions[`${host}:${runner.name.toLowerCase()}`] = { owner: 'mb', name: runner.name, session: runner.name, host, kind: runner.kind, command: runner.command, model: runner.model, workspace: runner.workspace, provider: PROVIDERS.includes(runner.model) ? runner.model : null, sid: null };
   }
   for (const runner of plan.updates) {
     const host = runner.host;

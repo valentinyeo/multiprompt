@@ -103,6 +103,7 @@ test('help lists style, workspace color, and roster apply', async () => {
   assert.equal(await run(['help'], { out: line => lines.push(line), err() {} }), 0);
   const help = lines.join('\n');
   for (const word of ['list', 'open', 'close', 'rename', 'move', 'style', 'star', 'mute', 'manual', 'settings', 'pull', '--face', '--color', '--photo', 'workspace color', 'group create', 'roster apply', '--dry-run']) assert.match(help, new RegExp(word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(help, /--provider claude\|codex\|pi\|antigravity\|hax/);
   assert.equal(await run([], { out() {}, err() {} }), 2);
 });
 
@@ -123,6 +124,15 @@ test('invalid face and color are refused before any request', async () => {
   assert.equal(color.code, 1);
   assert.match(color.errors[0], /invalid color/);
   assert.equal(color.puts.length, 0);
+  rmSync(box.dir, { recursive: true, force: true });
+});
+
+test('chat open refuses an unknown provider and names the ones it takes', async () => {
+  const box = harness();
+  const opened = await box.call(['open', '--kind', 'chat', '--tmux', 'Chat', '--workspace', 'Work', '--folder', '/tmp', '--provider', 'other']);
+  assert.equal(opened.code, 1);
+  assert.match(text(opened), /provider must be one of: claude, codex, pi, antigravity, hax/);
+  assert.equal(opened.puts.length, 0);
   rmSync(box.dir, { recursive: true, force: true });
 });
 
