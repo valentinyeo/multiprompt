@@ -35,7 +35,7 @@ fn Text(comptime capacity: usize) type {
     };
 }
 
-const Provider = enum { claude, codex, kimi };
+const Provider = enum { claude, codex, kimi, antigravity, pi };
 const Status = enum { loading, ok, retrying, stale, error_state };
 
 const Quota = struct {
@@ -408,6 +408,8 @@ fn publicAccountLabel(id: []const u8, provider: []const u8, configured: []const 
     if (std.mem.eql(u8, provider, "claude")) return "Claude";
     if (std.mem.eql(u8, provider, "codex")) return "Codex";
     if (std.mem.eql(u8, provider, "kimi")) return "Kimi";
+    if (std.mem.eql(u8, provider, "antigravity") or std.mem.eql(u8, provider, "google")) return "Antigravity";
+    if (std.mem.eql(u8, provider, "pi")) return "Pi";
     return "Account";
 }
 
@@ -433,7 +435,8 @@ fn loadConfig(runtime: *Runtime) !void {
         account.id.set(id);
         const configured_label = jsonString(value.object.get("label")) orelse id;
         account.label.set(publicAccountLabel(id, provider_text, configured_label));
-        if (std.mem.eql(u8, provider_text, "claude")) account.provider = .claude else if (std.mem.eql(u8, provider_text, "codex")) account.provider = .codex else if (std.mem.eql(u8, provider_text, "kimi")) account.provider = .kimi else continue;
+        account.provider = providerFromName(provider_text) orelse continue;
+        if (!providerCollectsQuotas(account.provider)) continue;
         if (jsonString(value.object.get("configDir"))) |path| expandHome(runtime, path, &account.config_dir);
         if (jsonString(value.object.get("configFile"))) |path| expandHome(runtime, path, &account.config_file);
         if (jsonString(value.object.get("pythonPath"))) |path| expandHome(runtime, path, &account.python_path);
@@ -655,6 +658,7 @@ fn refreshAccount(runtime: *Runtime, account: *Account) !void {
         .claude => try refreshClaude(runtime, account),
         .codex => try refreshCodex(runtime, account),
         .kimi => try refreshKimi(runtime, account),
+        .antigravity, .pi => return error.ProviderUnavailable,
     }
     account.status = .ok;
     account.error_message.len = 0;
@@ -1262,11 +1266,29 @@ fn updateGuidanceAndDailyGoal(runtime: *Runtime, account: *Account) void {
     account.daily_goal.baseline_estimated = estimated;
 }
 
+fn providerFromName(name: []const u8) ?Provider {
+    if (std.mem.eql(u8, name, "claude")) return .claude;
+    if (std.mem.eql(u8, name, "codex")) return .codex;
+    if (std.mem.eql(u8, name, "kimi")) return .kimi;
+    if (std.mem.eql(u8, name, "antigravity") or std.mem.eql(u8, name, "google")) return .antigravity;
+    if (std.mem.eql(u8, name, "pi")) return .pi;
+    return null;
+}
+
+fn providerCollectsQuotas(provider: Provider) bool {
+    return switch (provider) {
+        .claude, .codex, .kimi => true,
+        .antigravity, .pi => false,
+    };
+}
+
 fn providerName(provider: Provider) []const u8 {
     return switch (provider) {
         .claude => "claude",
         .codex => "codex",
         .kimi => "kimi",
+        .antigravity => "antigravity",
+        .pi => "pi",
     };
 }
 
@@ -1414,6 +1436,25 @@ test "public account labels never expose configured emails" {
     try std.testing.expectEqualStrings("Secondary", publicAccountLabel("claude-secondary", "claude", "person@company.test"));
     try std.testing.expectEqualStrings("Claude", publicAccountLabel("another-profile", "claude", "private@example.com"));
     try std.testing.expectEqualStrings("Team", publicAccountLabel("team", "claude", "Team"));
+    try std.testing.expectEqualStrings("Antigravity", publicAccountLabel("antigravity", "antigravity", "private@example.com"));
+    try std.testing.expectEqualStrings("Antigravity", publicAccountLabel("google-pool", "google", "private@example.com"));
+    try std.testing.expectEqualStrings("Pi", publicAccountLabel("pi", "pi", "private@example.com"));
+}
+
+test "MUBO-596 Antigravity and Pi providers parse to their own names" {
+    try std.testing.expectEqual(Provider.antigravity, providerFromName("antigravity").?);
+    try std.testing.expectEqual(Provider.antigravity, providerFromName("google").?);
+    try std.testing.expectEqual(Provider.pi, providerFromName("pi").?);
+    try std.testing.expectEqual(Provider.claude, providerFromName("claude").?);
+    try std.testing.expectEqual(Provider.codex, providerFromName("codex").?);
+    try std.testing.expectEqual(Provider.kimi, providerFromName("kimi").?);
+    try std.testing.expect(providerFromName("unknown") == null);
+    try std.testing.expectEqualStrings("antigravity", providerName(.antigravity));
+    try std.testing.expectEqualStrings("pi", providerName(.pi));
+    try std.testing.expectEqualStrings("kimi", providerName(.kimi));
+    try std.testing.expect(providerCollectsQuotas(.claude));
+    try std.testing.expect(!providerCollectsQuotas(.antigravity));
+    try std.testing.expect(!providerCollectsQuotas(.pi));
 }
 
 test "Claude refresh preserves the credential scopes required by the current token endpoint" {

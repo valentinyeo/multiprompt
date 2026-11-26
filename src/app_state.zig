@@ -1863,6 +1863,8 @@ pub const AiPaceProvider = enum(u8) {
     claude,
     codex,
     kimi,
+    antigravity,
+    pi,
     unknown,
 };
 
@@ -1947,6 +1949,8 @@ pub const AiPaceGoal = struct {
             .claude => "Claude",
             .codex => "Codex",
             .kimi => "Kimi",
+            .antigravity => "Antigravity",
+            .pi => "Pi",
             .unknown => "AI",
         };
     }

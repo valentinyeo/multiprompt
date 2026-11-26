@@ -222,6 +222,15 @@ fn aiPaceIsoUtcFileTime(value: []const u8) ?u64 {
     return std.math.add(u64, ticks, offset_ticks) catch return null;
 }
 
+fn aiPaceProviderFromName(name: []const u8) AiPaceProvider {
+    if (std.mem.eql(u8, name, "claude")) return .claude;
+    if (std.mem.eql(u8, name, "codex")) return .codex;
+    if (std.mem.eql(u8, name, "kimi")) return .kimi;
+    if (std.mem.eql(u8, name, "antigravity") or std.mem.eql(u8, name, "google")) return .antigravity;
+    if (std.mem.eql(u8, name, "pi")) return .pi;
+    return .unknown;
+}
+
 fn aiPacePublicAccountLabel(id: []const u8, provider: []const u8, configured: []const u8) []const u8 {
     if (std.mem.eql(u8, id, "claude-primary")) return "Primary";
     if (std.mem.eql(u8, id, "claude-secondary")) return "Secondary";
@@ -229,6 +238,8 @@ fn aiPacePublicAccountLabel(id: []const u8, provider: []const u8, configured: []
     if (std.mem.eql(u8, provider, "claude")) return "Claude";
     if (std.mem.eql(u8, provider, "codex")) return "Codex";
     if (std.mem.eql(u8, provider, "kimi")) return "Kimi";
+    if (std.mem.eql(u8, provider, "antigravity") or std.mem.eql(u8, provider, "google")) return "Antigravity";
+    if (std.mem.eql(u8, provider, "pi")) return "Pi";
     return "Account";
 }
 
@@ -251,14 +262,7 @@ fn parseAiPaceSnapshot(json: []const u8) !AiPaceSnapshot {
         const provider = aiPaceJsonString(object.get("provider")) orelse "";
         const configured_label = aiPaceJsonString(object.get("label")) orelse id;
         goal.setLabel(aiPacePublicAccountLabel(id, provider, configured_label));
-        goal.provider = if (std.mem.eql(u8, provider, "claude"))
-            .claude
-        else if (std.mem.eql(u8, provider, "codex"))
-            .codex
-        else if (std.mem.eql(u8, provider, "kimi"))
-            .kimi
-        else
-            .unknown;
+        goal.provider = aiPaceProviderFromName(provider);
         goal.available = true;
         const account_status = aiPaceJsonString(object.get("status")) orelse "";
         goal.retrying = std.mem.eql(u8, account_status, "retrying");
@@ -468,7 +472,7 @@ fn ladderAddGoal(next: *AiPaceSnapshot, item: std.json.Value, default_label: []c
     var goal = &next.goals[next.goal_count];
     next.goal_count += 1;
     goal.setLabel(label);
-    goal.provider = if (std.mem.eql(u8, provider, "claude")) .claude else if (std.mem.eql(u8, provider, "codex")) .codex else .unknown;
+    goal.provider = aiPaceProviderFromName(provider);
     goal.available = true;
     if (aiPaceJsonString(o.get("cluster"))) |cl| goal.setCluster(cl);
     if (o.get("in_ladder")) |il| {
@@ -871,6 +875,42 @@ test "AI telemetry account labels are safe for live streams" {
     try std.testing.expectEqualStrings("Secondary", aiPacePublicAccountLabel("claude-secondary", "claude", "person@company.test"));
     try std.testing.expectEqualStrings("Claude", aiPacePublicAccountLabel("another-profile", "claude", "private@example.com"));
     try std.testing.expectEqualStrings("Team", aiPacePublicAccountLabel("team", "claude", "Team"));
+    try std.testing.expectEqualStrings("Antigravity", aiPacePublicAccountLabel("antigravity", "antigravity", "private@example.com"));
+    try std.testing.expectEqualStrings("Antigravity", aiPacePublicAccountLabel("google-pool", "google", "private@example.com"));
+    try std.testing.expectEqualStrings("Pi", aiPacePublicAccountLabel("pi", "pi", "private@example.com"));
+}
+
+test "MUBO-596 Antigravity and Pi snapshots keep their own provider labels" {
+    const sample =
+        \\{"accounts":[
+        \\{"id":"claude-primary","provider":"claude","label":"Primary","status":"ok","quotas":[{"usedPercent":10,"windowMinutes":10080}]},
+        \\{"id":"antigravity","provider":"antigravity","label":"private@example.com","status":"ok","quotas":[{"usedPercent":20,"windowMinutes":10080}]},
+        \\{"id":"google-pool","provider":"google","label":"private@example.com","status":"ok","quotas":[{"usedPercent":30,"windowMinutes":10080}]},
+        \\{"id":"pi","provider":"pi","label":"private@example.com","status":"ok","quotas":[{"usedPercent":40,"windowMinutes":10080}]}]}
+    ;
+    const snapshot = try parseAiPaceSnapshot(sample);
+    try std.testing.expectEqual(@as(usize, 4), snapshot.goal_count);
+    try std.testing.expectEqual(AiPaceProvider.claude, snapshot.goals[0].provider);
+    try std.testing.expectEqual(AiPaceProvider.antigravity, snapshot.goals[1].provider);
+    try std.testing.expectEqual(AiPaceProvider.antigravity, snapshot.goals[2].provider);
+    try std.testing.expectEqual(AiPaceProvider.pi, snapshot.goals[3].provider);
+    try std.testing.expectEqualStrings("Antigravity", snapshot.goals[1].labelSlice());
+    try std.testing.expectEqualStrings("Antigravity", snapshot.goals[2].labelSlice());
+    try std.testing.expectEqualStrings("Pi", snapshot.goals[3].labelSlice());
+}
+
+test "MUBO-596 status line pool labels name Antigravity and Pi pools" {
+    var snapshot = AiPaceSnapshot{};
+    snapshot.goal_count = 3;
+    snapshot.goals[0] = .{ .provider = .antigravity };
+    snapshot.goals[1] = .{ .provider = .antigravity };
+    snapshot.goals[2] = .{ .provider = .pi };
+    var buf: [16]u8 = undefined;
+    try std.testing.expectEqualStrings("AG1", aiPoolShortLabel(&buf, &snapshot, 0));
+    try std.testing.expectEqualStrings("AG2", aiPoolShortLabel(&buf, &snapshot, 1));
+    try std.testing.expectEqualStrings("PI", aiPoolShortLabel(&buf, &snapshot, 2));
+    try std.testing.expectEqualStrings("ANTIGRAVITY", aiPaceProviderLabel(&snapshot.goals[0]));
+    try std.testing.expectEqualStrings("PI", aiPaceProviderLabel(&snapshot.goals[2]));
 }
 
 fn aiPaceProviderLabel(goal: *const AiPaceGoal) []const u8 {
@@ -879,6 +919,8 @@ fn aiPaceProviderLabel(goal: *const AiPaceGoal) []const u8 {
         .claude => "CLAUDE",
         .codex => "CODEX",
         .kimi => "KIMI",
+        .antigravity => "ANTIGRAVITY",
+        .pi => "PI",
         .unknown => "AI",
     };
 }
@@ -892,6 +934,8 @@ fn aiPaceProviderColor(goal: AiPaceGoal, slot: usize) DWORD {
             (if (app_state.g_light_theme) RGB(150, 96, 68) else RGB(198, 145, 112)),
         .codex => if (app_state.g_light_theme) RGB(20, 125, 86) else RGB(70, 190, 140),
         .kimi => if (app_state.g_light_theme) RGB(25, 115, 175) else RGB(70, 175, 235),
+        .antigravity => if (app_state.g_light_theme) RGB(95, 70, 180) else RGB(155, 135, 235),
+        .pi => if (app_state.g_light_theme) RGB(140, 80, 150) else RGB(205, 145, 215),
         .unknown => customColorOr("muted", if (app_state.g_light_theme) RGB(100, 100, 100) else RGB(135, 142, 152)),
     };
 }
