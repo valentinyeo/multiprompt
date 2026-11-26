@@ -140,7 +140,11 @@ pub fn draw(hdc: w.HANDLE, avatar: Avatar, badge: Mark) void {
 const Coverage = enum { outside, inside, border, edge };
 
 fn inTriangle(x: i32, y: i32, right: i32, top: i32, legs_wide: i32) bool {
-    return x <= right and x >= right - legs_wide and y >= top and y <= top + legs_wide and (y - top) <= (right - x);
+    return x <= right and x >= right - legs_wide and y >= top and y <= top + legs_wide and (y - top) <= (x - (right - legs_wide));
+}
+
+fn clearOfFill(x: i32, y: i32, right: i32, top: i32, legs_wide: i32) bool {
+    return x >= right or x + 1 <= right - legs_wide or y + 1 <= top or y >= top + legs_wide or (y - top) >= (x + 1 - (right - legs_wide));
 }
 
 fn cornersInside(x: i32, y: i32, right: i32, top: i32, legs_wide: i32) bool {
@@ -163,9 +167,9 @@ fn coverageOf(x: i32, y: i32, g: Geometry) Coverage {
     const fill = g.size - g.border * 2;
     const fill_right = g.right - g.border;
     const fill_top = g.top + g.border;
-    if (fill - 2 > 0 and cornersInside(x, y, fill_right - 1, fill_top + 1, fill - 2)) return .inside;
+    if (fill > 0 and cornersInside(x, y, fill_right, fill_top, fill)) return .inside;
     if (cornersOutside(x, y, g.right, g.top, g.size)) return .outside;
-    if (cornersInside(x, y, g.right, g.top, g.size) and (fill <= 0 or cornersOutside(x, y, fill_right, fill_top, fill))) return .border;
+    if (cornersInside(x, y, g.right, g.top, g.size) and (fill <= 0 or clearOfFill(x, y, fill_right, fill_top, fill))) return .border;
     return .edge;
 }
 

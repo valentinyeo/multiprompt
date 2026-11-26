@@ -73,7 +73,10 @@ function Badge($Row) {
     @{ side=$side; border=$border; right=$Row.right; left=($Row.right - $side); top=$Row.y }
 }
 function In-Triangle([int]$x, [int]$y, [int]$Right, [int]$Top, [int]$Legs) {
-    ($x -le $Right) -and ($x -ge ($Right - $Legs)) -and ($y -ge $Top) -and ($y -le ($Top + $Legs)) -and (($y - $Top) -le ($Right - $x))
+    ($x -le $Right) -and ($x -ge ($Right - $Legs)) -and ($y -ge $Top) -and ($y -le ($Top + $Legs)) -and (($y - $Top) -le ($x - ($Right - $Legs)))
+}
+function Fill-Clear([int]$x, [int]$y, [int]$Right, [int]$Top, [int]$Legs) {
+    ($x -ge $Right) -or ($x + 1 -le ($Right - $Legs)) -or ($y + 1 -le $Top) -or ($y -ge ($Top + $Legs)) -or (($y - $Top) -ge ($x + 1 - ($Right - $Legs)))
 }
 function Corners-Inside([int]$x, [int]$y, [int]$Right, [int]$Top, [int]$Legs) {
     foreach ($corner in @(@(0,0), @(1,0), @(0,1), @(1,1))) {
@@ -90,10 +93,9 @@ function Corners-Outside([int]$x, [int]$y, [int]$Right, [int]$Top, [int]$Legs) {
 function Badge-Coverage([int]$x, [int]$y, $Box) {
     $fill = $Box.side - $Box.border * 2
     $fillRight = $Box.right - $Box.border; $fillTop = $Box.top + $Box.border
-    $safe = $fill - 2
-    if ($safe -gt 0 -and (Corners-Inside $x $y ($fillRight - 1) ($fillTop + 1) $safe)) { return 'inside' }
+    if ($fill -gt 0 -and (Corners-Inside $x $y $fillRight $fillTop $fill)) { return 'inside' }
     if (Corners-Outside $x $y $Box.right $Box.top $Box.side) { return 'outside' }
-    if ((Corners-Inside $x $y $Box.right $Box.top $Box.side) -and ($fill -le 0 -or (Corners-Outside $x $y $fillRight $fillTop $fill))) { return 'border' }
+    if ((Corners-Inside $x $y $Box.right $Box.top $Box.side) -and ($fill -le 0 -or (Fill-Clear $x $y $fillRight $fillTop $fill))) { return 'border' }
     'edge'
 }
 function Capture([int]$x, [int]$y, [int]$w, [int]$h) {
