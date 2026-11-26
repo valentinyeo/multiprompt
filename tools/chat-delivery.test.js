@@ -252,6 +252,7 @@ var g_chat_ac_skill_command: [256]u16 = @splat(0);
 var mode_picker: ?bool = null;
 fn chatModeOpenPicker(plan: bool) void { mode_picker = plan; }
 fn chatPiModelPicker() void {}
+fn plusMenuOpen() void {}
 fn chatLoginArgument(_: []const u16, _: []u8) []const u8 { return ""; }
 fn chatLoginArgumentTooLong(_: []const u16) bool { return false; }
 fn chatPiLogin(_: []const u8) bool { return false; }
@@ -2124,7 +2125,7 @@ function runHarness(control = false) {
       const file = path.join(dir, 'chat_history.zig');
       fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace(/        for \(self.blocks.items\[first_block\.\.\]\) \|\*block\| block.stamp_ms = .*;\n/, ''));
     }
-    let functions = [...names, 'chatMessageCaptureAdmission', 'chatOutboxRecoverOlderAdmission'].map(body).join('\n')
+    let functions = [...names, 'clearChatModelCommand', 'chatMessageCaptureAdmission', 'chatOutboxRecoverOlderAdmission'].map(body).join('\n')
       .replaceAll('@import("chat_session.zig").chatSettingsPending', 'chatSettingsPending')
       .replaceAll('@import("chat_session.zig").chatFileRequestForDelivery', 'chatFileRequestForDelivery')
       .replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark')
@@ -2134,6 +2135,7 @@ function runHarness(control = false) {
       .replaceAll('@import("archive.zig").applyCanonicalSessionRename', 'applyCanonicalSessionRename')
       .replaceAll('@import("room_frontend.zig").privateActionsAllowed', 'privateActionsAllowed')
       .replaceAll('@import("workspaces.zig").updateMainWindowTitle', 'updateMainWindowTitle')
+      .replaceAll('@import("plus_menu.zig").open', 'plusMenuOpen')
       .replaceAll('@import("chat_composer.zig").clearChatReply', 'clearChatReply')
       .replaceAll('@import("chat_composer.zig").chatAcAgent', 'chatAcAgent')
       .replaceAll('@import("chat_composer.zig").chatShellDraftNoteSend', 'chatShellDraftNoteSend')

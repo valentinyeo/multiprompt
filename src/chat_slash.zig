@@ -37,8 +37,9 @@ pub fn decide(live: bool, text: []const u16, selected_skill: bool, interactive_h
 }
 
 pub fn decideForAgent(live: bool, ai_agent: u8, text: []const u16, selected_skill: bool, interactive_hint: bool) Route {
-    if (ai_agent == 8) return .send;
-    return decide(live, text, selected_skill, interactive_hint);
+    if (ai_agent != 8) return decide(live, text, selected_skill, interactive_hint);
+    if (!live or selected_skill) return .send;
+    return if (route(true, text) == .model) .model else .send;
 }
 
 fn equals(wide: []const u16, ascii: []const u8) bool {
@@ -89,6 +90,22 @@ test "live slash commands route without changing terminal or custom messages" {
     try std.testing.expectEqual(Route.send, decideForAgent(true, 8, w("/plan"), false, false));
     try std.testing.expectEqual(Route.send, decideForAgent(true, 8, w("/plan outline the steps"), false, false));
     try std.testing.expectEqual(Route.plan, decideForAgent(true, 1, w("/plan"), false, false));
+}
+
+test "MUBO-586 antigravity model opens the picker while its skills still send" {
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    try std.testing.expectEqual(Route.model, decideForAgent(true, 8, w("/model"), false, false));
+    try std.testing.expectEqual(Route.model, decideForAgent(true, 8, w("  /model  "), false, false));
+    try std.testing.expectEqual(Route.model, decideForAgent(true, 8, w("/model"), false, true));
+    try std.testing.expectEqual(Route.send, decideForAgent(true, 8, w("/model"), true, false));
+    try std.testing.expectEqual(Route.send, decideForAgent(false, 8, w("/model"), false, false));
+    try std.testing.expectEqual(Route.send, decideForAgent(true, 8, w("/model-pro"), false, false));
+    try std.testing.expectEqual(Route.send, decideForAgent(true, 8, w("/valentin-mode"), false, false));
+    try std.testing.expectEqual(Route.send, decideForAgent(true, 8, w("/poteto-mode"), false, false));
+    try std.testing.expectEqual(Route.send, decideForAgent(true, 8, w("/rewind"), false, true));
+    try std.testing.expectEqual(Route.model, decideForAgent(true, 1, w("/model"), false, false));
+    try std.testing.expectEqual(Route.model, decideForAgent(true, 3, w("/model"), false, false));
+    try std.testing.expectEqual(Route.unavailable, decideForAgent(true, 1, w("/rewind"), false, false));
 }
 
 test "mode requests serialize identity and supported mode" {
