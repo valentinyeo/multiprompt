@@ -7,7 +7,8 @@ CI workflow: chat-auto-switch.yml
 
 - `plan-out-match`: each provider's recorded usage-limit event is recognised by that provider's predicate only, so an ordinary sentence holding the words "usage limit" never counts.
 - `switch-on-plan-out`: a chat that runs out of plan moves to the next AI on the saved order, keeps its address and chat name, and shows the automatic switch divider above the carried conversation.
-- `fallback-order`: a used-up AI is skipped, so the chat lands on the next AI that still has a plan.
+- `fallback-order`: a used-up AI is skipped, so the chat lands on the next AI that still has a plan, and Antigravity is the last AI in that default order.
+- `antigravity-plan-out`: a chat whose own AI is Antigravity moves on when Antigravity reports resource exhaustion, the same way the other AIs do.
 - `toggle-off-keeps-chat`: with the automatic switch off, a recorded usage limit starts nothing, moves nothing and posts no notice; toggling back on restores the default.
 - `all-plans-empty`: when every AI in the order is used up the chat stays where it is and the app says no plan is left anywhere.
 
