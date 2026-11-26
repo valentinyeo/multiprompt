@@ -32,5 +32,7 @@ The real release-notes proof (`tools/update-card-real-notes.test.js`) runs the s
 
 When the offered release names no change the card shows no lines and no `See all`. It never borrows an older release's notes, so the card and the page it opens always describe the same release.
 
+The wrapped-card proof (`tools/update-card-release-proof.ps1`) restores the window to 1024x768 before its first screenshot, forces and flushes a paint, and checks the captured pixels: the Restart pill, the `See all` row below the notes and the note lines must be visible, so a stale or clipped frame fails instead of passing on log coordinates alone. It saves `released-card.png` with `wrapped-normal.png`, `wrapped-minimum.png`, `wrapped-scrolled.png` and `wrapped-collapsed.png`, each with its window, client and DPI record in `wrapped-card.json`. The update card is bottom-anchored, so its controls sit near the window edge at small sizes; always read an image next to its own geometry record.
+
 
 `safe-updates.json` records each successful scenario and cleanup; `sign-in-ready.png` shows the responsive signed-out app; `build.json` pins the branch executable and commit. Any missing assertion fails the job. All fixture processes are stopped before evidence is uploaded. The journey waits for the proof names the harness actually passes, and writes `result.json` only after its last check, so a late failure cannot report passed.

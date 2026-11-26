@@ -36,7 +36,193 @@ $null = $mutex.WaitOne()
 $process = $null
 $log = Join-Path $env:APPDATA 'ZigShell/debug.log'
 Add-Type -AssemblyName System.Drawing
-Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class ReleaseCardProof { [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int command); [DllImport("user32.dll")] public static extern bool IsZoomed(IntPtr h); [StructLayout(LayoutKind.Sequential)] public struct Point { public int X,Y; } [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int w, int height, uint flags); [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h, ref Point p); [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr wp, IntPtr lp); [StructLayout(LayoutKind.Sequential)] public struct Rect { public int L,T,R,B; } [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out Rect r); [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags); }'
+Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class ReleaseCardProof { [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int command); [DllImport("user32.dll")] public static extern bool IsZoomed(IntPtr h); [StructLayout(LayoutKind.Sequential)] public struct Point { public int X,Y; } [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int w, int height, uint flags); [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h, ref Point p); [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr wp, IntPtr lp); [StructLayout(LayoutKind.Sequential)] public struct Rect { public int L,T,R,B; } [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out Rect r); [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags); [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h, out Rect r); [DllImport("user32.dll")] public static extern bool RedrawWindow(IntPtr h, IntPtr update, IntPtr region, uint flags); [DllImport("user32.dll")] public static extern int GetDpiForWindow(IntPtr h); [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr context); [DllImport("dwmapi.dll")] public static extern int DwmFlush(); [DllImport("shcore.dll")] public static extern int SetProcessDpiAwareness(int awareness); }'
+try { if (-not [ReleaseCardProof]::SetProcessDpiAwarenessContext([IntPtr](-4))) { $null = [ReleaseCardProof]::SetProcessDpiAwareness(2) } } catch { try { $null = [ReleaseCardProof]::SetProcessDpiAwareness(2) } catch { $null = $_ } }
+$script:cardLog = ''
+$script:cardLogMark = 0
+$script:cardResized = $false
+$script:cardMaximized = $false
+$script:cardImages = @()
+function Card-Log {
+    if (-not (Test-Path -LiteralPath $log)) { return '' }
+    $stream = [IO.File]::Open($log, 'Open', 'Read', ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+    $reader = [IO.StreamReader]::new($stream)
+    try { $reader.ReadToEnd() } finally { $reader.Dispose() }
+}
+function Card-Mark {
+    $script:cardLog = Card-Log
+    $script:cardLogMark = $script:cardLog.Length
+}
+function Card-Tail {
+    if ($script:cardLogMark -ge $script:cardLog.Length) { return '' }
+    return $script:cardLog.Substring($script:cardLogMark)
+}
+function Card-Fresh {
+    if ($script:cardResized) { return Card-Tail }
+    return $script:cardLog
+}
+function Wait-Card([scriptblock]$Condition, [string]$Failure) {
+    $deadline = [DateTime]::UtcNow.AddSeconds(10)
+    do {
+        $script:cardLog = Card-Log
+        if (& $Condition) { return }
+        if ($process.HasExited -or [DateTime]::UtcNow -gt $deadline) { throw $Failure }
+        Start-Sleep -Milliseconds 100
+    } while ($true)
+}
+function Card-Bounds {
+    $matches = [regex]::Matches($script:cardLog, '\[update\] notes viewport=(\d+),(\d+),(\d+),(\d+) content=(\d+) scroll=(\d+)')
+    if ($matches.Count -eq 0) { throw 'Card did not expose wrapped note bounds' }
+    $m = $matches[$matches.Count - 1]
+    return @{ left = [int]$m.Groups[1].Value; top = [int]$m.Groups[2].Value; right = [int]$m.Groups[3].Value; bottom = [int]$m.Groups[4].Value; content = [int]$m.Groups[5].Value; scroll = [int]$m.Groups[6].Value }
+}
+function Card-Click([string]$Label) {
+    $matches = [regex]::Matches($script:cardLog, '\[update\] ' + $Label + '=(\d+),(\d+)')
+    if ($matches.Count -eq 0) { throw 'Card control unavailable' }
+    $m = $matches[$matches.Count - 1]
+    return @{ x = [int]$m.Groups[1].Value; y = [int]$m.Groups[2].Value }
+}
+function Card-Geometry {
+    $process.Refresh()
+    $window = New-Object ReleaseCardProof+Rect
+    if (-not [ReleaseCardProof]::GetWindowRect($process.MainWindowHandle, [ref]$window)) { throw 'Card window rect unavailable' }
+    $client = New-Object ReleaseCardProof+Rect
+    $origin = New-Object ReleaseCardProof+Point
+    if (-not [ReleaseCardProof]::GetClientRect($process.MainWindowHandle, [ref]$client) -or -not [ReleaseCardProof]::ClientToScreen($process.MainWindowHandle, [ref]$origin)) { throw 'Card client geometry unavailable' }
+    $scale = 0
+    try { $scale = [ReleaseCardProof]::GetDpiForWindow($process.MainWindowHandle) } catch { $scale = 0 }
+    return @{ window = @{ left = $window.L; top = $window.T; width = $window.R - $window.L; height = $window.B - $window.T }; client = @{ left = $origin.X - $window.L; top = $origin.Y - $window.T; width = $client.R; height = $client.B }; scale = $scale }
+}
+function Card-Present {
+    $null = [ReleaseCardProof]::RedrawWindow($process.MainWindowHandle, [IntPtr]::Zero, [IntPtr]::Zero, 0x0181)
+    try { $null = [ReleaseCardProof]::DwmFlush() } catch { $null = $_ }
+}
+function Set-Card-Window([int]$Width, [int]$Height) {
+    $process.Refresh()
+    $before = New-Object ReleaseCardProof+Rect
+    if (-not [ReleaseCardProof]::GetWindowRect($process.MainWindowHandle, [ref]$before)) { throw 'Card resize has no window' }
+    $script:cardResized = ($before.R - $before.L -ne $Width -or $before.B - $before.T -ne $Height)
+    if ($script:cardResized) { Card-Mark }
+    if (-not [ReleaseCardProof]::SetWindowPos($process.MainWindowHandle, [IntPtr]::Zero, 0, 0, $Width, $Height, 0x0040)) { throw 'Card resize failed' }
+    $deadline = [DateTime]::UtcNow.AddSeconds(10)
+    do {
+        $after = New-Object ReleaseCardProof+Rect
+        if ([ReleaseCardProof]::GetWindowRect($process.MainWindowHandle, [ref]$after) -and $after.R - $after.L -eq $Width -and $after.B - $after.T -eq $Height) { break }
+        if ($process.HasExited -or [DateTime]::UtcNow -gt $deadline) { throw 'Native card dimensions do not match requested proof size' }
+        Start-Sleep -Milliseconds 50
+    } while ($true)
+}
+function Card-Bitmap-Point([int]$x, [int]$y) {
+    $origin = New-Object ReleaseCardProof+Point
+    $window = New-Object ReleaseCardProof+Rect
+    if (-not [ReleaseCardProof]::ClientToScreen($process.MainWindowHandle, [ref]$origin) -or -not [ReleaseCardProof]::GetWindowRect($process.MainWindowHandle, [ref]$window)) { throw 'Card client geometry unavailable' }
+    return @{ x = $origin.X - $window.L + $x; y = $origin.Y - $window.T + $y }
+}
+function Card-Ink($Picture, [int]$Left, [int]$Top, [int]$Right, [int]$Bottom) {
+    $ink = 0
+    for ($y = $Top; $y -le $Bottom; $y++) {
+        if ($y -lt 0 -or $y -ge $Picture.Height) { continue }
+        for ($x = $Left; $x -le $Right; $x++) {
+            if ($x -lt 0 -or $x -ge $Picture.Width) { continue }
+            $colour = $Picture.GetPixel($x, $y)
+            if ($colour.R -gt 90 -and $colour.G -gt 90 -and $colour.B -gt 90) { $ink += 1 }
+        }
+    }
+    return $ink
+}
+function Card-Pill($Picture) {
+    for ($y = [Math]::Max(0, $Picture.Height - 220); $y -lt $Picture.Height; $y++) {
+        $run = 0
+        for ($x = 0; $x -lt [Math]::Min($Picture.Width, 360); $x++) {
+            $colour = $Picture.GetPixel($x, $y)
+            if ($colour.R -gt 200 -and $colour.G -gt 200 -and $colour.B -gt 200) { $run += 1 } else { $run = 0 }
+            if ($run -ge 40) { return $true }
+        }
+    }
+    return $false
+}
+function Assert-Card-Image([string]$Name, [string]$File, $Geometry) {
+    $picture = New-Object Drawing.Bitmap($File)
+    try {
+        if ($picture.Width -ne $Geometry.window.width -or $picture.Height -ne $Geometry.window.height) { throw ('Card ' + $Name + ' screenshot is ' + $picture.Width + 'x' + $picture.Height + ' instead of the window it captured') }
+        $visible = @{ restartVisible = $false; seeAllVisible = $false; notesVisible = $false }
+        $restart = Card-Click 'restart button'
+        if ($Contract -ne 'new') {
+            if (-not (Card-Pill $picture)) { throw ('Card ' + $Name + ' screenshot shows no Restart button') }
+            $visible.restartVisible = $true
+            return $visible
+        }
+        $point = Card-Bitmap-Point $restart.x $restart.y
+        if ($point.x -lt 8 -or $point.y -lt 8 -or $point.x -ge $picture.Width - 8 -or $point.y -ge $picture.Height - 8) { throw ('Card ' + $Name + ' screenshot cut the Restart button at ' + $point.x + ',' + $point.y) }
+        if ((Card-Ink $picture ($point.x - 12) ($point.y - 4) ($point.x + 12) ($point.y + 4)) -lt 30) { throw ('Card ' + $Name + ' screenshot shows no Restart button at the place the app paints it') }
+        $visible.restartVisible = $true
+        $bounds = Card-Bounds
+        $more = Card-Click 'more row'
+        if ($bounds.top -lt 0 -or $bounds.right -gt $Geometry.client.width -or $bounds.bottom -gt $Geometry.client.height -or $more.y -ge $Geometry.client.height) { throw ('Card ' + $Name + ' screenshot put the card outside the window') }
+        $row = Card-Bitmap-Point $bounds.left ($bounds.bottom + 2)
+        $rowBottom = (Card-Bitmap-Point $bounds.left ($more.y + 8)).y
+        if ($rowBottom -ge $picture.Height) { throw ('Card ' + $Name + ' screenshot cut the See all row') }
+        if ((Card-Ink $picture $row.x $row.y ($row.x + ($bounds.right - $bounds.left)) $rowBottom) -lt 8) { throw ('Card ' + $Name + ' screenshot shows no See all row below the notes') }
+        $visible.seeAllVisible = $true
+        $line = Card-Bitmap-Point $bounds.left ($bounds.top + 4)
+        $lineBottom = [Math]::Min($line.y + 24, $picture.Height - 1)
+        if ((Card-Ink $picture $line.x $line.y ($line.x + ($bounds.right - $bounds.left)) $lineBottom) -lt 8) { throw ('Card ' + $Name + ' screenshot shows no note lines') }
+        $visible.notesVisible = $true
+        return $visible
+    } finally { $picture.Dispose() }
+}
+function Capture-Card-Image([string]$Name) {
+    Card-Present
+    $deadline = [DateTime]::UtcNow.AddSeconds(5)
+    do {
+        $script:cardLog = Card-Log
+        $geometry = Card-Geometry
+        $placed = [regex]::Matches($script:cardLog, '\[reposition\] client=(\d+)x(\d+)')
+        if ($placed.Count -eq 0) { break }
+        $last = $placed[$placed.Count - 1]
+        if ([int]$last.Groups[1].Value -eq $geometry.client.width -and [int]$last.Groups[2].Value -eq $geometry.client.height) { break }
+        if ($process.HasExited -or [DateTime]::UtcNow -gt $deadline) { throw ('Card ' + $Name + ' client size differs from the size the app laid out') }
+        Start-Sleep -Milliseconds 50
+    } while ($true)
+    $geometry = Card-Geometry
+    $file = Join-Path $Evidence ($Name + '.png')
+    $bitmap = New-Object Drawing.Bitmap($geometry.window.width, $geometry.window.height)
+    $graphics = [Drawing.Graphics]::FromImage($bitmap)
+    $dc = $graphics.GetHdc()
+    try { if (-not [ReleaseCardProof]::PrintWindow($process.MainWindowHandle, $dc, 2)) { throw 'Card screenshot failed' } } finally { $graphics.ReleaseHdc($dc); $graphics.Dispose() }
+    try { $bitmap.Save($file) } finally { $bitmap.Dispose() }
+    Card-Mark
+    $visible = Assert-Card-Image $Name $file $geometry
+    $state = $null
+    $viewport = [regex]::Matches($script:cardLog, '\[update\] notes viewport=(\d+),(\d+),(\d+),(\d+) content=(\d+) scroll=(\d+)')
+    if ($viewport.Count -gt 0) {
+        $last = $viewport[$viewport.Count - 1]
+        $state = @{ top = [int]$last.Groups[2].Value; bottom = [int]$last.Groups[4].Value; content = [int]$last.Groups[5].Value; scroll = [int]$last.Groups[6].Value }
+    }
+    $record = @{ name = $Name; file = ($Name + '.png'); window = $geometry.window; client = $geometry.client; scale = $geometry.scale; maximized = [ReleaseCardProof]::IsZoomed($process.MainWindowHandle); logOffset = $script:cardLog.Length; notes = $state; restartVisible = $visible.restartVisible; seeAllVisible = $visible.seeAllVisible; notesVisible = $visible.notesVisible }
+    $script:cardImages = @($script:cardImages) + @($record)
+    return $record
+}
+function Normalize-Card {
+    if ([ReleaseCardProof]::IsZoomed($process.MainWindowHandle)) {
+        $null = [ReleaseCardProof]::ShowWindow($process.MainWindowHandle, 9)
+        $deadline = [DateTime]::UtcNow.AddSeconds(10)
+        do {
+            if (-not [ReleaseCardProof]::IsZoomed($process.MainWindowHandle)) { break }
+            if ($process.HasExited -or [DateTime]::UtcNow -gt $deadline) { throw 'Card window did not restore before its first screenshot' }
+            Start-Sleep -Milliseconds 50
+        } while ($true)
+    }
+    Set-Card-Window 1024 768
+    Card-Present
+    Card-Mark
+    if ($Contract -eq 'new') {
+        $normalBounds = Card-Bounds
+        $normalRestart = Card-Click 'restart button'
+        $normalClient = Card-Geometry
+        if ($normalBounds.top -lt 0 -or $normalBounds.right -gt $normalClient.client.width -or $normalBounds.bottom -gt $normalClient.client.height -or $normalRestart.y -ge $normalClient.client.height) { throw 'Card controls fall outside the window at the normal proof size' }
+    }
+}
 try {
     $process = Start-Process $cardExe -ArgumentList "--update-ready $eventName" -PassThru
     if (-not $event.WaitOne(15000)) { throw 'Released app did not report readiness' }
@@ -47,20 +233,18 @@ try {
         if ($process.HasExited -or [DateTime]::UtcNow -gt $deadline) { throw 'Released app did not paint the card' }
         Start-Sleep -Milliseconds 100
     } while ($true)
-    $process.Refresh()
-    $rectangle = New-Object ReleaseCardProof+Rect
-    if (-not [ReleaseCardProof]::GetWindowRect($process.MainWindowHandle, [ref]$rectangle)) { throw 'Released window unavailable' }
-    $bitmap = New-Object Drawing.Bitmap(($rectangle.R - $rectangle.L), ($rectangle.B - $rectangle.T))
-    $graphics = [Drawing.Graphics]::FromImage($bitmap)
-    $dc = $graphics.GetHdc()
-    try { if (-not [ReleaseCardProof]::PrintWindow($process.MainWindowHandle, $dc, 2)) { throw 'Released screenshot failed' } } finally { $graphics.ReleaseHdc($dc); $graphics.Dispose() }
+    $script:cardMaximized = [ReleaseCardProof]::IsZoomed($process.MainWindowHandle)
+    Normalize-Card
     $image = Join-Path $Evidence 'released-card.png'
-    try { $bitmap.Save($image) } finally { $bitmap.Dispose() }
+    $firstCapture = Capture-Card-Image 'released-card'
+    $text = Card-Log
     $published = @($changes)
     $plainLines = @($published | ForEach-Object { ($_ -replace '^(?:IGSH|MUBO)-\d+ ', '') })
     $publishedIds = @($published | ForEach-Object { [regex]::Match($_, '^((?:IGSH|MUBO)-\d+)').Groups[1].Value })
-    $named = @([regex]::Matches($text, '\[update\] card note \d+=([^\r\n]*)') | ForEach-Object { $_.Groups[1].Value })
-    $views = [regex]::Matches($text, '\[update\] card view=collapsed n=(\d+)')
+    $blocks = [regex]::Matches($text, '\[update\] card view=collapsed n=\d+')
+    $current = if ($blocks.Count -gt 0) { $text.Substring($blocks[$blocks.Count - 1].Index) } else { $text }
+    $named = @([regex]::Matches($current, '\[update\] card note \d+=([^\r\n]*)') | ForEach-Object { $_.Groups[1].Value })
+    $views = [regex]::Matches($current, '\[update\] card view=collapsed n=(\d+)')
     if ($views.Count -eq 0) { throw 'Released app painted no card view line' }
     if ([int]$views[$views.Count - 1].Groups[1].Value -ne $named.Count) { throw 'Released card view count differs from its note lines' }
     if ($text -match '\[update\] card note \d+=.*(behind the scenes|latest improvements)') { throw 'Released card showed filler' }
@@ -85,7 +269,7 @@ try {
             }
             if ($at -lt 0 -or $at -ge $plainLines.Count -or $plainLines[$at] -cne $named[$i]) { throw 'New card differs from the published change text' }
             $cursor = $at + 1
-            $id = [regex]::Match($text, '\[update\] card note id ' + $i + '=([^\r\n]*)')
+            $id = [regex]::Match($current, '\[update\] card note id ' + $i + '=([^\r\n]*)')
             if (-not $id.Success -or $id.Groups[1].Value -cne $publishedIds[$at]) { throw 'New card lost the published ticket id' }
             $matchedIds += $publishedIds[$at]
         }
@@ -95,78 +279,21 @@ try {
         $seeAll = $true
     }
     if ((Get-FileHash $cardExe -Algorithm SHA256).Hash.ToLowerInvariant() -ne $hash) { throw 'Released binary changed during proof' }
-    $receipt = @{ contract = $Contract; binaryVersion = $binaryVersion; version = $document.version; sha256 = $hash; changes = $published; painted = $named; ids = $paintedIds; seeAll = $seeAll; simulatedOffer = '999.0.0'; success = $true }
+    $receipt = @{ contract = $Contract; binaryVersion = $binaryVersion; version = $document.version; sha256 = $hash; changes = $published; painted = $named; ids = $paintedIds; seeAll = $seeAll; simulatedOffer = '999.0.0'; maximized = $script:cardMaximized; image = $firstCapture; success = $true }
     $receipt | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 (Join-Path $Evidence 'released-card.json')
     if ($Wrapped) {
-        $script:cardLog = ''
-        $script:cardLogMark = 0
-        $script:cardResized = $false
-        function Card-Log {
-            if (-not (Test-Path -LiteralPath $log)) { return '' }
-            $stream = [IO.File]::Open($log, 'Open', 'Read', ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
-            $reader = [IO.StreamReader]::new($stream)
-            try { $reader.ReadToEnd() } finally { $reader.Dispose() }
-        }
-        function Card-Mark {
-            $script:cardLog = Card-Log
-            $script:cardLogMark = $script:cardLog.Length
-        }
-        function Card-Tail {
-            if ($script:cardLogMark -ge $script:cardLog.Length) { return '' }
-            return $script:cardLog.Substring($script:cardLogMark)
-        }
-        function Card-Fresh {
-            if ($script:cardResized) { return Card-Tail }
-            return $script:cardLog
-        }
-        function Wait-Card([scriptblock]$Condition, [string]$Failure) {
-            $deadline = [DateTime]::UtcNow.AddSeconds(10)
-            do {
-                $script:cardLog = Card-Log
-                if (& $Condition) { return }
-                if ($process.HasExited -or [DateTime]::UtcNow -gt $deadline) { throw $Failure }
-                Start-Sleep -Milliseconds 100
-            } while ($true)
-        }
-        function Card-Bounds {
-            $matches = [regex]::Matches($script:cardLog, '\[update\] notes viewport=(\d+),(\d+),(\d+),(\d+) content=(\d+) scroll=(\d+)')
-            if ($matches.Count -eq 0) { throw 'Card did not expose wrapped note bounds' }
-            $m = $matches[$matches.Count - 1]
-            return @{ left = [int]$m.Groups[1].Value; top = [int]$m.Groups[2].Value; right = [int]$m.Groups[3].Value; bottom = [int]$m.Groups[4].Value; content = [int]$m.Groups[5].Value; scroll = [int]$m.Groups[6].Value }
-        }
-        function Card-Click([string]$Label) {
-            $matches = [regex]::Matches($script:cardLog, '\[update\] ' + $Label + '=(\d+),(\d+)')
-            if ($matches.Count -eq 0) { throw 'Card control unavailable' }
-            $m = $matches[$matches.Count - 1]
-            return @{ x = [int]$m.Groups[1].Value; y = [int]$m.Groups[2].Value }
-        }
         function Capture-Card([string]$Name) {
-            $process.Refresh()
-            $r = New-Object ReleaseCardProof+Rect
-            if (-not [ReleaseCardProof]::GetWindowRect($process.MainWindowHandle, [ref]$r)) { throw 'Card screenshot has no window' }
-            $b = New-Object Drawing.Bitmap(($r.R - $r.L), ($r.B - $r.T))
-            $g = [Drawing.Graphics]::FromImage($b)
-            $dc = $g.GetHdc()
-            try { if (-not [ReleaseCardProof]::PrintWindow($process.MainWindowHandle, $dc, 2)) { throw 'Card screenshot failed' } } finally { $g.ReleaseHdc($dc); $g.Dispose() }
+            $null = Capture-Card-Image $Name
             $file = Join-Path $Evidence ($Name + '.png')
-            try { $b.Save($file) } finally { $b.Dispose() }
             Write-Output ('WRAPPED_CARD_IMAGE=' + $Name + ':' + [Convert]::ToBase64String([IO.File]::ReadAllBytes($file)))
         }
         function Resize-Card([int]$Width, [int]$Height) {
-            $before = New-Object ReleaseCardProof+Rect
-            if (-not [ReleaseCardProof]::GetWindowRect($process.MainWindowHandle, [ref]$before)) { throw 'Card resize has no window' }
-            $script:cardResized = ($before.R - $before.L -ne $Width -or $before.B - $before.T -ne $Height)
-            if ($script:cardResized) { Card-Mark }
-            if (-not [ReleaseCardProof]::SetWindowPos($process.MainWindowHandle, [IntPtr]::Zero, 0, 0, $Width, $Height, 0x0040)) { throw 'Card resize failed' }
+            Set-Card-Window $Width $Height
             Wait-Card { (Card-Fresh) -match '\[update\] notes viewport=' -and (Card-Fresh) -match '\[update\] card remaining=' } 'Card did not expose wrapped note bounds'
-            $after = New-Object ReleaseCardProof+Rect
-            if (-not [ReleaseCardProof]::GetWindowRect($process.MainWindowHandle, [ref]$after)) { throw 'Card resized window unavailable' }
-            Write-Output ('WRAPPED_CARD_WINDOW=' + ($after.R - $after.L) + 'x' + ($after.B - $after.T))
-            if ($after.R - $after.L -ne $Width -or $after.B - $after.T -ne $Height -or [ReleaseCardProof]::IsZoomed($process.MainWindowHandle)) { throw 'Native card dimensions do not match requested proof size' }
+            if ([ReleaseCardProof]::IsZoomed($process.MainWindowHandle)) { throw 'Native card dimensions do not match requested proof size' }
+            Write-Output ('WRAPPED_CARD_WINDOW=' + $Width + 'x' + $Height)
         }
-        Write-Output ('WRAPPED_CARD_WAS_MAXIMIZED=' + [ReleaseCardProof]::IsZoomed($process.MainWindowHandle))
-        $null = [ReleaseCardProof]::ShowWindow($process.MainWindowHandle, 9)
-        Wait-Card { -not [ReleaseCardProof]::IsZoomed($process.MainWindowHandle) } 'Card window did not restore before resizing'
+        Write-Output ('WRAPPED_CARD_WAS_MAXIMIZED=' + $script:cardMaximized)
         Resize-Card 1024 768
         $normal = Card-Bounds
         $noteHeights = @(foreach ($index in 0..2) {
@@ -208,7 +335,7 @@ try {
         }
         Wait-Card { (Card-Bounds).scroll -eq 0 -and $script:cardLog -match '\[update\] card remaining=' } 'Notes did not return to their first line'
         Capture-Card 'wrapped-collapsed'
-        $wrappedReceipt = @{ contract = $Contract; binaryVersion = $binaryVersion; version = $document.version; sha256 = $hash; wrapped = $true; scrollVerified = $true; noteHeights = $noteHeights; overflowWindow = ('640x' + $overflowHeight); normal = $normal; minimum = $minimum; collapsed = $collapsed; scrolled = $scrolled; restartBefore = $restartBefore; restartAfter = $restartAfter; changes = $published; painted = $named; ids = $paintedIds; seeAll = $seeAll; simulatedOffer = '999.0.0'; success = $true }
+        $wrappedReceipt = @{ contract = $Contract; binaryVersion = $binaryVersion; version = $document.version; sha256 = $hash; wrapped = $true; scrollVerified = $true; noteHeights = $noteHeights; overflowWindow = ('640x' + $overflowHeight); normal = $normal; minimum = $minimum; collapsed = $collapsed; scrolled = $scrolled; restartBefore = $restartBefore; restartAfter = $restartAfter; changes = $published; painted = $named; ids = $paintedIds; seeAll = $seeAll; simulatedOffer = '999.0.0'; maximized = $script:cardMaximized; images = $script:cardImages; firstImage = $firstCapture; success = $true }
         $wrappedReceipt | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 (Join-Path $Evidence 'wrapped-card.json')
         Write-Output ('WRAPPED_CARD_RECEIPT=' + [Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $Evidence 'wrapped-card.json'))))
     }

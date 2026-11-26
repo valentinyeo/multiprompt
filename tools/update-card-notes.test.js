@@ -232,6 +232,12 @@ test('the real release proof uses the downloaded production notes and their matc
   assert.match(cardProof, /Released old card already links the release notes/);
   assert.match(cardProof, /Released old painter named no published note to wrap/);
   assert.match(cardProof, /Card binary carries no version marker/);
+  assert.match(cardProof, /SetProcessDpiAwarenessContext/);
+  assert.match(cardProof, /RedrawWindow/);
+  assert.match(cardProof, /Card client size differs from the size the app laid out/);
+  assert.match(cardProof, /Card screenshot cut the Restart button/);
+  assert.match(cardProof, /Card screenshot shows no See all row below the notes/);
+  assert.match(cardProof, /images = \$script:cardImages/);
   const script = read('tools/update-card-real-release-proof.ps1');
   assert.match(script, /\[switch\]\$Before/);
   assert.match(script, /'before-card'/);
@@ -405,10 +411,11 @@ test('IGSH-1118 native card wraps long real notes, scrolls internally, and rejec
   assert.ok(beforeLines.every(line => !/^[A-Z]+-\d+ /.test(line)), 'v0.28.983 shipped plain note lines, before ticket keys');
   const evidence = path.join(root, 'evidence/wrapped-card');
   fs.rmSync(evidence, { recursive: true, force: true });
+  const captured = ['released-card.png', 'wrapped-normal.png', 'wrapped-minimum.png', 'wrapped-scrolled.png', 'wrapped-collapsed.png'];
   const keepEvidence = label => {
     const target = path.join(evidence, label);
     fs.mkdirSync(target, { recursive: true });
-    for (const name of ['released-card.png', 'released-card.json', 'wrapped-card.json', 'debug.log']) {
+    for (const name of [...captured, 'released-card.json', 'wrapped-card.json', 'debug.log']) {
       const file = path.join(directory, label, name);
       if (fs.existsSync(file)) fs.copyFileSync(file, path.join(target, name));
     }
@@ -436,6 +443,10 @@ test('IGSH-1118 native card wraps long real notes, scrolls internally, and rejec
   for (const line of redReceipt.painted) assert.ok(beforeLines.includes(line), `Old painter named a line its own release never published: ${line}`);
   assert.deepEqual(redReceipt.ids, []);
   assert.equal(redReceipt.seeAll, false);
+  assert.equal(redReceipt.image.name, 'released-card', 'The old painter kept no first screenshot record');
+  assert.equal(redReceipt.image.window.width, 1024, 'The old painter screenshot was not taken at the normal proof size');
+  assert.equal(redReceipt.image.maximized, false, 'The old painter screenshot was taken while the window was maximized');
+  assert.ok(fs.existsSync(path.join(evidence, 'red', 'released-card.png')), 'The old painter screenshot was not kept as evidence');
   console.log('WRAPPED_CARD_RED v0.28.983 painted its own published notes without wrapped bounds');
   const green = proof(branch, notes, 'green', 'new');
   keepEvidence('green');
@@ -473,6 +484,29 @@ test('IGSH-1118 native card wraps long real notes, scrolls internally, and rejec
   assert.ok(greenReceipt.scrolled.scroll > 0, 'The wrapped notes did not scroll');
   assert.deepEqual(greenReceipt.restartAfter, greenReceipt.restartBefore, 'Scrolling moved Restart');
   assert.equal(greenReceipt.scrollVerified, true);
+  const pngSize = file => {
+    const head = fs.readFileSync(file);
+    return { width: head.readUInt32BE(16), height: head.readUInt32BE(20) };
+  };
+  const savedImage = (receipt, name) => receipt.images.find(image => image.name === name);
+  assert.equal(greenReceipt.image.name, 'released-card', 'The branch kept no first screenshot record');
+  assert.equal(greenReceipt.image.window.width, 1024, 'The first branch screenshot was not taken at the normal proof size');
+  assert.equal(greenReceipt.image.maximized, false, 'The first branch screenshot was taken while the window was maximized');
+  assert.deepEqual(pngSize(path.join(evidence, 'green', 'released-card.png')), { width: greenReceipt.image.window.width, height: greenReceipt.image.window.height }, 'The first branch screenshot is not the window size it records');
+  assert.equal(greenReceipt.image.restartVisible, true, 'The first branch screenshot does not show Restart');
+  assert.equal(greenReceipt.images.length, 5, 'The branch proof recorded no images for its captured card states');
+  for (const name of ['wrapped-normal', 'wrapped-minimum', 'wrapped-scrolled', 'wrapped-collapsed']) {
+    const image = savedImage(greenReceipt, name);
+    assert.ok(image, `Branch proof recorded no ${name} image`);
+    const file = path.join(evidence, 'green', `${name}.png`);
+    assert.ok(fs.existsSync(file), `Branch proof kept no ${name}.png in its evidence`);
+    assert.deepEqual(pngSize(file), { width: image.window.width, height: image.window.height }, `${name}.png is not the window size it records`);
+    assert.ok(image.client.left >= 0 && image.client.top >= 0 && image.client.left + image.client.width <= image.window.width && image.client.top + image.client.height <= image.window.height, `${name}.png records a client area outside its window`);
+    assert.equal(image.restartVisible, true, `${name}.png does not show Restart`);
+    assert.equal(image.seeAllVisible, true, `${name}.png does not show See all`);
+    assert.equal(image.notesVisible, true, `${name}.png shows no note lines`);
+  }
+  assert.equal(savedImage(greenReceipt, 'wrapped-normal').window.height, 768, 'The whole-card screenshot was not taken at the normal proof size');
   console.log(green.stdout);
 });
 
