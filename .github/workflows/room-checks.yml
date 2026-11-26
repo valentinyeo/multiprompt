@@ -79,6 +79,33 @@ jobs:
             timeout 90s python "$test" -v 2>&1 | tee "room-check-results/$(basename "$test").log" || status=1
           done
           exit "$status"
+      - name: Reject interrupted-answer loss with the production regression
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          control=$(mktemp -d "$RUNNER_TEMP/room-reply-control.XXXXXX")
+          mkdir -p "$control/src" "$control/tools"
+          cp src/room_bridge.py src/room_service.py "$control/src/"
+          cp tools/room-routing.test.py "$control/tools/"
+          python - "$control/src/room_bridge.py" <<'PY'
+          import pathlib, sys
+          path = pathlib.Path(sys.argv[1])
+          source = path.read_text()
+          changed = source.replace('answered = bool(reply.strip())', "answered = payload.get('status') == 'completed' and bool(reply.strip())")
+          if source == changed:
+              raise SystemExit('missing negative-control mutation')
+          path.write_text(changed)
+          PY
+          if timeout 90s python "$control/tools/room-routing.test.py" RoutingTest.test_ended_turn_preserves_text_and_identity_once_across_collection_and_restart -v > room-check-results/interrupted-loss-control.log 2>&1; then
+            cat room-check-results/interrupted-loss-control.log
+            exit 1
+          fi
+          grep -E "^FAIL: .*status='interrupted'.*text='Bravo says BROADCAST534'" room-check-results/interrupted-loss-control.log
+      - name: Run room driver regressions and negative controls
+        if: ${{ !cancelled() }}
+        run: |
+          set -o pipefail
+          timeout 120s pwsh -NoProfile -File tools/rooms-driver.test.ps1 2>&1 | tee room-check-results/driver.log
       - name: Run canonical room process tests
         if: ${{ !cancelled() }}
         run: |

@@ -29,9 +29,9 @@ function run(source, files = {}, expectedStatus = 0) {
   }
 }
 
-test('refresh survives restart and the newest answer cannot hide an older unanswered question', () => {
+test('refresh survives restart, backs off and stops without hiding older unanswered questions', () => {
   const source = read('room_frontend.zig');
-  run(`
+  const harness = `
 const std = @import("std");
 const HumanEvent = struct { id: []const u8, recipients: []const []const u8 };
 const Message = struct { author: ?u8 = 1, question_id: []const u8, member_id: []const u8 = "beta" };
@@ -50,30 +50,56 @@ var shown = true;
 var visible = true;
 const reply_fast_ms = 120000;
 const reply_window_ms = 1800000;
-var last_post_room: ?Location = null;
-var last_post_tick: u64 = 0;
-const w = struct { fn GetTickCount64() u64 { return 3600000; } };
+var reply_watch_started: ?u64 = null;
+var tick: u64 = 3600000;
+const app_state = struct { const g_main_hwnd = 0; };
+const TIMER_ROOM_REPLIES = 1;
+const w = struct {
+    fn GetTickCount64() u64 { return tick; }
+    fn KillTimer(_: usize, _: usize) bool { return true; }
+};
 fn isVisible() bool { return visible; }
 fn sameLocation(a: Location, b: Location) bool { return std.meta.eql(a, b); }
 ${declaration(source, 'fn replyPending(')}
 ${declaration(source, 'fn replyDelay(')}
+${declaration(source, 'fn stopReplyWatch(')}
 test "restart refreshes all stored unanswered questions without a recent send" {
     const questions = [_]HumanEvent{ .{ .id = "older", .recipients = &.{ "alpha", "beta" } }, .{ .id = "newer", .recipients = &.{"beta"} } };
     const answers = [_]Message{ .{ .question_id = "older", .member_id = "alpha" }, .{ .question_id = "newer" } };
     var item = OwnedModel{ .human_events = .{ .items = &questions }, .messages = .{ .items = &answers } };
     owned_model = &item;
     try std.testing.expect(replyPending(&item));
-    try std.testing.expect(replyDelay() != null);
+    try std.testing.expectEqual(@as(?u32, 2000), replyDelay());
+    tick += reply_fast_ms - 1;
+    try std.testing.expectEqual(@as(?u32, 2000), replyDelay());
+    tick += 1;
+    try std.testing.expectEqual(@as(?u32, 15000), replyDelay());
+    tick += reply_window_ms - reply_fast_ms - 1;
+    try std.testing.expectEqual(@as(?u32, 15000), replyDelay());
+    tick += 1;
+    try std.testing.expectEqual(@as(?u32, null), replyDelay());
+    tick += 3600000;
+    try std.testing.expectEqual(@as(?u32, null), replyDelay());
+    try std.testing.expect(replyPending(&item));
     front = .hidden;
+    stopReplyWatch();
     try std.testing.expectEqual(@as(?u32, null), replyDelay());
     front = .{ .selected = .{} };
-    try std.testing.expect(replyDelay() != null);
+    try std.testing.expectEqual(@as(?u32, 2000), replyDelay());
     const complete = [_]Message{ answers[0], answers[1], .{ .question_id = "older" } };
     item.messages.items = &complete;
     try std.testing.expect(!replyPending(&item));
     try std.testing.expectEqual(@as(?u32, null), replyDelay());
+    item.messages.items = &answers;
+    try std.testing.expectEqual(@as(?u32, 2000), replyDelay());
+    item.bindings.items = &.{};
+    try std.testing.expectEqual(@as(?u32, null), replyDelay());
 }
-`);
+`;
+  run(harness);
+  const unbounded = harness.replace('    if (age < reply_fast_ms) return 2000;\n    if (age < reply_window_ms) return 15000;\n    return null;', '    _ = age;\n    return 2000;');
+  assert.notEqual(unbounded, harness);
+  assert.match(run(unbounded, {}, 1), /restart refreshes all stored unanswered questions[\s\S]*FAIL \(TestExpectedEqual\)/);
 });
 
 test('freshly created rooms send posts through the journal, including capability-gated requests', () => {
@@ -520,6 +546,9 @@ test "names resolve to stable aliases" {
     try std.testing.expectEqual(@as(?usize, 1), post.namedRecipients("@agent_123 again", &members, &out));
     try std.testing.expectEqual(@as(?usize, null), post.namedRecipients("@Research NotesElse", &members, &out));
     try std.testing.expectEqual(@as(?usize, 0), post.namedRecipients("a@b.example", &members, &out));
+    const unicode = [_]post.Recipient{ .{ .alias = "agent_123", .display_name = "Zoë / QA 東京!" }, .{ .alias = "beta", .display_name = "Beta" } };
+    try std.testing.expectEqual(@as(?usize, 1), post.namedRecipients("@Zoë / QA 東京! hello", &unicode, &out));
+    try std.testing.expectEqualStrings("agent_123", out[0]);
     const ambiguous = [_]post.Recipient{ .{ .alias = "a", .display_name = "Same" }, .{ .alias = "b", .display_name = "Same" } };
     try std.testing.expectEqual(@as(?usize, null), post.namedRecipients("@same hello", &ambiguous, &out));
 }

@@ -30,6 +30,8 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
+      - name: Test room driver readiness, reply roles and failed-member retry
+        run: timeout 120s pwsh -NoProfile -File tools/rooms-driver.test.ps1
       - name: Test the squash merge helper builds its own title
         run: node --test tools/automerge-admit-run.test.js
       - name: Test commit identity enforcement

@@ -464,9 +464,7 @@ class RoomBridge:
     def retry_sentence(self, member_id, detail):
         row = self.store.db.execute('SELECT display_name FROM members WHERE id=?', (member_id,)).fetchone()
         name = str(row['display_name']) if row is not None and row['display_name'] else ''
-        if re.fullmatch(r'[A-Za-z0-9_-]{1,64}', name) is None:
-            return 'No answer. The agent %s. Send the question again as a mention of that chat to retry only it.' % detail
-        return 'No answer. %s %s. Send it again in the room as @%s to retry only that chat.' % (name, detail, name)
+        return 'No answer. %s %s. Type @ in the room and choose that chat from the mention picker, then send the question again to retry only it.' % (name or 'The agent', detail)
 
     def collect_reply(self, work, scope, progress, page):
         turn = progress['turn']
@@ -515,7 +513,7 @@ class RoomBridge:
                             fail('reply_too_large')
                 elif turn is not None and event.get('turn') == turn and event.get('kind') == 'turn.ended':
                     reply = '\n\n'.join(part[1] for part in parts)
-                    answered = payload.get('status') == 'completed' and bool(reply.strip())
+                    answered = bool(reply.strip())
                     text = reply if answered else self.retry_sentence(work['member_id'], 'did not complete a reply')
                     response_id = str(uuid.uuid5(uuid.NAMESPACE_URL, 'multibot-room-reply:' + work['message_id']))
                     self.store.command(dict(op='agent_reply', command_id=response_id, room_id=work['room_id'], parent_event_id=work['parent_event_id'], member_id=work['member_id'], response_id=response_id, text=text))

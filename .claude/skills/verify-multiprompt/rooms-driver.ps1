@@ -139,6 +139,7 @@ function Room-Window { $windows = @(Visible-Children 'MultiPromptRoomView'); if 
 function Open-Room([string]$Name) {
     $offset = (Read-Shared "$settings/debug.log").Length
     Invoke-JourneyCommand -Text $Name
+    [void](Wait-For "the room window for $Name" { Room-Window } 30)
     $settle = [Diagnostics.Stopwatch]::StartNew()
     while ($settle.Elapsed.TotalSeconds -lt 5) {
         if (-not (Room-Window)) { break }
@@ -559,7 +560,7 @@ Host remote-1
             $index = [int]$saved.active_tab
             $index -ge 0 -and $index -lt $tabs.Count -and $tabs[$index].name -ceq 'Bravo' -and -not (Room-Window)
         })
-        Invoke-JourneyCommand -Text 'Rooms534'
+        Open-Room 'Rooms534'
         Invoke-JourneyCommand 'Edit room'
         $room = Wait-For 'room editor' { Room-Window }
         Press @(0x09) 'Tab: search member chats'
@@ -618,14 +619,14 @@ Host remote-1
         $problems = @()
         foreach ($member in @($state.rooms | ForEach-Object { $_.tables.members } | Where-Object { $_.active -eq 1 })) {
             $name = [string]$member.display_name
-            $own = @($replies | Where-Object { $_.member_id -ceq $member.id })
+            $own = @($replies | Where-Object { $_.member_id -ceq $member.id -and $_.text -notlike 'No answer.*' })
             $context = @()
             $previous = 0
             foreach ($delivery in @($events | Where-Object { $_.type -eq 'human' -and @($_.recipients) -contains $member.id } | Sort-Object { [int]$_.seq })) {
                 $context += @($replies | Where-Object { $_.member_id -cne $member.id -and [int]$_.seq -gt $previous -and [int]$_.seq -lt [int]$delivery.seq })
                 $previous = [int]$delivery.seq
             }
-            if ($own.Count -eq 0) { $problems += "$name has no saved reply in the room"; continue }
+            if ($replies.member_id -cnotcontains $member.id) { $problems += "$name has no saved reply in the room"; continue }
             $expected = @((@($own) + @($context)) | Sort-Object { [int]$_.seq })
             Open-Member $name
             [void](Wait-For "$name chat shows its own room replies and the room context delivered to it, in room order" {
@@ -661,7 +662,7 @@ Host remote-1
                 if ($next -lt 0) { $problems += "$name saved transcript is missing the room context '$($reply.text)' delivered to it" } else { $position = $next }
             }
         }
-        Invoke-JourneyCommand -Text 'Rooms534'
+        Open-Room 'Rooms534'
         $visible = Shot-Room 'room-order'
         $position = -1
         foreach ($reply in $replies) {
@@ -682,7 +683,7 @@ Host remote-1
         [void](Wait-For 'both providers answered while the room was closed' { @((Snapshot 'away-answered').inputs | Where-Object { $_.marker -ceq 'AWAY534' }).Count -eq 2 } 30)
         $savedWhileAway = @(Room-Events (Snapshot 'away-while-closed') | Where-Object { $_.type -eq 'agent_reply' -and $_.text -like '* says AWAY534' }).Count
         $result.observations += @{ fact = 'saved room replies while the room was closed'; count = $savedWhileAway; expected = 2 }
-        Invoke-JourneyCommand -Text 'Rooms534'
+        Open-Room 'Rooms534'
         [void](Wait-For 'both away replies saved after returning to the room' { @(Room-Events (Snapshot 'away-return-poll') | Where-Object { $_.type -eq 'agent_reply' -and $_.text -like '* says AWAY534' }).Count -eq 2 } 60)
         $visible = Shot-Room 'away-return'
         if ($visible -notmatch 'Alpha says AWAY534' -or $visible -notmatch 'Bravo says AWAY534') { throw 'Replies that arrived while away are missing after returning to the room' }
@@ -699,7 +700,7 @@ Host remote-1
         Release-Replies 'RESTART534'
         Await-Replies 'RESTART534'
         [void](Shot 'restart-replies-with-room-closed')
-        Invoke-JourneyCommand -Text 'Rooms534'
+        Open-Room 'Rooms534'
         $visible = Shot-Room 'restart-return'
         if ($visible -notmatch 'Alpha says RESTART534' -or $visible -notmatch 'Bravo says RESTART534') { throw 'Restarted desktop lost answers to the unanswered room question' }
     }
@@ -709,8 +710,11 @@ Host remote-1
         Open-Room 'Rooms534'
         Send-Text 'FAIL534' -Room
         [void](Wait-For 'both provider failure receipts' { @((Snapshot 'failed-turn').inputs | Where-Object { $_.marker -ceq 'FAIL534' }).Count -eq 2 })
+        $question = @(Room-Events (Snapshot 'failed-turn-question') | Where-Object { $_.type -eq 'human' -and $_.text -ceq 'FAIL534' })
+        if ($question.Count -ne 1) { throw 'Expected exactly one FAIL534 parent event' }
+        $parent = [string]$question[0].id
         $failure = @(Wait-For 'one saved failed member turn' {
-            $failed = @(Room-Events (Snapshot 'failed-turn-saved') | Where-Object { $_.type -eq 'agent_reply' -and $_.text -like 'No answer*' })
+            $failed = @(Room-Events (Snapshot 'failed-turn-saved') | Where-Object { $_.type -eq 'agent_reply' -and $_.parent_event_id -ceq $parent -and $_.text -like 'No answer.*' })
             if ($failed.Count -eq 1) { $failed } else { $null }
         })
         $members = @((Snapshot 'failed-turn-members').rooms | ForEach-Object { $_.tables.members } | Where-Object { $_.active -eq 1 })
@@ -718,14 +722,21 @@ Host remote-1
         if ($null -eq $failedMember) { throw 'The failed member is missing from the saved room' }
         $failedName = [string]$failedMember.display_name
         [void](Wait-For 'the other member answered FAIL534 once' {
-            $replies = @(Room-Events (Snapshot 'failed-turn-answers') | Where-Object { $_.type -eq 'agent_reply' -and $_.text -like '* says FAIL534' })
+            $replies = @(Room-Events (Snapshot 'failed-turn-answers') | Where-Object { $_.type -eq 'agent_reply' -and $_.parent_event_id -ceq $parent -and $_.text -like '* says FAIL534' })
             $replies.Count -eq 1 -and $replies[0].member_id -ne $failure[0].member_id
         } 30)
         Send-Text "@$failedName FAIL534" -Room
-        [void](Wait-For 'saved retry for the failed member only' { @(Room-Events (Snapshot 'retry-poll') | Where-Object { $_.type -eq 'human' -and $_.text -ceq "@$failedName FAIL534" }).Count -eq 1 } 20)
+        $retry = @(Wait-For 'saved retry for the failed member only' {
+            $events = @(Room-Events (Snapshot 'retry-poll') | Where-Object { $_.type -eq 'human' -and $_.text -ceq "@$failedName FAIL534" })
+            if ($events.Count -eq 1 -and @($events[0].recipients).Count -eq 1 -and $events[0].recipients[0] -ceq $failedMember.id) { $events }
+        } 20)
         [void](Wait-For 'two saved FAIL534 answers from two members' {
-            $replies = @(Room-Events (Snapshot 'recovered-poll') | Where-Object { $_.type -eq 'agent_reply' -and $_.text -like '* says FAIL534' })
-            $replies.Count -eq 2 -and @($replies.member_id | Select-Object -Unique).Count -eq 2
+            $state = Snapshot 'recovered-poll'
+            $replies = @(Room-Events $state | Where-Object { $_.type -eq 'agent_reply' -and $_.parent_event_id -in @($parent, $retry[0].id) -and $_.text -like '* says FAIL534' })
+            $inputs = @($state.inputs | Where-Object { $_.marker -ceq 'FAIL534' })
+            $replies.Count -eq 2 -and @($replies.member_id | Select-Object -Unique).Count -eq 2 -and
+                @($replies | Where-Object { $_.parent_event_id -ceq $retry[0].id -and $_.member_id -ceq $failedMember.id }).Count -eq 1 -and
+                $inputs.Count -eq 3 -and @($inputs | Where-Object { $_.sid -ceq $failedMember.provider_sid }).Count -eq 2
         } 60)
         $visible = Shot-Room 'failed-turn-recovered'
         foreach ($member in $members) {
@@ -738,7 +749,7 @@ Host remote-1
         $before = @(Room-Events (Snapshot 'history-before') | Where-Object { $_.type -eq 'agent_reply' })
         if ($before.Count -eq 0) { throw 'No saved replies exist to check for stale or missing history' }
         Open-Member 'Alpha'
-        Invoke-JourneyCommand -Text 'Rooms534'
+        Open-Room 'Rooms534'
         $visible = Shot-Room 'history-reloaded'
         foreach ($reply in $before) {
             if ($visible -notmatch [regex]::Escape($reply.text)) { throw "Room history is missing saved reply '$($reply.text)' after reopening" }
@@ -756,7 +767,7 @@ Host remote-1
         }
         [void](Wait-For 'Bravo is closed before the room adds it again' $bravoGone 5)
         [void](Shot 'closed-bravo-gone')
-        Invoke-JourneyCommand -Text 'Rooms534'
+        Open-Room 'Rooms534'
         Invoke-JourneyCommand 'Edit room'
         [void](Wait-For 'room editor' { Room-Window })
         Press @(0x09) 'Tab: search member chats'
@@ -793,7 +804,7 @@ Host remote-1
         Restart-Desktop
         $script:settings = "$fresh/roaming/ZigShell"
         [void](Wait-For 'account chats imported on fresh install' { (Read-Shared "$settings/session.json").Contains('rooms-alpha') } 90)
-        Invoke-JourneyCommand -Text 'Rooms534'
+        Open-Room 'Rooms534'
         [void](Wait-For 'discovered existing room view' { Room-Window })
         $visible = Shot-Room 'fresh-discovery'
         if ($visible -notmatch 'Rooms534') { throw 'Existing room is missing on a fresh install of the same account' }

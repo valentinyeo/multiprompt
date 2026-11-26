@@ -90,7 +90,9 @@ release a newer action, and proves `finishCommand`, `launchQueuedCommand` and `r
 release without a visibility test. The accepted-post fixture's third case proves a same-room read, a
 foreign-room receipt and a refusal leave the room untouched.
 
-## Still open, with the evidence that carries it
+## Earlier open findings, with the evidence that carried them
+
+The interrupted-answer finding below was diagnosed at `418f5ce81` and corrected in the recovery section at the end of this document. Its final-head hosted proof remains pending.
 
 - Step 4/7 at a56ae6d7b: Alpha's saved transcript holds `BROADCAST534` and `Alpha says BROADCAST534`,
   the room store holds Alpha's delivery `8ceb9885` as written and accepted, and the room event seq 4 is
@@ -133,3 +135,75 @@ The run at `dd6331199` (Verify desktop rooms 45722205958) passed cases 1, privat
 - The saved failure sentence asked the user to resend the question to the room, which asks every member
   again. It now names the member and asks for `@<name>`, so the retry asks only that chat. The room view
   had no restart control and now has no restart plumbing either.
+
+## Recovery review at 418f5ce81
+
+The goal is to resolve genuine recovery findings before PR 1396 merges. This fix pass is OpenAI
+`gpt-6.1-sol`, not an independent verifier. The earlier DeepSeek review also overlaps an author family.
+
+At the reviewed head, [Room safety 45727235769](https://github.com/valentinyeo/multiprompt/actions/runs/45727235769)
+and [Tests 45727236830](https://github.com/valentinyeo/multiprompt/actions/runs/45727236830) succeeded.
+[Native Rooms 45727275008](https://github.com/valentinyeo/multiprompt/actions/runs/45727275008) failed cases
+4, 6 and 12. [PR verifier 45727373482](https://github.com/valentinyeo/multiprompt/actions/runs/45727373482)
+failed case 8. These results do not cover the new fix head.
+
+Accepted findings and corrections:
+
+- **Collected answers were discarded.** Native `step-6-state.json` contains Bravo's assistant text
+  `Bravo says BROADCAST534`. `step-12-debug.log` records delivery `cdcab94f` with `parts=1 bytes=23
+  status=interrupted answered=0`, while room event seq 5 in `failed-turn-saved-state.json` is a generated
+  failure. The inspected `step-4.png` shows that failure even though Bravo's sidebar preview shows the
+  answer. Collection now publishes nonempty final text regardless of terminal status. Scope checks,
+  delivery-derived response UUID, transactional publication and the native status remain unchanged.
+- **Reopening was read too early.** The verifier's `step-8.png` still shows Alpha's private chat.
+  Its saved state already contains both restart answers, and `debug.log` later presents 11 room messages
+  at `00:24:50.531`. Reopens now use `Open-Room`, which waits for the real room window. `Shot-Room`
+  still waits for presented history and requires both answers in pixels.
+- **Generated failures are not native assistant messages.** Case 6 excludes them only from the member's
+  own native-answer expectations. Peer context still includes legitimate failure replies in user role
+  and saved order. The room still requires every saved reply on screen.
+- **Failure counts belonged to the wrong turn.** The native artifact has failures at seq 5 and 15.
+  Case 12 now selects the FAIL534 parent, requires one failure plus one successful baseline answer,
+  and checks the retry recipient, three provider inputs and exactly two distinct successful members.
+- **ASCII-only retry advice excluded valid names.** Failure guidance now uses the actual mention picker,
+  rather than inventing a command from a display name. Regressions include spaces, punctuation, Unicode
+  and duplicate names. The existing ambiguous-name rejection remains intact.
+- **Reply polling was unbounded.** One observation window now uses the existing two-second, then
+  fifteen-second schedule and stops after thirty minutes. Snapshot reads cannot renew it. Reopening
+  or an accepted new send can restart it. Host sweeps and uncertain-command recovery are separate.
+- **The PR body understated the full patch.** Its scope now includes member discovery, capabilities,
+  store metadata, helper publication, transport diagnostics, the desktop journal and recorder repair.
+
+The proposed blanket rollback after `launchBytes` returns false is rejected. `launchPrepared` also
+replays records that were already uncertain. A local failure of that retry cannot prove that an older
+attempt had no remote effect. `room_journal.updateLocked` deliberately forbids returning to prepared.
+This pass keeps that conservative invariant, including a first local launch refusal, rather than adding
+a downgrade that can lose an accepted command. Durable uncertain-before-launch and exact replay remain.
+A prepared-only rollback would need a separate proven transition; this pass does not claim that optimization.
+
+Regression coverage is wired to public hosted workflows, not executed on the shared server:
+
+- `tools/room-routing.test.py` exercises completed, interrupted, cancelled, failed and error turns, each
+  with text, empty text and whitespace. It repeats collection before and after reopening the bridge and
+  checks exact text, room, member, parent and the delivery-derived response ID. Room safety restores the
+  old status gate as a negative control and requires the interrupted-text case to fail.
+- `tools/room-reliability.test.js` compiles the production pending-reply and delay logic with a fake clock.
+  It checks fast polling, backoff, the cap, reopening and unanswered older questions. A mutation that
+  restores unbounded polling must fail. The picker and parser regressions retain non-ASCII shown names.
+- `tools/rooms-driver.test.ps1` executes the actual driver case bodies against controlled observations.
+  It rejects early room reads, missing answer pixels, retry fanout, duplicate successful-member answers,
+  a missing baseline, missing or reordered peer failure context, forged assistant roles and missing
+  native answers. These checks are driver regressions, not substitute native transport proof.
+
+Still pending: final-head Room safety, Tests and native Rooms; a verifier outside OpenAI, DeepSeek and
+Google without Claude; phone read/retry proof; and controlled real-transport lost-receipt proof.
+Case 13 remains UNREACHABLE. An ordinary successful send does not satisfy it. Cases 9/10 remain
+UNREACHABLE. Android's bundled collectors select only `pending`, so they cannot collect desktop
+`pending_features_1` deliveries. MUBO-536 remains the other owner's Todo/unassigned dependency; no Android
+source was edited and neither client pair nor Rooms is Done.
+
+Faults were reported before edits. The driver and repository-check faults route to the existing
+MUBO-533 and recorder MUBO-579 tickets on board 13734, not duplicate tickets or board 2060.
+This worker has no board login and made no board writes. The owner must record them there.
+No local tests, syntax probes, compilers, linters or installs ran. `rooms-breaks.md` is preserved.
+Manual no-comments review found no added code comments or suppressions. Deslop is unavailable.

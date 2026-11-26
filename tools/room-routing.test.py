@@ -229,13 +229,63 @@ class RoutingTest(unittest.TestCase):
         self.assertTrue(all('No answer' in e['text'] and 'again' in e['text'] for e in replies))
         names = {m['id']: m['display_name'] for m in self.bridge.store.members(self.room)}
         for reply in replies:
-            self.assertIn('@' + names[reply['member_id']], reply['text'])
-            self.assertNotIn('@' + names[[i for i in names if i != reply['member_id']][0]], reply['text'])
+            self.assertIn(names[reply['member_id']], reply['text'])
+            self.assertIn('Type @ in the room and choose that chat from the mention picker', reply['text'])
+            self.assertNotIn(names[[i for i in names if i != reply['member_id']][0]], reply['text'])
         self.runtime.answer = True
         self.post('question')
         self.sweep()
         self.assertEqual(2, len(self.sent_to('alpha')))
         self.assertEqual(2, len(self.sent_to('beta')))
+
+    def test_ended_turn_preserves_text_and_identity_once_across_collection_and_restart(self):
+        self.runtime.answer = False
+        for status in ('completed', 'interrupted', 'cancelled', 'failed', 'error'):
+            for text in ('Bravo says BROADCAST534', '', ' \t\n'):
+                with self.subTest(status=status, text=text):
+                    sent = self.post('question', ['beta'])
+                    self.sweep()
+                    delivery = sent['deliveries'][0]
+                    member = next(m for m in self.bridge.store.members(self.room) if m['id'] == delivery['member_id'])
+                    work = self.bridge.store.execute(dict(op='delivery_work', room_id=self.room, delivery_id=delivery['id']))
+                    scope = dict(host_uuid=self.host, room_id=self.room, parent_event_id=sent['event']['id'], member_id=member['id'])
+                    self.runtime.reply(member['provider_sid'], delivery['id'], scope, text)
+                    self.runtime.events[member['provider_sid']][-1]['event']['payload']['status'] = status
+                    progress = self.bridge.store.db.execute('SELECT * FROM reply_progress WHERE delivery_id=?', (delivery['id'],)).fetchone()
+                    page = self.runtime.request(dict(op='events_subscribe', sid=member['provider_sid'], after=progress['after_seq']))['result']
+                    errors = io.StringIO()
+                    with redirect_stderr(errors):
+                        self.bridge.collect_reply(work, scope, progress, page)
+                        self.bridge.collect_reply(work, scope, progress, page)
+                    self.assertIn('status=' + status + ' answered=' + str(int(bool(text.strip()))), errors.getvalue())
+                    self.assertEqual(status, self.runtime.events[member['provider_sid']][-1]['event']['payload']['status'])
+                    before = list(self.runtime.submits)
+                    self.bridge.close()
+                    self.open()
+                    self.sweep()
+                    self.bridge.collect_reply(work, scope, progress, page)
+                    replies = [e for e in self.sweep()['events'] if e['type'] == 'agent_reply' and e['parent_event_id'] == sent['event']['id']]
+                    self.assertEqual(1, len(replies))
+                    reply = replies[0]
+                    self.assertEqual(self.room, reply['room_id'])
+                    self.assertEqual(member['id'], reply['member_id'])
+                    self.assertEqual(str(uuid.uuid5(uuid.NAMESPACE_URL, 'multibot-room-reply:' + delivery['id'])), reply['response_id'])
+                    if text.strip():
+                        self.assertEqual(text, reply['text'])
+                    else:
+                        self.assertTrue(reply['text'].startswith('No answer. Beta '))
+                        self.assertIn('mention picker', reply['text'])
+                    self.assertEqual(before, self.runtime.submits)
+
+    def test_retry_guidance_uses_the_real_picker_for_all_display_names(self):
+        member = next(m for m in self.bridge.store.members(self.room) if m['alias'] == 'beta')
+        for name in ('Alpha Bot', 'Research / QA!', 'Zoë 東京', 'Alpha', '@nested name', 'a' * 128):
+            with self.subTest(name=name):
+                self.bridge.store.db.execute('UPDATE members SET display_name=? WHERE id=?', (name, member['id']))
+                guidance = self.bridge.retry_sentence(member['id'], 'did not complete a reply')
+                self.assertTrue(guidance.startswith('No answer. ' + name + ' '))
+                self.assertIn('Type @ in the room and choose that chat from the mention picker', guidance)
+                self.assertNotIn('as @' + name, guidance)
 
     def test_no_answer_decision_records_the_turn_rows_it_read(self):
         self.runtime.answer = False

@@ -53,6 +53,9 @@ const TIMER_ROOM_UI: usize = 0xB313;
 const TIMER_ROOM_EVIDENCE: usize = 0xB314;
 const TIMER_ROOM_DISCOVERY: usize = 0xB315;
 const TIMER_ROOM_REPLIES: usize = 0xB316;
+const reply_fast_ms = 120000;
+const reply_window_ms = 1800000;
+var reply_watch_started: ?u64 = null;
 const Candidate = struct {
     sid: [80]u8 = undefined,
     sid_len: usize = 0,
@@ -1619,8 +1622,14 @@ fn replyPending(item: *const OwnedModel) bool {
 fn replyDelay() ?u32 {
     if (!enabled or !created or !shown or !isVisible() or front != .selected) return null;
     const current = owned_model orelse return null;
-    if (!std.mem.eql(u8, current.value.room_id, &front.selected.room_id) or !replyPending(current)) return null;
-    return 2000;
+    if (!std.mem.eql(u8, current.value.room_id, &front.selected.room_id)) return null;
+    if (!replyPending(current)) { reply_watch_started = null; return null; }
+    const now = w.GetTickCount64();
+    if (reply_watch_started == null) reply_watch_started = now;
+    const age = now -% reply_watch_started.?;
+    if (age < reply_fast_ms) return 2000;
+    if (age < reply_window_ms) return 15000;
+    return null;
 }
 
 fn armReplyWatch() void {
@@ -1630,6 +1639,7 @@ fn armReplyWatch() void {
 }
 
 fn stopReplyWatch() void {
+    reply_watch_started = null;
     _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM_REPLIES);
 }
 
@@ -1743,6 +1753,7 @@ fn finishCommand(c: *rooms.Controller, completion: rooms.Completion, fresh: bool
     var outcome: [192]u8 = undefined;
     diagnostics.syncLog(std.fmt.bufPrint(&outcome, "[rooms] command finished kind={s} state={s} fresh={} visible={}", .{ @tagName(item.kind), @tagName(state), fresh, visible }) catch unreachable);
     if (state == .accepted and item.kind == .post) {
+        if (front == .selected and sameLocation(front.selected, .{ .store = item.location, .room_id = item.room_id })) reply_watch_started = null;
         retireSubmittedDraft(item);
     }
     if (evidence) |bytes| {

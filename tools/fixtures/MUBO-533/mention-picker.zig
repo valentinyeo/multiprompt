@@ -34,3 +34,13 @@ test "the picker inserts the full shown name and preserves the preceding draft" 
     try std.testing.expectEqual(@as(usize, 11), selected_end);
     try std.testing.expect(!view.picker);
 }
+
+test "the picker inserts spaces punctuation and Unicode without changing the member name" {
+    const L = std.unicode.utf8ToUtf16LeStringLiteral;
+    var view = View{ .model = .{ .members = &.{.{ .alias = L("agent_123456"), .name = L("Zoë / QA 東京!") }} } };
+    chooseMention(&view, 0);
+    try std.testing.expectEqualSlices(u16, L("@Zoë / QA 東京! "), inserted[0..inserted_len]);
+    try std.testing.expectEqual(@as(usize, 7), selected_start);
+    try std.testing.expectEqual(@as(usize, 11), selected_end);
+    try std.testing.expect(!view.picker);
+}
