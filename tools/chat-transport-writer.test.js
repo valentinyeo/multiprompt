@@ -9,6 +9,11 @@ const root = path.resolve(__dirname, '..');
 const boundary = String.raw`
 const w = struct {
     const HANDLE = ?*anyopaque;
+    var ticks: u64 = 0;
+    fn GetTickCount64() u64 {
+        ticks +%= 1;
+        return ticks;
+    }
     fn Sleep(_: u32) void { std.Thread.yield() catch {}; }
     fn SetEvent(_: HANDLE) i32 { return 1; }
     fn WaitForSingleObject(_: HANDLE, _: u32) u32 { Sleep(1); return 0; }
@@ -35,6 +40,7 @@ const state = struct {
 var test_host: ?*Host = null;
 var entered: std.atomic.Value(bool) = .init(false);
 var released: std.atomic.Value(bool) = .init(false);
+fn debugLog(_: []const u8) void {}
 
 test "MUBO-532 reader retries do not cancel an SSH handshake already in progress" {
     hosts[0] = .{ .starting = true };
@@ -62,7 +68,7 @@ test "blocked SSH writes leave incoming data and other channels usable with boun
     try host.channels.append(a, &healthy);
     try std.testing.expect(write(&noisy, "first"));
     try std.testing.expect(std.mem.eql(u8, host.outgoing.items[0].bytes, "{\"channel\":1,\"watch\":false,\"terminal\":false,\"open\":true,\"data\":\"first\"}\n"));
-    const writer = try std.Thread.spawn(.{}, transmit, .{&host});
+    const writer = try std.Thread.spawn(.{}, transmit, .{ &host, host.generation, null, null });
     defer {
         lock(&host);
         host.running = false;
@@ -104,8 +110,9 @@ test('production SSH writer releases the host mutex and isolates input overflow'
     .replace('const state = @import("app_state.zig");', '')
     .replaceAll('@import("idle_budget.zig")', 'struct { pub fn bump(_: anytype) void {} }')
     .replaceAll('@import("console.zig")', 'struct {}')
-    .replaceAll('@import("chat_session.zig")', 'struct {}');
-  assert.match(source, /fn transmit\(host: \*Host\)/, 'shared transport has an independent writer');
+    .replaceAll('@import("chat_session.zig")', 'struct {}')
+    .replaceAll('@import("diagnostics.zig").debugLog', 'debugLog');
+  assert.match(source, /fn transmit\(host: \*Host, generation: u32, input: w\.HANDLE, process: w\.HANDLE\)/, 'shared transport has an independent writer');
   const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'mp-transport-writer-'));
   try {
     const fixture = path.join(folder, 'writer.zig');
