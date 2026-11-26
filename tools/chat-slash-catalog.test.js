@@ -21,13 +21,27 @@ test('slash routing covers the interactive builtins catalog', () => {
 test('live commands are routed before the outbox and keep the draft on refusal', () => {
   const source = fs.readFileSync(path.join(root, 'src/chat_send.zig'), 'utf8');
   const send = source.slice(source.indexOf('pub fn sendChatPrompt()'), source.indexOf('pub fn chatSendChoice('));
-  assert.ok(send.indexOf('.decide(live, text') < send.indexOf('chatEchoEnqueueForShell('));
+  assert.ok(send.indexOf('.decideForAgent(live, shell.ai_agent, text') < send.indexOf('chatEchoEnqueueForShell('));
   assert.match(send, /\.plan, \.permissions => \{\s*chatModeOpenPicker\(route == \.plan\);\s*return;/);
   assert.match(send, /\.unavailable => \{\s*showHeaderNoticeAscii\("Not available in live chat"[^]*?return;/);
-  assert.match(send, /\.model => \{\s*if \(shell\.ai_agent == 3\) \{\s*chatPiModelPicker\(\);\s*\} else \{\s*showHeaderNoticeAscii\("Model picker is coming soon"[^]*?return;/);
+  assert.match(send, /\.model => \{\s*if \(shell\.ai_agent == 3\) \{\s*chatPiModelPicker\(\);\s*\} else if \(shell\.ai_agent == 8\) \{\s*clearChatModelCommand\(\);\s*@import\("plus_menu\.zig"\)\.open\(\);\s*\} else \{\s*showHeaderNoticeAscii\("Model picker is coming soon"[^]*?return;/);
   const finish = source.slice(source.indexOf('pub fn chatModeFinish('), source.indexOf('fn chatModeOpenPicker('));
   assert.ok(finish.indexOf('if (!job.ok)') < finish.indexOf('SetWindowTextW('));
   assert.match(finish, /std\.meta\.eql\(job\.key, chatFileIdentityForShell\(app_state\.active_shell\)\)/);
+});
+
+test('antigravity model routes to the plus menu and its skills still send', () => {
+  const slash = fs.readFileSync(path.join(root, 'src/chat_slash.zig'), 'utf8');
+  const decide = slash.slice(slash.indexOf('pub fn decideForAgent('), slash.indexOf('fn equals('));
+  assert.match(decide, /if \(ai_agent != 8\) return decide\(live, text, selected_skill, interactive_hint\);/);
+  assert.match(decide, /if \(!live or selected_skill\) return \.send;/);
+  assert.match(decide, /return if \(route\(true, text\) == \.model\) \.model else \.send;/);
+  const send = fs.readFileSync(path.join(root, 'src/chat_send.zig'), 'utf8');
+  const model = send.slice(send.indexOf('.model => {'), send.indexOf('.login => {'));
+  assert.ok(model.indexOf('chatPiModelPicker()') < model.indexOf('shell.ai_agent == 8'), 'the Pi picker keeps its own branch');
+  assert.ok(model.indexOf('shell.ai_agent == 8') < model.indexOf('plus_menu.zig'), 'the plus menu opens from the Antigravity branch');
+  assert.match(model, /clearChatModelCommand\(\);\s*@import\("plus_menu\.zig"\)\.open\(\);/);
+  assert.ok(model.indexOf('plus_menu.zig') < model.indexOf('Model picker is coming soon'), 'other chats keep the coming-soon notice');
 });
 
 test('command notices keep the title within the space beside the notice', () => {

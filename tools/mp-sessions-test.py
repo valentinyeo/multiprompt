@@ -13,6 +13,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 MP_SESSIONS = ROOT / "tools" / "mp-sessions"
+MP_SEND = ROOT / "tools" / "mp-send"
 MUBO_194_FIXTURES = ROOT / "tools" / "fixtures" / "MUBO-194"
 
 FAKE_READER = r'''
@@ -153,6 +154,10 @@ class MpSessionsTest(unittest.TestCase):
         return subprocess.run([sys.executable, str(MP_SESSIONS), *args], capture_output=True, text=True,
                               env=self.env(**extra), cwd=str(self.work), timeout=60)
 
+    def run_send(self, *args, **extra):
+        return subprocess.run([sys.executable, str(MP_SEND), *args], capture_output=True, text=True,
+                              env=self.env(**extra), cwd=str(self.work), timeout=60)
+
     def servers_file(self, slot=None, hostname=None):
         facts = json.loads((ROOT / "tools/fixtures/MUBO-294/servers.json").read_text(encoding="utf-8"))
         if hostname is not None:
@@ -172,14 +177,14 @@ class MpSessionsTest(unittest.TestCase):
             return []
         return [value for name, value in (json.loads(line) for line in self.log.read_text(encoding="utf-8").splitlines()) if name == kind]
 
-    def mark_running(self, started):
-        key = hashlib.sha256(("claude:" + started["sid"]).encode()).hexdigest()[:32]
+    def mark_running(self, started, provider="claude"):
+        key = hashlib.sha256((provider + ":" + started["sid"]).encode()).hexdigest()[:32]
         path = self.host / (key + ".config.json")
         self.assertTrue(path.is_file(), str(path))
         config = json.loads(path.read_text(encoding="utf-8"))
         config["enabled"] = True
         (self.host / (key + ".config.json")).write_text(json.dumps(config), encoding="utf-8")
-        (self.host / (key + ".state.json")).write_text(json.dumps(dict(sid=started["sid"], provider="claude",
+        (self.host / (key + ".state.json")).write_text(json.dumps(dict(sid=started["sid"], provider=provider,
                                                                        pid=os.getpid())), encoding="utf-8")
 
     def identity_chat(self, provider="claude", sid="caller-session", tmux="live-caller", name="My Chat"):
@@ -196,9 +201,9 @@ class MpSessionsTest(unittest.TestCase):
         self.state_file.write_text(json.dumps(state), encoding="utf-8")
 
     def test_SOFT_2451_whoami_json_identifies_only_the_caller_for_every_host_provider(self):
-        for provider in ("claude", "codex", "pi", "hax", "cursor"):
+        for provider in ("claude", "codex", "pi", "hax", "cursor", "antigravity"):
             self.identity_chat(provider, provider + "-session", "live-" + provider)
-        for provider in ("claude", "codex", "pi", "hax", "cursor"):
+        for provider in ("claude", "codex", "pi", "hax", "cursor", "antigravity"):
             for hosted in (False, True):
                 with self.subTest(provider=provider, hosted=hosted):
                     extra = dict(MULTIBOT_PROVIDER=provider, MULTIBOT_SID=provider + "-session") if hosted else {}
@@ -437,6 +442,40 @@ class MpSessionsTest(unittest.TestCase):
         self.assertEqual(names, {"Caller", "Peer"})
         for row in listed:
             self.assertEqual(row.get("workspace"), "Home")
+
+    def test_MUBO_583_antigravity_can_start_and_list(self):
+        started = self.parsed(self.run_sessions("start", "--name", "Antigravity Lead", "--workspace", "Home",
+                                               "--provider", "antigravity"))
+        self.assertEqual(started["provider"], "antigravity")
+        key = hashlib.sha256(("antigravity:" + started["sid"]).encode()).hexdigest()[:32]
+        config = json.loads((self.host / (key + ".config.json")).read_text(encoding="utf-8"))
+        self.assertEqual(config["provider"], "antigravity")
+        self.assertIn(["start", "antigravity", started["sid"]], self.events("host"))
+        listed = {row["tmux"]: row for row in self.parsed(self.run_sessions("list", "--json"))}
+        self.assertEqual(listed[started["tmux"]]["provider"], "antigravity")
+
+    def test_MUBO_583_an_antigravity_chat_gets_a_message_from_another_chat(self):
+        target = self.parsed(self.run_sessions("start", "--name", "Antigravity Lead", "--workspace", "Home",
+                                               "--provider", "antigravity"))
+        sender = self.parsed(self.run_sessions("start", "--name", "Sender", "--workspace", "Home"))
+        self.mark_running(target, "antigravity")
+        self.mark_running(sender)
+        names = self.home / ".local/state/multiprompt/chat-names.json"
+        names.write_text(json.dumps({target["tmux"]: dict(name="Antigravity Lead", at=1.0),
+                                     sender["tmux"]: dict(name="Sender", at=1.0)}), encoding="utf-8")
+        done = self.run_send("--to", "Antigravity Lead", "hello there", "--json", MULTIPROMPT_TAB=sender["tmux"],
+                             MULTIPROMPT_READER_SOURCE=str(READER))
+        self.assertIn(done.returncode, (0, 3), done.stderr)
+        sent = json.loads(done.stdout)
+        self.assertRegex(sent.get("id") or "", r"\Amp-[0-9a-f]{32}\Z")
+        self.assertEqual([(row[1], row[2], row[3]) for row in self.message_rows()],
+                         [("antigravity", target["sid"], "From Sender: hello there")])
+
+    def test_MUBO_583_an_unknown_start_provider_is_still_refused(self):
+        failed = self.run_sessions("start", "--name", "No Provider", "--provider", "gemini")
+        self.assertEqual(failed.returncode, 2)
+        self.assertIn("invalid choice", failed.stderr)
+        self.assertEqual(self.start_configs(), [])
 
     def test_SOFT_3055_send_by_name_targets_the_named_chat(self):
         peer = self.parsed(self.run_sessions("start", "--name", "Peer", "--workspace", "Home"))
