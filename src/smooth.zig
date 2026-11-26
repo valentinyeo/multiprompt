@@ -471,7 +471,7 @@ pub fn fillRoundedTriangle(hdc: HANDLE, left: i32, top: i32, right: i32, bottom:
     const cx: f32 = @as(f32, @floatFromInt(right)) - corner;
     const cy: f32 = @as(f32, @floatFromInt(top)) + corner;
     for (0..arc_steps + 1) |step| {
-        const angle = -std.math.pi / 2 + std.math.pi / 2 * @as(f32, @floatFromInt(step)) / @as(f32, @floatFromInt(arc_steps));
+        const angle = -std.math.pi / 2.0 + std.math.pi / 2.0 * @as(f32, @floatFromInt(step)) / @as(f32, @floatFromInt(arc_steps));
         points[step + 1] = .{
             .x = @intFromFloat(@round(cx + corner * @cos(angle))),
             .y = @intFromFloat(@round(cy + corner * @sin(angle))),
