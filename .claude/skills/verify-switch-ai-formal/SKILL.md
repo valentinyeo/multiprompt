@@ -35,7 +35,7 @@ One logical chat address, at most two pending switch requests, five successful s
 
 ## Coverage and sync
 
-Last reviewed source/model sync commit is `764e3716f`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
+Last reviewed source/model sync commit is `26f1c2ca5`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
 
 MUBO-585 puts Antigravity in `HOST_AUTO_SWITCH_ORDER`, so a chat whose plan runs out can land on Antigravity and a chat already on Antigravity can move off it. `HOST_AUTO_SWITCH_TRIGGERS` and `host_usage_limit` already read the Antigravity `result` event, so the detector is unchanged; the saved order, the native probe's `FollowOrder` steps, `tools/chat-auto-switch.test.js` and the chat-auto-switch journey change instead. Merging master `764e3716f` (MUBO-532, MUBO-587) touches no file covered by this skill. The TLC provider set and bounds stay at three providers, so the model does not explore Antigravity as a target. Reader and auto-switch test hashes and sync commit `764e3716f` move; the model, bounds, decision table, replays and mutation controls are unchanged. Hosted CI must rerun the full self-test and native replay.
 
@@ -96,6 +96,8 @@ MUBO-528 makes `start_message_worker` ask the store whether a message is due bef
 MUBO-525 changes only the reader's event push: a synced live snapshot now reads the store read-only, the minute retention sweep probes read-only before it writes, the folder watch drops `IN_CLOSE_WRITE`, and the push loop wakes only for `store.sqlite3` or its `-wal`. The twelve covered `host_switch_*`, `host_usage_limit` and `host_auto_switch_*` functions are unchanged, including `host_switch_follow`, so only the reader's whole-file hash and the sync commit move. Bounds, decisions, probes and mutations stay the same. Merging master `2d3eeee17` carries MUBO-452's fresh-start queue hold, MUBO-304's ready tab wait and MUBO-528's due-check before a message worker forks, all outside every covered switch function.
 
 MUBO-243's merge of master `5908369f8` puts MUBO-525's idle push loop in the same reader that keeps a cleared chat's name. All twelve covered `host_switch_*`, `host_usage_limit` and `host_auto_switch_*` functions are unchanged, as is every other covered file, the model, bounds, decisions, probes and mutations, so only the reader's whole-file hash and the sync commit move.
+
+Merging master `26f1c2ca5` brings MUBO-583 (starting and messaging an Antigravity chat), MUBO-584 (keeping an Antigravity chat's history apart from Claude) and MUBO-586 (a live `/model` opening Antigravity's picker) into the branch. None of them touches `src/chat_history_reader.py`, `tools/chat-switch-ai.test.js`, `tools/chat-auto-switch.test.js` or the `tools/fixtures/SOFT-2469/` limit events, so every recorded whole-file hash stays and only the sync commit moves. The twelve covered `host_switch_*`, `host_dispatch_switch`, `host_usage_limit` and `host_auto_switch_*` functions are unchanged, as are `HOST_AUTO_SWITCH_ORDER`, the three-provider model, bounds, decisions, replays and mutations. Hosted CI must rerun the full self-test and native replay.
 
 | Source | Covered behavior |
 | --- | --- |
