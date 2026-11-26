@@ -273,7 +273,7 @@ test('background spawning reuses the hand-made path without switching or refocus
   assert.match(spawning, /background_workspace != null\) @import\("win32.zig"\)\.SWP_NOACTIVATE/);
   assert.match(spawning, /if \(!app_state.g_restoring and background_workspace == null\) \{\s*if \(app_state.g_focus_user_action_tick != 0\) switchToShellByUser\(idx\) else switchToShell\(idx\);\s*requestShellRefocus/);
   assert.match(spawning, /if \(background_workspace\) \|workspace\| \{\s*app_state.shells\[idx\]\.workspace = workspace/);
-  assert.match(spawning, /if \(findLocalTmuxTab\(app_state.g_pending_tmux_host, session\)\) \|existing\|/);
+  assert.match(spawning, /if \(findLocalTmuxTab\(@import\("native_session\.zig"\)\.hostFor\(kind\), session\)\) \|existing\|/);
   assert.doesNotMatch(spawning, /SetForegroundWindow|SetFocus\(/);
 });
 
