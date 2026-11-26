@@ -13,6 +13,7 @@ on:
       - 'tools/mp-sessions-test.py'
       - 'tools/mp-layout.mjs'
       - 'tools/mp-layout-host.test.js'
+      - 'tools/mp-spawn-provider.test.js'
       - 'tools/mb.mjs'
       - 'tools/check-servers-slots.mjs'
       - 'tools/check-servers-slots.test.js'
@@ -54,6 +55,8 @@ jobs:
           set +e
           node --test --test-reporter=tap tools/mp-layout-host.test.js tools/check-servers-slots.test.js > "$RUNNER_TEMP/input/layout.log" 2>&1
           echo "head_layout=$?" >> "$GITHUB_ENV"
+          node --test --test-reporter=tap tools/mp-spawn-provider.test.js > "$RUNNER_TEMP/input/spawn.log" 2>&1
+          echo "head_spawn=$?" >> "$GITHUB_ENV"
           timeout 180s python3 tools/zsb-port-holder.test.py -v > "$RUNNER_TEMP/input/bridge.log" 2>&1
           echo "head_bridge=$?" >> "$GITHUB_ENV"
           timeout 300s python3 tools/mp-sessions-test.py -v > "$RUNNER_TEMP/input/sessions.log" 2>&1
@@ -62,7 +65,7 @@ jobs:
           echo "head_health=$?" >> "$GITHUB_ENV"
           timeout 180s python3 -m unittest tools/agent-notifications/test_mp_notify_relay.py -v > "$RUNNER_TEMP/input/relay.log" 2>&1
           echo "head_relay=$?" >> "$GITHUB_ENV"
-          cat "$RUNNER_TEMP/input/bridge.log" "$RUNNER_TEMP/input/sessions.log" "$RUNNER_TEMP/input/health.log" "$RUNNER_TEMP/input/relay.log"
+          cat "$RUNNER_TEMP/input/spawn.log" "$RUNNER_TEMP/input/bridge.log" "$RUNNER_TEMP/input/sessions.log" "$RUNNER_TEMP/input/health.log" "$RUNNER_TEMP/input/relay.log"
           true
       - name: Run the same tests against the base source
         shell: bash
@@ -72,7 +75,7 @@ jobs:
             exit 0
           fi
           git worktree add --detach "$RUNNER_TEMP/base" "$BASE_SHA"
-          cp tools/mp-layout-host.test.js tools/mp-sessions-test.py "$RUNNER_TEMP/base/tools/"
+          cp tools/mp-layout-host.test.js tools/mp-sessions-test.py tools/mp-spawn-provider.test.js "$RUNNER_TEMP/base/tools/"
           cp tools/check-servers-slots.test.js tools/check-servers-slots.mjs "$RUNNER_TEMP/base/tools/"
           mkdir -p "$RUNNER_TEMP/base/tools/fixtures/MUBO-294" "$RUNNER_TEMP/base/tools/fixtures/MUBO-558" "$RUNNER_TEMP/base/tools/fixtures/MUBO-566"
           cp tools/fixtures/MUBO-566/*.json "$RUNNER_TEMP/base/tools/fixtures/MUBO-566/"
@@ -80,6 +83,8 @@ jobs:
           cp tools/fixtures/MUBO-558/mp-send-without-published-entries.py "$RUNNER_TEMP/base/tools/fixtures/MUBO-558/"
           (cd "$RUNNER_TEMP/base" && node --test --test-reporter=tap tools/mp-layout-host.test.js tools/check-servers-slots.test.js) > "$RUNNER_TEMP/input/layout-base.log" 2>&1
           echo "base_layout=$?" >> "$GITHUB_ENV"
+          (cd "$RUNNER_TEMP/base" && node --test --test-reporter=tap tools/mp-spawn-provider.test.js) > "$RUNNER_TEMP/input/spawn-base.log" 2>&1
+          echo "base_spawn=$?" >> "$GITHUB_ENV"
           (cd "$RUNNER_TEMP/base" && python3 tools/mp-sessions-test.py -v) > "$RUNNER_TEMP/input/sessions-base.log" 2>&1
           echo "base_sessions=$?" >> "$GITHUB_ENV"
           true
@@ -88,17 +93,21 @@ jobs:
         run: |
           set +e
           if [ -n "$BASE_SHA" ]; then
+            node tools/ci-receipt-summary.mjs "$RUNNER_TEMP/receipt" spawn "$RUNNER_TEMP/input/spawn.log" "$head_spawn" '^(?:not )?ok [0-9]+ - |^# (?:pass|fail) ' "$RUNNER_TEMP/input/spawn-base.log" "$base_spawn"
+            echo "receipt_spawn=$?" >> "$GITHUB_ENV"
             node tools/ci-receipt-summary.mjs "$RUNNER_TEMP/receipt" layout "$RUNNER_TEMP/input/layout.log" "$head_layout" '^(?:not )?ok [0-9]+ - MUBO-294 |^# (?:pass|fail) ' "$RUNNER_TEMP/input/layout-base.log" "$base_layout"
             echo "receipt_layout=$?" >> "$GITHUB_ENV"
             node tools/ci-receipt-summary.mjs "$RUNNER_TEMP/receipt" sessions "$RUNNER_TEMP/input/sessions.log" "$head_sessions" '^test_MUBO_294_|^(?:OK|FAILED)' "$RUNNER_TEMP/input/sessions-base.log" "$base_sessions"
             echo "receipt_sessions=$?" >> "$GITHUB_ENV"
           else
+            node tools/ci-receipt-summary.mjs "$RUNNER_TEMP/receipt" spawn "$RUNNER_TEMP/input/spawn.log" "$head_spawn" '^(?:not )?ok [0-9]+ - |^# (?:pass|fail) '
+            echo "receipt_spawn=$?" >> "$GITHUB_ENV"
             node tools/ci-receipt-summary.mjs "$RUNNER_TEMP/receipt" layout "$RUNNER_TEMP/input/layout.log" "$head_layout" '^(?:not )?ok [0-9]+ - MUBO-294 |^# (?:pass|fail) '
             echo "receipt_layout=$?" >> "$GITHUB_ENV"
             node tools/ci-receipt-summary.mjs "$RUNNER_TEMP/receipt" sessions "$RUNNER_TEMP/input/sessions.log" "$head_sessions" '^test_MUBO_294_|^(?:OK|FAILED)'
             echo "receipt_sessions=$?" >> "$GITHUB_ENV"
           fi
-          cp "$RUNNER_TEMP/input/bridge.log" "$RUNNER_TEMP/input/health.log" "$RUNNER_TEMP/input/relay.log" "$RUNNER_TEMP/receipt/"
+          cp "$RUNNER_TEMP/input/spawn.log" "$RUNNER_TEMP/input/bridge.log" "$RUNNER_TEMP/input/health.log" "$RUNNER_TEMP/input/relay.log" "$RUNNER_TEMP/receipt/"
           true
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
@@ -109,9 +118,11 @@ jobs:
       - name: Fail when the head tests or the receipt failed
         run: |
           test "$head_layout" = 0
+          test "$head_spawn" = 0
           test "$head_sessions" = 0
           test "$head_bridge" = 0
           test "$head_health" = 0
           test "$head_relay" = 0
+          test "$receipt_spawn" = 0
           test "$receipt_layout" = 0
           test "$receipt_sessions" = 0
