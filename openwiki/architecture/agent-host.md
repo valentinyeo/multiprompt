@@ -170,6 +170,21 @@ python3 <reader> host handover <provider> <sid>
 - One chat's error never blocks another chat: the message worker is per chat, and the
   backoff file is per chat.
 
+## Queue actions
+
+A client can act on one waiting message over message protocol 1. The operations are additive: a
+client that never sends them, including older Desktop and Android builds, keeps working unchanged.
+
+- `message_dismiss` cancels a `queued` or `failed` row, so the message never reaches the agent.
+- `message_edit` changes the text of a `queued` or `failed` row in place and leaves it `queued`. With
+  no `text`, it cancels the row and returns its text, so the client can put the text back in the
+  message box and send it again.
+- `message_send_now` moves a `queued` row in front of the rest of the queue and reports
+  `promoted: true`. `message_dispatch` then takes it first. On a row that is already first, or one
+  that is no longer `queued`, it changes nothing and reports `promoted: false`.
+- All three repeat cleanly: a second call reports the same row and, when nothing changed,
+  publishes no new event.
+
 ## Limits
 
 - One host per chat; no parallel agents inside one chat.

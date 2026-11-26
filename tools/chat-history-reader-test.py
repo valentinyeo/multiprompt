@@ -4825,6 +4825,102 @@ class IGSH_1266_SharedMessageHostTest(unittest.TestCase):
         self.assertEqual(self.submit().get('origin'), 'human')
 
 
+class MUBO_594_QueuedMessageActionsTest(unittest.TestCase):
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name)
+        self.path = self.home / 'sid.jsonl'
+        self.path.write_text('')
+        self.base = dict(message_protocol=1, provider='claude', sid='sid', tmux='fixture')
+        self.sources = {name: base64.b64encode((ROOT / 'src/chat_connectors' / (name + '.py')).read_bytes()).decode()
+                        for name in ('claude', 'codex')}
+        self.addCleanup(patch.stopall)
+        patch.object(reader, 'HOME', self.home).start()
+        patch.object(reader, 'CONNECTOR_SOURCES', self.sources, create=True).start()
+        patch.object(reader, 'resolve_tmux_agent', return_value=('sid', self.path)).start()
+        patch.object(reader, 'send_response_preserve_draft', return_value={'status': 'sent'}).start()
+
+    def request(self, op, **values):
+        return reader.message_store_request(dict(self.base, op='message_' + op, **values))
+
+    def submit(self, token='message_mubo594_0001', text='queued prompt'):
+        return self.request('submit', message_id=token, text=text)['message']
+
+    def queued(self):
+        snapshot = self.request('snapshot')
+        return [item['message'] for item in snapshot['items'] if 'message' in item]
+
+    def text(self, token='message_mubo594_0001'):
+        return self.request('status', message_id=token)['message']
+
+    def test_a_queued_message_lists_with_its_text_and_position(self):
+        self.submit()
+        self.submit('message_mubo594_0002', 'second prompt')
+        listed = self.queued()
+        self.assertEqual([row['text'] for row in listed], ['queued prompt', 'second prompt'])
+        self.assertEqual([row['state'] for row in listed], ['queued', 'queued'])
+        self.assertEqual([row['position'] for row in listed], [1, 2])
+
+    def test_edit_updates_the_text_in_place_and_stays_idempotent(self):
+        self.submit()
+        first = self.request('edit', message_id='message_mubo594_0001', text='a better prompt')
+        self.assertEqual((first['message']['text'], first['message']['state']), ('a better prompt', 'queued'))
+        second = self.request('edit', message_id='message_mubo594_0001', text='a better prompt')
+        self.assertEqual(first['seq'], second['seq'])
+        self.assertEqual([row['text'] for row in self.queued()], ['a better prompt'])
+        self.assertEqual(self.text()['text'], 'a better prompt')
+
+    def test_edit_without_text_cancels_and_hands_the_text_back(self):
+        self.submit()
+        reply = self.request('edit', message_id='message_mubo594_0001')['message']
+        self.assertEqual((reply['text'], reply['state']), ('queued prompt', 'cancelled'))
+        self.assertEqual(self.text()['state'], 'cancelled')
+        self.assertEqual(self.request('edit', message_id='message_mubo594_0001')['message']['state'], 'cancelled')
+
+    def test_delete_cancels_a_queued_message_once(self):
+        self.submit()
+        first = self.request('dismiss', message_id='message_mubo594_0001')['message']
+        second = self.request('dismiss', message_id='message_mubo594_0001')['message']
+        self.assertEqual((first['state'], second['state']), ('cancelled', 'cancelled'))
+        self.assertEqual([row['id'] for row in self.queued() if row['state'] == 'queued'], [])
+
+    def test_send_now_promotes_the_queued_message_to_the_front_once(self):
+        self.submit()
+        self.submit('message_mubo594_0002', 'second prompt')
+        promoted = self.request('send_now', message_id='message_mubo594_0002')
+        self.assertTrue(promoted['promoted'])
+        self.assertEqual([row['text'] for row in self.queued()], ['second prompt', 'queued prompt'])
+        again = self.request('send_now', message_id='message_mubo594_0002')
+        self.assertFalse(again['promoted'])
+        self.assertEqual([row['text'] for row in self.queued()], ['second prompt', 'queued prompt'])
+
+    def test_send_now_after_dispatch_is_an_idempotent_no_op(self):
+        self.submit()
+        self.request('dispatch')
+        self.assertNotEqual(self.text()['state'], 'queued')
+        reply = self.request('send_now', message_id='message_mubo594_0001')
+        self.assertFalse(reply['promoted'])
+        self.assertEqual(reply['message']['state'], self.text()['state'])
+
+    def test_a_client_that_never_sends_the_new_ops_keeps_working(self):
+        self.submit()
+        self.assertEqual(self.queued()[0]['state'], 'queued')
+        self.assertEqual(self.request('dismiss', message_id='message_mubo594_0001')['message']['state'], 'cancelled')
+        with self.assertRaises(ValueError):
+            self.request('edit_everything', message_id='message_mubo594_0001')
+
+    def test_the_new_ops_refuse_identities_they_do_not_own(self):
+        self.submit()
+        other = dict(self.base, sid='other-sid', tmux='other-chat')
+        with self.assertRaises(ValueError):
+            reader.message_store_request(dict(other, op='message_edit', message_id='message_mubo594_0001', text='hijack'))
+        with self.assertRaises(ValueError):
+            reader.message_store_request(dict(other, op='message_send_now', message_id='message_mubo594_0001'))
+        self.assertEqual((self.text()['text'], self.text()['state']), ('queued prompt', 'queued'))
+
+
 class IGSH_1900_MpSendReportTest(unittest.TestCase):
     def module(self):
         import importlib.machinery

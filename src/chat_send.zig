@@ -2575,6 +2575,19 @@ pub fn chatEchoRemove(id: u64) void {
     chatOutboxChanged();
 }
 
+pub fn chatEchoDropLocal(id: u64) void {
+    const ei = chatOutboxIndexById(id) orelse return;
+    const entry = app_state.g_chat_outbox.orderedRemove(ei);
+    if (!saveChatOutbox()) {
+        app_state.g_chat_outbox.insertAssumeCapacity(ei, entry);
+        showHeaderNoticeAscii("Could not save message removal; try again", 3500, true);
+        return;
+    }
+    if (entry.text.len > 0) std.heap.page_allocator.free(entry.text);
+    if (app_state.g_chat_verify_echo_id == id) chatVerifyClear();
+    chatOutboxChanged();
+}
+
 pub fn chatEchoRetryAllForActive() void {
     if (app_state.active_shell >= app_state.shell_count) return;
     var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
