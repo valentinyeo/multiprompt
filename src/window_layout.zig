@@ -147,6 +147,26 @@ pub fn activePaneContentRect(client: RECT) RECT {
     };
 }
 
+pub fn cellCounts(width: i32, height: i32, cell_w: i32, cell_h: i32) ?[2]i32 {
+    if (width <= 0 or height <= 0 or cell_w <= 0 or cell_h <= 0) return null;
+    const rows = std.math.clamp(@divTrunc(height, cell_h), 1, 512);
+    const cols = std.math.clamp(@divTrunc(width, cell_w), 1, 1024);
+    if (rows < 8 or cols < 20) return null;
+    return .{ rows, cols };
+}
+
+pub fn shellPaneCellCounts(cell_h: i32) ?[2]i32 {
+    const main = app_state.g_main_hwnd orelse return null;
+    var rc: RECT = std.mem.zeroes(RECT);
+    if (GetClientRect(main, &rc) == 0 or rc.right <= 0 or rc.bottom <= 0) return null;
+    const pane = activePaneContentRect(rc);
+    const cell_w = consoleCellW();
+    const col = centeredConsoleColumn(pane.right, pane.left, 0, cell_w);
+    const full_width = app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].full_width;
+    const width = if (full_width) pane.right - pane.left else col.width;
+    return cellCounts(width, pane.bottom - (pane.top + threadTitleHeight()), cell_w, cell_h);
+}
+
 pub fn repositionActive() void {
     @import("computer_pane.zig").sync();
     defer @import("computer_pane.zig").present();
@@ -537,6 +557,22 @@ pub fn invalidateSpinnerRects() void {
         }
         _ = InvalidateRect(app_state.g_main_hwnd, &title_rc, 0);
     }
+}
+
+test "MUBO-598 a server shell opens at the rows and columns of its full pane" {
+    const full = cellCounts(1500, 800, 15, 16).?;
+    try std.testing.expectEqual(@as(i32, 50), full[0]);
+    try std.testing.expectEqual(@as(i32, 100), full[1]);
+    const half = cellCounts(1200, 384, 15, 16).?;
+    try std.testing.expectEqual(@as(i32, 24), half[0]);
+    try std.testing.expectEqual(@as(i32, 80), half[1]);
+    try std.testing.expect(cellCounts(1560, 800, 0, 16) == null);
+    try std.testing.expect(cellCounts(1560, 0, 15, 16) == null);
+    try std.testing.expect(cellCounts(1560, 60, 15, 16) == null);
+    try std.testing.expect(cellCounts(120, 800, 15, 16) == null);
+    const huge = cellCounts(1_000_000, 200_000, 10, 10).?;
+    try std.testing.expectEqual(@as(i32, 512), huge[0]);
+    try std.testing.expectEqual(@as(i32, 1024), huge[1]);
 }
 
 test "ISSUE-444 Send button keeps blended corners at 100 and 150 percent" {

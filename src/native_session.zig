@@ -205,6 +205,10 @@ pub fn open(kind: app_state.ShellKind, tmux_session: ?[]const u8, shell_id: u32,
     slot.host = hostFor(kind);
     slot.rows = 24;
     slot.cols = 80;
+    if (@import("window_layout.zig").shellPaneCellCounts(shellFontHeight())) |size| {
+        slot.rows = size[0];
+        slot.cols = size[1];
+    }
     return .{ .hwnd = null, .pending = true, .host = slot.host };
 }
 
@@ -213,7 +217,10 @@ fn attachWindow(slot: *Slot) bool {
     const parent = app_state.g_main_hwnd orelse return false;
     slot.hwnd = createWindow(slot, parent);
     if (slot.hwnd == null) return false;
-    if (@import("inbox.zig").findShellById(slot.shell_id)) |idx| app_state.shells[idx].hwnd = slot.hwnd;
+    if (@import("inbox.zig").findShellById(slot.shell_id)) |idx| {
+        app_state.shells[idx].hwnd = slot.hwnd;
+        if (idx == app_state.active_shell) @import("window_layout.zig").repositionActive();
+    }
     return true;
 }
 
@@ -281,19 +288,35 @@ fn connectWorker(shell_id: u32) void {
     slot.channel = channel;
     slot.mutex.unlock();
     const ok = sendOpening(slot, channel, rows, cols, command_len);
+    if (!ok) {
+        dropChannel(shell_id);
+        postReady(shell_id, false);
+        return;
+    }
     lock(slot);
-    slot.opened = ok;
+    slot.opened = true;
     const current_rows = slot.rows;
     const current_cols = slot.cols;
     slot.mutex.unlock();
-    if (!ok) dropChannel(shell_id) else if (current_rows != rows or current_cols != cols) {
-        const line = std.fmt.allocPrint(a, "{{\"size\":[{d},{d}]}}", .{ current_rows, current_cols }) catch null;
-        if (line) |text| {
-            sendLine(slot, text);
-            a.free(text);
-        }
-    }
-    postReady(shell_id, ok);
+    sendSize(slot, current_rows, current_cols);
+    postSizeReport(shell_id);
+    postReady(shell_id, true);
+}
+
+pub fn sizeMessage(buf: []u8, rows: i32, cols: i32) []const u8 {
+    return std.fmt.bufPrint(buf, "{{\"size\":[{d},{d}]}}", .{ rows, cols }) catch "";
+}
+
+test "MUBO-598 a terminal resize leaves as one size line" {
+    var buf: [48]u8 = undefined;
+    try std.testing.expectEqualStrings("{\"size\":[50,104]}", sizeMessage(&buf, 50, 104));
+    try std.testing.expectEqualStrings("{\"size\":[8,20]}", sizeMessage(&buf, 8, 20));
+}
+
+fn sendSize(slot: *Slot, rows: i32, cols: i32) void {
+    if (!reportableSize(rows, cols)) return;
+    var buf: [48]u8 = undefined;
+    sendLine(slot, sizeMessage(&buf, rows, cols));
 }
 
 fn sendOpening(slot: *Slot, channel: *transport.Channel, rows: i32, cols: i32, command_len: usize) bool {
@@ -334,9 +357,18 @@ fn onResize(rows: c_int, cols: c_int, user: ?*anyopaque) callconv(.c) void {
     if (!slot.live or !reportableSize(rows, cols)) return;
     slot.rows = rows;
     slot.cols = cols;
-    const line = std.fmt.allocPrint(a, "{{\"size\":[{d},{d}]}}", .{ rows, cols }) catch return;
-    defer a.free(line);
-    sendLine(slot, line);
+    sendSize(slot, rows, cols);
+}
+
+fn postSizeReport(shell_id: u32) void {
+    const main = app_state.g_main_hwnd orelse return;
+    _ = w.PostMessageW(main, w.WM_APP_NATIVE_SIZE, shell_id, 0);
+}
+
+pub fn reportSize(shell_id: u32) void {
+    const slot = find(shell_id) orelse return;
+    const hwnd = slot.hwnd orelse return;
+    mp_terminal_window_report(hwnd);
 }
 
 pub fn pump(shell_id: u32) void {
@@ -392,8 +424,8 @@ pub fn ready(shell_id: u32, ok: bool) void {
     if (idx == app_state.active_shell and !app_state.g_chat_active and shell.hwnd != null) {
         _ = @import("chat_composer.zig").showShellConsole(@intCast(idx), w.SW_SHOW, "native-session");
         @import("window_layout.zig").repositionActive();
-        if (shell.hwnd) |hwnd| mp_terminal_window_report(hwnd);
     }
+    if (shell.hwnd) |hwnd| mp_terminal_window_report(hwnd);
 }
 
 pub fn alive(shell_id: u32) bool {
