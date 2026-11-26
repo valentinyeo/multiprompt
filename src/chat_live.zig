@@ -2,6 +2,7 @@ const std = @import("std");
 const chat_markdown = @import("chat_markdown.zig");
 const chat_options = @import("chat_options.zig");
 const chat_permission = @import("chat_permission.zig");
+const chat_activity = @import("chat_activity.zig");
 
 pub const MAX_LIVE: usize = 4;
 pub const MAX_PARKED: usize = 16;
@@ -30,10 +31,17 @@ pub const Item = struct {
     status: ItemStatus = .running,
     done: bool = false,
     key: u64 = 0,
+    step: [chat_activity.MAX_NAME]u8 = @splat(0),
+    step_len: usize = 0,
     text: std.ArrayList(u8) = .empty,
 
     pub fn idSlice(self: *const Item) []const u8 {
         return self.id[0..self.id_len];
+    }
+
+    fn setStep(self: *Item, value: []const u8) void {
+        self.step_len = @min(value.len, self.step.len);
+        @memcpy(self.step[0..self.step_len], value[0..self.step_len]);
     }
 
     fn setId(self: *Item, id: []const u8) void {
@@ -128,6 +136,8 @@ pub const Live = struct {
     held: bool = false,
     reply_in_history: bool = false,
     items: std.ArrayList(Item) = .empty,
+    workers: [chat_activity.MAX_WORKERS]chat_activity.Worker = @splat(chat_activity.Worker{}),
+    worker_count: usize = 0,
     request: Request = .{},
     prompt: chat_options.Prompt = .{},
     answers: [chat_options.MAX_QUESTIONS][MAX_ANSWER]u8 = @splat(@splat(0)),
@@ -140,6 +150,7 @@ pub const Live = struct {
     pub fn clear(self: *Live, a: std.mem.Allocator) void {
         for (self.items.items) |*item| item.text.deinit(a);
         self.items.clearRetainingCapacity();
+        self.worker_count = 0;
         self.held = false;
         self.reply_in_history = false;
         self.after = 0;
@@ -201,16 +212,46 @@ pub const Live = struct {
         h.update(self.turn[0..self.turn_len]);
         h.update(self.sent_id[0..self.sent_id_len]);
         for (self.sent_keys[0..self.sent_key_count]) |key| stampInt(&h, key);
+        stampInt(&h, self.workerStamp());
         for (self.items.items) |*item| {
             stampInt(&h, @intFromEnum(item.kind));
             stampInt(&h, @intFromEnum(item.status));
             stampInt(&h, @intFromBool(item.done));
             stampInt(&h, item.key);
             h.update(item.idSlice());
+            h.update(item.step[0..item.step_len]);
             stampInt(&h, @as(u64, @intCast(item.text.items.len)));
             h.update(item.text.items);
         }
         return h.final();
+    }
+
+    pub fn workerStamp(self: *const Live) u64 {
+        var h = std.hash.Wyhash.init(0);
+        stampInt(&h, @as(u64, @intCast(self.worker_count)));
+        for (self.workers[0..self.worker_count]) |*worker| {
+            h.update(worker.idSlice());
+            h.update(worker.harnessSlice());
+            h.update(worker.modelSlice());
+            h.update(worker.labelSlice());
+            stampInt(&h, worker.started_at);
+        }
+        return h.final();
+    }
+
+    pub fn setWorkers(self: *Live, rows_value: std.json.Value) void {
+        self.worker_count = 0;
+        const rows = switch (rows_value) {
+            .array => |array| array.items,
+            else => return,
+        };
+        for (rows) |row| {
+            if (self.worker_count >= self.workers.len) break;
+            var worker = chat_activity.Worker{};
+            worker.set(strOf(row, "id"), strOf(row, "harness"), strOf(row, "model"), strOf(row, "label"), intOf(row, "started_at") orelse 0, workerSource(strOf(row, "source")));
+            self.workers[self.worker_count] = worker;
+            self.worker_count += 1;
+        }
     }
 
     fn itemFor(self: *Live, a: std.mem.Allocator, id: []const u8, kind: ItemKind) !*Item {
@@ -271,6 +312,12 @@ fn settingsOf(payload: std.json.Value) Settings {
     };
 }
 
+fn workerSource(name: []const u8) chat_activity.Source {
+    if (std.mem.eql(u8, name, "plan-pick")) return .plan_pick;
+    if (std.mem.eql(u8, name, "subagent")) return .subagent;
+    return .unknown;
+}
+
 fn statusOf(name: []const u8) ItemStatus {
     if (std.mem.eql(u8, name, "failed") or std.mem.eql(u8, name, "error")) return .failed;
     if (std.mem.eql(u8, name, "interrupted")) return .interrupted;
@@ -324,6 +371,7 @@ pub fn applyValue(self: *Live, a: std.mem.Allocator, seq: u64, event: std.json.V
         self.reply_in_history = false;
         const line = eventLabel(payload);
         try target.setText(a, if (line.len > 0) line else strOf(payload, "tool"));
+        target.setStep(strOf(payload, "step"));
         target.done = false;
         target.status = .running;
     } else if (std.mem.eql(u8, kind, "item.done")) {
@@ -355,6 +403,8 @@ pub fn applyValue(self: *Live, a: std.mem.Allocator, seq: u64, event: std.json.V
             self.prompt = .{};
             self.answer_lens = @splat(0);
         }
+    } else if (std.mem.eql(u8, kind, "workers.snapshot")) {
+        if (fieldOf(payload, "workers")) |rows| self.setWorkers(rows);
     } else if (std.mem.eql(u8, kind, "turn.ended")) {
         self.held = self.state == .running and !self.reply_in_history;
         self.state = .idle;
@@ -740,6 +790,11 @@ pub fn applyPage(shell_id: u32, sid: []const u8, page: []const u8) bool {
         changed = changed or applied;
     }
     if (intOf(root, "next_after")) |after| live.after = @max(live.after, after);
+    if (fieldOf(root, "workers")) |rows| {
+        const before = live.workerStamp();
+        live.setWorkers(rows);
+        if (live.workerStamp() != before) changed = true;
+    }
     if (changed) _ = live.touchIfVisible();
     return changed;
 }
@@ -762,6 +817,7 @@ fn applySnapshot(live: *Live, a: std.mem.Allocator, snapshot: std.json.Value) !b
         }
     }
     next.after = after;
+    if (fieldOf(snapshot, "workers")) |rows| next.setWorkers(rows);
     next.card_dismissed = true;
     next.settings_seq = if (next.settings_known) after else 0;
     if (live.settings_seq > next.settings_seq) {
@@ -812,6 +868,38 @@ pub fn running(shell_id: u32) bool {
     defer mutex.unlock();
     for (&slots) |*live| {
         if (live.used and live.shell_id == shell_id) return live.state == .running;
+    }
+    return false;
+}
+
+fn itemStep(item: *const Item) []const u8 {
+    return switch (item.kind) {
+        .thinking => "Thinking",
+        .tool => if (item.step_len > 0) item.step[0..item.step_len] else "Working",
+        else => "",
+    };
+}
+
+pub fn activityFor(shell_id: u32, out: *chat_activity.Activity) bool {
+    mutex.lock();
+    defer mutex.unlock();
+    for (&slots) |*live| {
+        if (!live.used or live.shell_id != shell_id) continue;
+        out.* = .{ .running = live.state == .running };
+        for (live.workers[0..live.worker_count]) |worker| out.pushWorker(worker);
+        var current: []const u8 = "";
+        for (live.items.items) |*item| {
+            const label = itemStep(item);
+            if (label.len == 0) continue;
+            out.pushStep(label, !item.done);
+            if (!item.done) current = label;
+        }
+        if (current.len > 0) {
+            out.setStep(current);
+        } else if (out.running) {
+            out.setStep("Thinking");
+        }
+        return out.visible();
     }
     return false;
 }
@@ -1336,6 +1424,33 @@ test "D1 a tool step is one line and closes on item.done" {
     try std.testing.expectEqualStrings("Run the tests", live.items.items[0].text.items);
     try std.testing.expect(live.items.items[0].done);
     try std.testing.expectEqual(ItemStatus.ok, live.items.items[0].status);
+}
+
+test "MUBO-591 steps and sub-workers reach the live model and survive a snapshot" {
+    var live: Live = .{};
+    defer live.deinit(std.testing.allocator);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var name: [32]u8 = undefined;
+    _ = try applyValue(&live, std.testing.allocator, 1, try parse(a, "{\"kind\":\"turn.started\",\"turn\":\"t-1\"}"));
+    _ = try applyValue(&live, std.testing.allocator, 2, try parse(a, "{\"kind\":\"item.started\",\"item\":\"toolu_1\",\"payload\":{\"type\":\"tool_call\",\"tool\":\"Edit\",\"title\":\"Edit app.zig\",\"step\":\"Editing\"}}"));
+    _ = try applyValue(&live, std.testing.allocator, 3, try parse(a, "{\"kind\":\"workers.snapshot\",\"payload\":{\"workers\":[{\"id\":\"toolu_2\",\"source\":\"subagent\",\"harness\":\"pi\",\"model\":\"deepseek\",\"label\":\"audit the board\",\"started_at\":1700000000000}]}}"));
+    try std.testing.expectEqualStrings("Editing", live.items.items[0].step[0..live.items.items[0].step_len]);
+    try std.testing.expectEqual(@as(usize, 1), live.worker_count);
+    try std.testing.expectEqual(chat_activity.Source.subagent, live.workers[0].source);
+    try std.testing.expectEqualStrings("pi-deepseek", live.workers[0].name(&name));
+    const sid = "22222222-3333-4444-5555-591000000001";
+    defer release(5910);
+    _ = begin(5910, 0, sid);
+    const page = "{\"result\":{\"live_snapshot\":{\"seq\":9,\"events\":[{\"kind\":\"workers.snapshot\",\"payload\":{\"workers\":[]}}],\"requests\":[],\"workers\":[{\"id\":\"plan-pick:a\",\"source\":\"plan-pick\",\"harness\":\"hax\",\"model\":\"codex\",\"label\":\"w-1\",\"started_at\":1700000000000}]}}}";
+    try std.testing.expect(applyPage(5910, sid, page));
+    var activity: chat_activity.Activity = .{};
+    try std.testing.expect(activityFor(5910, &activity));
+    try std.testing.expectEqual(@as(usize, 1), activity.worker_count);
+    try std.testing.expectEqualStrings("hax-codex", activity.workers[0].name(&name));
+    var pill: [96]u8 = undefined;
+    try std.testing.expectEqualStrings("1 worker · hax-codex", chat_activity.pillText(&activity, &pill));
 }
 
 test "D2 an approval request fills the existing card and resolved clears it" {

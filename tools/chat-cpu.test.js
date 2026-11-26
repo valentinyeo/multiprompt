@@ -197,6 +197,15 @@ var g_working_rect: ?RECT = null;
 const g_shell_rect_count: usize = 0;
 fn chatStopVisible() bool { return false; }
 fn chatWorkingDotsVisible() bool { return false; }
+const chat_activity_view = struct {
+    fn reset() void {}
+    fn refresh() void {}
+    fn isVisible() bool { return false; }
+    fn layout(_: RECT, y: i32) i32 { return y; }
+};
+const chat_view = struct {
+    fn activityStrip(_: bool, dots: bool) bool { return dots; }
+};
 var g_chat_echo_layout_count: usize = 0;
 var g_chat_sel_anchor: usize = 0;
 var g_chat_sel_caret: usize = 0;

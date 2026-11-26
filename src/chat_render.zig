@@ -18,6 +18,8 @@ const DragFinish = @import("win32.zig").DragFinish;
 const chat_code = @import("chat_code.zig");
 const chat_table_expand = @import("chat_table_expand.zig");
 const chat_diff = @import("chat_diff.zig");
+const chat_activity_view = @import("chat_activity_view.zig");
+const chat_view = @import("chat_view.zig");
 const WINAPI = @import("win32.zig").WINAPI;
 const DWORD = @import("win32.zig").DWORD;
 const UINT = @import("win32.zig").UINT;
@@ -2103,18 +2105,7 @@ fn chatWorkingDotsVisible() bool {
 }
 
 pub fn chatWorkingSync() void {
-    if (app_state.g_chat_transcript_hwnd == null) return;
-    if ((g_working_rect != null) != chatWorkingDotsVisible()) {
-        var rc: RECT = std.mem.zeroes(RECT);
-        chatViewClientRect(&rc);
-        chatRelayoutPreservingScroll(rc.right - rc.left, rc.bottom - rc.top);
-        _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
-    } else if (g_working_rect) |source| {
-        var rc = source;
-        rc.top -= app_state.g_chat_scroll_y;
-        rc.bottom -= app_state.g_chat_scroll_y;
-        _ = InvalidateRect(app_state.g_chat_transcript_hwnd, &rc, 0);
-    }
+    chat_activity_view.sync(chatWorkingDotsVisible(), g_working_rect, app_state.g_chat_scroll_y);
 }
 
 fn chatPaintWorking(hdc: HANDLE, now: u64) void {
@@ -2514,6 +2505,7 @@ fn chatPaintChoices(hdc: HANDLE, view_h: i32, paint: RECT) void {
 pub fn chatRelayout(client_width: i32) void {
     app_state.g_chat_layout_count +%= 1;
     g_working_rect = null;
+    chat_activity_view.reset();
     app_state.g_chat_layout_dirty = false;
     if (app_state.g_chat_layout_width != client_width or app_state.g_chat_layout_scale != uiScaled(1024) or app_state.g_chat_layout_top_pad != app_state.g_chat_top_pad or app_state.g_chat_layout_font_pt != app_state.g_chat_font_pt or app_state.g_chat_find_layout_open != app_state.g_chat_find_open) app_state.g_chat_layout_reuse = 0;
     app_state.g_chat_layout_width = client_width;
@@ -2679,14 +2671,15 @@ pub fn chatRelayout(client_width: i32) void {
     if (@max(app_state.g_chat_sel_anchor, app_state.g_chat_sel_caret) >= chat_hit.pending_selection_base and
         (old_echo_count != app_state.g_chat_echo_layout_count or
             !std.mem.eql(u64, old_echo_ids[0..old_echo_count], app_state.g_chat_echo_layout_ids[0..app_state.g_chat_echo_layout_count]))) chatSelectionClear();
-    if (chatWorkingDotsVisible()) {
+    chat_activity_view.refresh();
+    if (chat_view.activityStrip(chat_activity_view.isVisible(), chatWorkingDotsVisible())) {
         y += chatBlockGapBefore(has_previous or app_state.g_chat_echo_layout_count > 0 or g_shell_rect_count > 0, .prose, true, .single);
         const sample = std.unicode.utf8ToUtf16LeStringLiteral("Ready.");
         var rc = chatMeasureBlockRect(hdc, sample, .{ .start = 0, .len = sample.len, .role = .prose, .first = true }, .single, width, y, null);
         rc.left += content.left;
         rc.right += content.left;
+        y = chat_activity_view.layout(rc, y);
         g_working_rect = rc;
-        y = rc.bottom;
     }
     app_state.g_chat_content_h = y;
 }
@@ -5409,6 +5402,7 @@ var selection_offer_sid: [40]u8 = @splat(0);
 var selection_offer_position: LPARAM = 0;
 
 fn chatTranscriptMouseDown(hwnd: HANDLE, x: i32, y: i32) void {
+    if (chat_activity_view.toggleAndRelayout(y, app_state.g_chat_scroll_y)) return;
     selection_completion_pending = false;
     const now = GetTickCount64();
     const near = @abs(x - app_state.g_chat_sel_last_x) <= uiScaled(4) and @abs(y - app_state.g_chat_sel_last_y) <= uiScaled(4);
@@ -5818,6 +5812,7 @@ pub fn chatPaintTranscriptContent(mem_dc: HANDLE, w: i32, h: i32, paint: RECT) v
             chatPaintShellRow(mem_dc, &g_shell_view.rows[g_shell_rect_row[i]], rc);
         }
         chatPaintWorking(mem_dc, GetTickCount64());
+        chat_activity_view.paintLine(mem_dc, app_state.g_chat_scroll_y, chatWorkingDotsVisible());
         if (app_state.g_chat_block_count == 0) {
             const entry = chatHistoryEntry(chatFileIdentity());
             const missing_note = if (entry) |e| e.missing_message[0] != 0 else false;
@@ -5837,6 +5832,7 @@ pub fn chatPaintTranscriptContent(mem_dc: HANDLE, w: i32, h: i32, paint: RECT) v
         } else g_note_logged = false;
     }
     chatPaintTopFade(mem_dc, w);
+    chat_activity_view.paintPill(mem_dc, w, app_state.g_chat_top_pad);
     chatPaintScrollUi(&canvas, mem_dc, w, @max(1, h - app_state.g_chat_bottom_inset));
     @import("chat_find_ui.zig").paint(mem_dc, w);
 }
