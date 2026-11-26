@@ -653,6 +653,7 @@ const ChatHit = struct { x: i32 = 0, y: i32 = 0, char: ?*usize = null };
 const link_detect = struct { const Range = struct { start: usize, end: usize }; };
 const DT_SINGLELINE: u32 = 1;
 const DT_NOPREFIX: u32 = 2;
+const DT_RIGHT: u32 = 8;
 var g_chat_tables: chat_markdown.TableCache = .{};
 var chat_received_parses: usize = 0;
 var g_chat_received: chat_markdown.BlockCache = .{};

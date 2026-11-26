@@ -28,6 +28,7 @@ var g_reaction_view: chat_reaction.View = .{};
 fn chatDisplayForIndex(_: usize) ?ChatDisplay { return null; }
 const chat_markdown = @import("chat_markdown.zig");
 const chat_code = @import("chat_code.zig");
+const chat_inline_code = @import("chat_inline_code.zig");
 const chat_style = @import("chat_style.zig");
 const link_detect = @import("link_detect.zig");
 const find_ui = @import("chat_find_ui.zig");
@@ -43,6 +44,7 @@ const ChatHit = struct { x: i32, y: i32, char: ?*usize = null, find: ?struct { p
 const DT_CALCRECT = 1;
 const DT_SINGLELINE = 2;
 const DT_NOPREFIX = 4;
+const DT_RIGHT = 8;
 const WM_MOUSEHWHEEL = 0x020e;
 const WM_MOUSEWHEEL = 0x020a;
 const CHAT_CODE_PAD = 12;
@@ -332,6 +334,7 @@ function execute(control) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'igsh421-grid-'));
   try {
     copyZig(['chat_hit.zig', 'chat_markdown.zig', 'chat_table_measure.zig', 'chat_code.zig', 'chat_style.zig', 'link_detect.zig', 'chat_reaction.zig', 'chat_reply.zig'], dir);
+    require('./fixtures/inline-stubs').writeChatInlineCode(dir);
     fs.writeFileSync(path.join(dir, 'chat_find_ui.zig'), 'pub var last: usize = 0;\npub fn paintRun(_: anytype, _: []const u16, at: usize, _: i32, _: i32, _: i32) void { last = at; }\n');
     fs.writeFileSync(path.join(dir, 'chat_skill.zig'), 'pub fn paint(_: anytype, _: anytype, _: u32) u32 { return 0; }\n');
     let functions = ['chatReceivedBlocks', 'chatBlockDisplayRange', 'chatRichSize', 'chatRichText', 'chatTableLayout', 'chatFlowTable', 'chatTableLayoutIn', 'chatFlowTableIn', 'chatFlowBlock', 'chatTableAt', 'chatTableSetScroll', 'chatTableMouseDown', 'chatTableMouseMove', 'chatTableWheel', 'chatFindY', 'chatReplyLineHeight'].map(name => body(name)).join('\n');

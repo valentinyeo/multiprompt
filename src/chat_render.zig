@@ -826,7 +826,7 @@ fn chatRichText(hdc: HANDLE, text: []const u16, area: RECT, level: u3, paint: bo
                         if (find.position >= offset + pos and find.position < offset + pos + count) find.y.* = rc.top;
                     }
                     if (pt.char != null) {
-                        const at = if (pt.y >= rc.top and pt.y < rc.bottom) chatCharAtX(hdc, segment, chat_inline_code.textOffset(rc.left, pt.x)) else if (pt.y < rc.top or pt.x <= rc.left) @as(usize, 0) else segment.len;
+                        const at = if (pt.y >= rc.top and pt.y < rc.bottom) chatCharAtX(hdc, segment, pt.x - rc.left) else if (pt.y < rc.top or pt.x <= rc.left) @as(usize, 0) else segment.len;
                         nearest.consider(pt.x, pt.y, rc.left, rc.top, rc.right, rc.bottom, offset + pos + at);
                     }
                     if (pt.find == null and pointInRect(rc, pt.x, pt.y)) {
@@ -838,7 +838,6 @@ fn chatRichText(hdc: HANDLE, text: []const u16, area: RECT, level: u3, paint: bo
                     @import("chat_find_ui.zig").paintRun(hdc, segment, offset + pos, rc.left, rc.top, line_h);
                     chatPaintSelectionRun(hdc, segment, offset + pos, rc.left, rc.top, line_h);
                     _ = SetTextColor(hdc, if (target != null) customColorOr("link", if (app_state.g_light_theme) RGB(30, 90, 170) else RGB(110, 175, 245)) else if (span.style.code) chat_inline_code.textColor(app_state.g_light_theme) else customColorOr("text", themeConsoleFg()));
-                    if (app_state.g_chat_hover_link != null and target != null and app_state.g_chat_hover_link.?.start == offset + target.?.start and app_state.g_chat_hover_link.?.end == offset + target.?.end) _ = SelectObject(hdc, chatLinkFont(style.code));
                     _ = chatDrawText(hdc, segment.ptr, @intCast(segment.len), &rc, DT_SINGLELINE | DT_NOPREFIX);
                 }
                 x += chat_inline_code.chipWidth(w, pad);
@@ -1934,7 +1933,8 @@ test "IGSH-537 clicking either side of a URL underscore opens the exact address"
         .{ .text = w("<https://example.test/session_auto_01> https://example.test/session_next_02"), .prefix = w("https://example.test/session_auto_01") },
     }) |sequence| {
         _ = SelectObject(dc, chatRichFont(.{ .code = sequence.code }, 0));
-        const next_x = chatTextWidth(dc, sequence.prefix) + space_w + 2;
+        const chip = if (sequence.code) 2 * chat_inline_code.padX() else 0;
+        const next_x = chatTextWidth(dc, sequence.prefix) + chip + space_w + 2;
         const target = chatRichText(dc, sequence.text, area, 0, false, .{ .x = next_x, .y = 2 }, 17, null, false) orelse return error.TestUnexpectedResult;
         const start = std.mem.indexOf(u16, sequence.text, url).?;
         try std.testing.expectEqual(@as(usize, 17) + start, target.start);

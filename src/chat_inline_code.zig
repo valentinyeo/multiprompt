@@ -39,10 +39,6 @@ pub fn chipRadius(rc: RECT, m: Metrics) i32 {
     return @max(0, @min(m.radius, @divTrunc(@max(0, rc.bottom - rc.top), 2)));
 }
 
-pub fn textOffset(text_left: i32, x: i32) i32 {
-    return x - text_left;
-}
-
 pub fn chipColor(light: bool) u32 {
     return if (light) light_chip else dark_chip;
 }
@@ -106,17 +102,12 @@ test "MUBO-593 a pill counts its padding before the line wraps" {
     }
 }
 
-test "MUBO-593 the pill grows past the text box while clicks map back to the code" {
+test "MUBO-593 the pill grows past the text box on every side" {
     const m = metrics(1);
     const text_rc = RECT{ .left = 210, .top = 8, .right = 260, .bottom = 27 };
     const pill = chipRect(text_rc, m);
     try std.testing.expect(pill.left < text_rc.left and pill.right > text_rc.right);
     try std.testing.expect(pill.top < text_rc.top and pill.bottom > text_rc.bottom);
-    try std.testing.expect(textOffset(text_rc.left, pill.left) < 0);
-    try std.testing.expect(textOffset(text_rc.left, pill.left + m.pad_x - 1) < 0);
-    try std.testing.expect(textOffset(text_rc.left, pill.right) > text_rc.right - text_rc.left);
-    try std.testing.expectEqual(@as(i32, 0), textOffset(text_rc.left, text_rc.left));
-    try std.testing.expectEqual(@as(i32, 50), textOffset(text_rc.left, text_rc.right));
 }
 
 test "MUBO-593 inline code sits on a tinted surface with its own calm monospace colour" {
