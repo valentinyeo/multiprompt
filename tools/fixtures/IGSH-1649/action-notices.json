@@ -62,6 +62,10 @@
     "selectChatReply: showHeaderNoticeAscii(\"This message is too large to quote\",3500,true)",
     "selectChatSkill: showHeaderNoticeAscii(\"This skill is too large for Chat View\",3500,true)"
   ],
+  "chat_queue_view.zig": [
+    "edit: showHeaderNoticeAscii(\"Editing a queued message\",2500,false)",
+    "sendNow: showHeaderNoticeAscii(\"Could not ask this chat to take the queued message now\",4000,true)"
+  ],
   "chat_render.zig": [
     "chatAttachFromClipboard: if(read_ok)chatAttachPaths(paths.items)elseshowHeaderNoticeAscii(\"Could not read those files\",3000,true)",
     "chatAttachFromClipboard: showHeaderNoticeAscii(\"Could not read the image on the clipboard\",3000,true)",
@@ -101,6 +105,7 @@
     "chatCancelFinish: else=>showHeaderNoticeAscii(\"Could not cancel the message; try again\",3500,true)",
     "chatEchoDiscardUnsentForActive: showHeaderNoticeAscii(\"No unsent messages for this tab\",3000,false)",
     "chatEchoDiscardUnsentForActive: showHeaderNoticeAscii(msg,3000,false)",
+    "chatEchoDropLocal: showHeaderNoticeAscii(\"Could not save message removal; try again\",3500,true)",
     "chatEchoPushQueuedForShell: if(!quiet)showHeaderNoticeAscii(\"Could not ask this chat's agent to take the queued message now\",4000,true)",
     "chatEchoPushQueuedForShell: showHeaderNoticeAscii(\"Asked Claude to take the queued message now\",2500,false)",
     "chatEchoPushQueuedForShell: showHeaderNoticeAscii(\"Could not reach this terminal; press Ctrl+X Ctrl+S in the terminal\",4000,true)",

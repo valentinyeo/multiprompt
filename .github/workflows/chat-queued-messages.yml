@@ -2,6 +2,19 @@ name: Queued messages tray
 
 on:
   pull_request:
+    paths:
+      - 'src/chat_queue.zig'
+      - 'src/chat_queue_view.zig'
+      - 'src/chat_echo.zig'
+      - 'src/chat_send.zig'
+      - 'src/chat_render.zig'
+      - 'src/chat_composer.zig'
+      - 'src/chat_history_reader.py'
+      - 'src/app_state.zig'
+      - 'tools/chat-history-reader-test.py'
+      - '.claude/skills/verify-multiprompt/features/chat-queued-messages.md'
+      - '.github/workflows/chat-queued-messages.yml'
+  workflow_dispatch:
 
 permissions:
   contents: read

@@ -22,7 +22,6 @@ const SelectObject = win32.SelectObject;
 const DeleteObject = win32.DeleteObject;
 const InvalidateRect = win32.InvalidateRect;
 
-const L = @import("startup.zig").L;
 const uiScaled = @import("drawing.zig").uiScaled;
 const RGB = @import("startup.zig").RGB;
 const chatDrawText = @import("dwrite_text.zig").draw;
@@ -184,14 +183,14 @@ pub fn paint(hdc: HANDLE) void {
     defer _ = SelectObject(hdc, old_font);
     _ = SetTextColor(hdc, inkColor());
     var wide: [96]u16 = undefined;
-    const title = L("Queued Messages");
+    const title = std.unicode.utf8ToUtf16LeStringLiteral("Queued Messages");
     @memcpy(wide[0..title.len], title);
     var title_rc = toRect(found.title);
     _ = chatDrawText(hdc, &wide, @intCast(title.len), &title_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
     countPill(hdc, found.badge);
     _ = SelectObject(hdc, metadataFont());
     _ = SetTextColor(hdc, subtitleColor());
-    const subtitle = L("Sends after agent finishes working");
+    const subtitle = std.unicode.utf8ToUtf16LeStringLiteral("Sends after agent finishes working");
     @memcpy(wide[0..subtitle.len], subtitle);
     var subtitle_rc = toRect(found.subtitle);
     _ = chatDrawText(hdc, &wide, @intCast(subtitle.len), &subtitle_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);

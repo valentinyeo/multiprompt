@@ -15,7 +15,7 @@ CI workflow: chat-queued-messages.yml
 
 Send a message to a chat whose agent is still working. The message waits, and the tray appears above the message box. Click the chevron to collapse it, the arrow to send early, the pencil to edit, or the bin to delete. Nothing else has to be open.
 
-## Driving it with the queue-tray workflow
+## Driving it with GitHub CI
 
 This surface is proved by `.github/workflows/chat-queued-messages.yml` on GitHub Linux; it is not a Windows desktop journey:
 
