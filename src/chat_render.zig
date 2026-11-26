@@ -10,6 +10,7 @@ const chat_reply = @import("chat_reply.zig");
 const chat_shell_sync = @import("chat_shell_sync.zig");
 const chat_transcript = @import("chat_transcript.zig");
 const chat_style = @import("chat_style.zig");
+const chat_inline_code = @import("chat_inline_code.zig");
 const chat_options = @import("chat_options.zig");
 const chat_drop = @import("chat_drop.zig");
 const chat_keynav = @import("chat_keynav.zig");
@@ -799,7 +800,8 @@ fn chatRichText(hdc: HANDLE, text: []const u16, area: RECT, level: u3, paint: bo
                     }
                 }
             }
-            if (x > 0 and chatTextWidth(hdc, text[pos..end]) > max_w - x) {
+            const pad = if (style.code) chat_inline_code.padX() else 0;
+            if (!chat_inline_code.fits(x, chatTextWidth(hdc, text[pos..end]), max_w, pad)) {
                 x = 0;
                 y += line_h;
             }
@@ -811,20 +813,20 @@ fn chatRichText(hdc: HANDLE, text: []const u16, area: RECT, level: u3, paint: bo
                     measure_end = pos + 1024;
                     if (text[measure_end - 1] >= 0xD800 and text[measure_end - 1] <= 0xDBFF) measure_end += 1;
                 }
-                var measured = GetTextExtentExPointW(hdc, text[pos..measure_end].ptr, @intCast(measure_end - pos), @max(0, max_w - x), &fit, null, &size) != 0;
+                var measured = GetTextExtentExPointW(hdc, text[pos..measure_end].ptr, @intCast(measure_end - pos), @max(0, max_w - x - 2 * pad), &fit, null, &size) != 0;
                 if (measure_end < end and fit + 2 >= @as(i32, @intCast(measure_end - pos))) {
-                    measured = GetTextExtentExPointW(hdc, text[pos..end].ptr, @intCast(end - pos), @max(0, max_w - x), &fit, null, &size) != 0;
+                    measured = GetTextExtentExPointW(hdc, text[pos..end].ptr, @intCast(end - pos), @max(0, max_w - x - 2 * pad), &fit, null, &size) != 0;
                 }
                 const count = chat_code.fitCount(text[pos..end], fit);
                 const segment = text[pos .. pos + count];
                 const w = if (measured and count == end - pos) size.cx else chatTextWidth(hdc, segment);
-                var rc = RECT{ .left = area.left + x, .top = area.top + y, .right = area.left + x + w, .bottom = area.top + y + line_h };
+                var rc = RECT{ .left = area.left + x + pad, .top = area.top + y, .right = area.left + x + pad + w, .bottom = area.top + y + line_h };
                 if (hit) |pt| {
                     if (pt.find) |find| {
                         if (find.position >= offset + pos and find.position < offset + pos + count) find.y.* = rc.top;
                     }
                     if (pt.char != null) {
-                        const at = if (pt.y >= rc.top and pt.y < rc.bottom) chatCharAtX(hdc, segment, pt.x - rc.left) else if (pt.y < rc.top or pt.x <= rc.left) @as(usize, 0) else segment.len;
+                        const at = if (pt.y >= rc.top and pt.y < rc.bottom) chatCharAtX(hdc, segment, chat_inline_code.textOffset(rc.left, pt.x)) else if (pt.y < rc.top or pt.x <= rc.left) @as(usize, 0) else segment.len;
                         nearest.consider(pt.x, pt.y, rc.left, rc.top, rc.right, rc.bottom, offset + pos + at);
                     }
                     if (pt.find == null and pointInRect(rc, pt.x, pt.y)) {
@@ -832,17 +834,14 @@ fn chatRichText(hdc: HANDLE, text: []const u16, area: RECT, level: u3, paint: bo
                     }
                 }
                 if (paint) {
-                    if (span.style.code) {
-                        const brush = CreateSolidBrush(chatCodePanelColor());
-                        _ = FillRect(hdc, &rc, brush);
-                        _ = DeleteObject(brush);
-                    }
+                    if (span.style.code) chat_inline_code.paint(hdc, rc, app_state.g_light_theme);
                     @import("chat_find_ui.zig").paintRun(hdc, segment, offset + pos, rc.left, rc.top, line_h);
                     chatPaintSelectionRun(hdc, segment, offset + pos, rc.left, rc.top, line_h);
-                    _ = SetTextColor(hdc, if (target != null) customColorOr("link", if (app_state.g_light_theme) RGB(30, 90, 170) else RGB(110, 175, 245)) else customColorOr("text", themeConsoleFg()));
+                    _ = SetTextColor(hdc, if (target != null) customColorOr("link", if (app_state.g_light_theme) RGB(30, 90, 170) else RGB(110, 175, 245)) else if (span.style.code) chat_inline_code.textColor(app_state.g_light_theme) else customColorOr("text", themeConsoleFg()));
+                    if (app_state.g_chat_hover_link != null and target != null and app_state.g_chat_hover_link.?.start == offset + target.?.start and app_state.g_chat_hover_link.?.end == offset + target.?.end) _ = SelectObject(hdc, chatLinkFont(style.code));
                     _ = chatDrawText(hdc, segment.ptr, @intCast(segment.len), &rc, DT_SINGLELINE | DT_NOPREFIX);
                 }
-                x += w;
+                x += chat_inline_code.chipWidth(w, pad);
                 pos += count;
                 if (pos < end) {
                     x = 0;
@@ -1074,7 +1073,7 @@ fn chatFlowBlock(hdc: HANDLE, text: []const u16, block: ChatBlock, area: RECT, p
             var marker = area;
             marker.left += indent;
             marker.right = body.left - uiScaled(6);
-            if (block.prefix == 2) _ = chatDrawText(hdc, L("\u{2022}"), 1, &marker, DT_SINGLELINE | DT_NOPREFIX) else _ = chatDrawText(hdc, text.ptr, @intCast(block.prefix), &marker, DT_SINGLELINE | DT_NOPREFIX);
+            if (block.prefix == 2) _ = chatDrawText(hdc, L("\u{2022}"), 1, &marker, DT_SINGLELINE | DT_NOPREFIX | DT_RIGHT) else _ = chatDrawText(hdc, text.ptr, @intCast(block.prefix), &marker, DT_SINGLELINE | DT_NOPREFIX | DT_RIGHT);
         }
         return chatRichText(hdc, text[block.prefix..], body, 0, paint, hit, offset + block.prefix, height, false);
     }
@@ -1896,6 +1895,9 @@ test "Chat View GDI layout keeps bubble width and avatar space consistent" {
     const link_text = std.unicode.utf8ToUtf16LeStringLiteral("[docs](https://example.test)");
     const link = chatFlowBlock(dc, link_text, reply, .{ .left = 0, .top = 0, .right = 320, .bottom = 100 }, false, .{ .x = 2, .y = 2 }, 0, null) orelse return error.TestUnexpectedResult;
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("https://example.test"), link_text[link.start..link.end]);
+    const file_text = std.unicode.utf8ToUtf16LeStringLiteral("[notes](file:///C:/notes.md)");
+    const file = chatFlowBlock(dc, file_text, reply, .{ .left = 0, .top = 0, .right = 320, .bottom = 100 }, false, .{ .x = 2, .y = 2 }, 0, null) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("file:///C:/notes.md"), file_text[file.start..file.end]);
 }
 
 test "IGSH-537 clicking either side of a URL underscore opens the exact address" {
