@@ -1,6 +1,6 @@
 # Status card
 
-Source files: src/inbox*, src/notification*, src/settings*, src/themes.zig, src/fonts*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, src/usage_card.zig, src/capacity.zig, src/update_card.zig, .claude/skills/verify-multiprompt/control-feature-status-card.ps1, tools/usage-icon-geometry.js, tools/capture-usage-pace.py
+Source files: src/inbox*, src/notification*, src/settings*, src/themes.zig, src/fonts*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, src/usage_card.zig, src/capacity.zig, src/telemetry_panel.zig, src/update_card.zig, .claude/skills/verify-multiprompt/control-feature-status-card.ps1, tools/usage-icon-geometry.js, tools/capture-usage-pace.py
 
 Verify on: push
 

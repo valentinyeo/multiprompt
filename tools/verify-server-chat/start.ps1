@@ -24,7 +24,8 @@ if (-not $actual.AreAccessRulesProtected -or $rules.Count -ne 1 -or $rules[0].Id
 @{ owner = $user.Value; protected = $actual.AreAccessRulesProtected; rules = @($rules | ForEach-Object { @{ sid = $_.IdentityReference.Value; rights = [string]$_.FileSystemRights } }) } | ConvertTo-Json -Depth 5 | Set-Content -Encoding UTF8 "$Evidence/key-acl.json"
 $repo = (Invoke-ServerNative -FilePath wsl.exe -Arguments @('-d', 'Ubuntu-24.04', '-u', 'root', '--exec', 'wslpath', '-a', $env:GITHUB_WORKSPACE) -Evidence $Evidence -Name 'start-repo-path').Trim()
 $public = (Invoke-ServerNative -FilePath wsl.exe -Arguments @('-d', 'Ubuntu-24.04', '-u', 'root', '--exec', 'wslpath', '-a', "$key.pub") -Evidence $Evidence -Name 'public-key-path').Trim()
-$started = Invoke-ServerNative -FilePath wsl.exe -Arguments @('-d', 'Ubuntu-24.04', '-u', 'root', '--exec', 'bash', "$repo/tools/verify-server-chat/start.sh", $repo, $public) -Evidence $Evidence -Name 'server-start'
+$mode = if ($env:SSH_IDLE_PROOF -eq '1') { 'idle' } else { 'chat' }
+$started = Invoke-ServerNative -FilePath wsl.exe -Arguments @('-d', 'Ubuntu-24.04', '-u', 'root', '--exec', 'bash', "$repo/tools/verify-server-chat/start.sh", $repo, $public, $mode) -Evidence $Evidence -Name 'server-start'
 Write-Host $started
 $config = @"
 Host remote-1
@@ -38,6 +39,11 @@ Host remote-1
   StrictHostKeyChecking yes
   UserKnownHostsFile "$((Join-Path $Profile 'home/.ssh/known_hosts').Replace('\', '/'))"
 "@
+if ($env:SSH_IDLE_PROOF -eq '1') {
+    $config = $config.Replace('Host remote-1', 'Host remote-1 vps') + "`n" +
+        $config.Replace('Host remote-1', 'Host remote-2').Replace('User mpverify', 'User mpverify2') + "`n" +
+        $config.Replace('Host remote-1', 'Host remote-3').Replace('User mpverify', 'User mpverify3')
+}
 [IO.File]::WriteAllText("$keyDir/config", $config)
 $known = Invoke-ServerNative -FilePath "$env:SystemRoot/System32/OpenSSH/ssh-keyscan.exe" -Arguments @('-p', '2222', '-t', 'ed25519', '127.0.0.1') -Evidence $Evidence -Name 'ssh-keyscan'
 if (-not $known.Trim()) { throw 'Runner server host key scan returned no key' }
@@ -48,4 +54,10 @@ $warm = Invoke-ServerNative -FilePath $ssh -Arguments @('-F', "$keyDir/config", 
 if ($warm -notmatch '(?s)Linux.*tmux.*Python') { throw "Real Windows OpenSSH preflight output is invalid: $warm" }
 $warm | Set-Content -Encoding UTF8 "$Evidence/ssh-preflight.txt"
 [IO.File]::WriteAllText("$settings/ssh-path.txt", $ssh)
-[IO.File]::WriteAllText("$keyDir/servers.txt", "v1`nconnected`t1`t2222`t0`t127.0.0.1`tmpverify`tRunner Linux`t`nremoved`t0`t22`t0`t`t`t`t`nremoved`t0`t22`t0`t`t`t`t`n")
+$servers = "v1`nconnected`t1`t2222`t0`t127.0.0.1`tmpverify`tRunner Linux`t`nremoved`t0`t22`t0`t`t`t`t`nremoved`t0`t22`t0`t`t`t`t`n"
+if ($env:SSH_IDLE_PROOF -eq '1') {
+    $servers = "v1`n"
+    foreach ($login in @('mpverify', 'mpverify2', 'mpverify3')) { $servers += "connected`t1`t2222`t0`t127.0.0.1`t$login`tRunner Linux`t`n" }
+    [void](Invoke-ServerNative -FilePath wsl.exe -Arguments @('-d', 'Ubuntu-24.04', '-u', 'mpverify', '--exec', 'tmux', 'new-session', '-d', '-s', 'idle-ci') -Evidence $Evidence -Name 'idle-session')
+}
+[IO.File]::WriteAllText("$keyDir/servers.txt", $servers)

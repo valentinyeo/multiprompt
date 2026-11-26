@@ -36,6 +36,16 @@ var test_host: ?*Host = null;
 var entered: std.atomic.Value(bool) = .init(false);
 var released: std.atomic.Value(bool) = .init(false);
 
+test "MUBO-532 reader retries do not cancel an SSH handshake already in progress" {
+    hosts[0] = .{ .starting = true };
+    defer hosts[0] = .{};
+    for (0..120) |_| {
+        respawn(0);
+        try std.testing.expect(hosts[0].starting);
+        try std.testing.expect(!hosts[0].running);
+    }
+}
+
 test "blocked SSH writes leave incoming data and other channels usable with bounded queues" {
     var host = Host{ .running = true };
     test_host = &host;
@@ -105,4 +115,17 @@ test('production SSH writer releases the host mutex and isolates input overflow'
   } finally {
     fs.rmSync(folder, { recursive: true, force: true });
   }
+});
+
+test('idle probes and usage cards use logical commands rather than opening SSH logins', () => {
+  for (const [file, name] of [['src/chat_send.zig', 'sshProbeThread'], ['src/telemetry_panel.zig', 'ladderFetchRemote']]) {
+    const source = fs.readFileSync(path.join(root, file), 'utf8');
+    const start = source.indexOf(`fn ${name}(`);
+    const body = source.slice(start, source.indexOf('\n}', start));
+    assert.match(body, /captureSharedCommand\(/);
+    assert.doesNotMatch(body, /sshOneShotCapture|appendSshExe|CreateProcessW/);
+  }
+  const transport = fs.readFileSync(path.join(root, 'src/chat_transport.zig'), 'utf8');
+  assert.match(transport, /pub fn openCommandWait[\s\S]*?WaitForSingleObject\(ready, timeout_ms\)/);
+  assert.match(transport, /fn handshakeWorker\(b: Boot\) void \{\s+defer _ = w.SetEvent\(b.host.ready\)/);
 });

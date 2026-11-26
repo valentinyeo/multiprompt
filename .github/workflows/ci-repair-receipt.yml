@@ -3,6 +3,9 @@ name: CI repair receipt
 on:
   pull_request:
     paths:
+      - 'src/vps.zig'
+      - 'src/win32.zig'
+      - 'tools/ssh-idle-reuse.test.js'
       - 'tools/pr-verifier.cjs'
       - 'tools/pr-verifier-cancel.test.js'
       - 'tools/pr-verifier-download-retry.test.js'
@@ -49,12 +52,12 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/input"
           set +e
-          node --test --test-reporter=tap tools/pr-verifier-cancel.test.js tools/pr-verifier-download-retry.test.js tools/strip-comments.test.js tools/reusable-workflow-permissions.test.js > "$RUNNER_TEMP/input/head.log" 2>&1
+          node --test --test-reporter=tap tools/pr-verifier-cancel.test.js tools/pr-verifier-download-retry.test.js tools/strip-comments.test.js tools/reusable-workflow-permissions.test.js tools/ssh-idle-reuse.test.js > "$RUNNER_TEMP/input/head.log" 2>&1
           echo "head=$?" >> "$GITHUB_ENV"
           if [ -n "$BASE_SHA" ]; then
             git worktree add --detach "$RUNNER_TEMP/base" "$BASE_SHA"
-            cp tools/pr-verifier-cancel.test.js tools/pr-verifier-download-retry.test.js tools/strip-comments.test.js tools/reusable-workflow-permissions.test.js "$RUNNER_TEMP/base/tools/"
-            (cd "$RUNNER_TEMP/base" && node --test --test-reporter=tap tools/pr-verifier-cancel.test.js tools/pr-verifier-download-retry.test.js tools/strip-comments.test.js tools/reusable-workflow-permissions.test.js) > "$RUNNER_TEMP/input/base.log" 2>&1
+            cp tools/pr-verifier-cancel.test.js tools/pr-verifier-download-retry.test.js tools/strip-comments.test.js tools/reusable-workflow-permissions.test.js tools/ssh-idle-reuse.test.js "$RUNNER_TEMP/base/tools/"
+            (cd "$RUNNER_TEMP/base" && node --test --test-reporter=tap tools/pr-verifier-cancel.test.js tools/pr-verifier-download-retry.test.js tools/strip-comments.test.js tools/reusable-workflow-permissions.test.js tools/ssh-idle-reuse.test.js) > "$RUNNER_TEMP/input/base.log" 2>&1
             echo "base=$?" >> "$GITHUB_ENV"
           fi
       - name: Write the receipt
