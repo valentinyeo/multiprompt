@@ -18,7 +18,8 @@ for parsed per-session remote history and local-console snapshots. Host,
 provider and tmux identity survive runtime shell-id/cwd changes and sid adoption;
 a changed known sid starts a different entry. Disk files live in
 `%APPDATA%\ZigShell\chatcache\<host/provider/session hash>.jsonl`. A versioned
-header validates host/provider/tmux/sid (even if hash paths collide), inode,
+header validates host, the full agent identity, tmux and sid (even if hash paths
+collide), inode,
 mtime, a 64-byte source-boundary digest and the consumed JSONL byte offset.
 Subsequent lines contain only normalized user/assistant messages, timestamps
 and message ids. Writes are atomic. These are personal conversation files, not
