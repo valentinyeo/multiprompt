@@ -35,7 +35,7 @@ One logical chat address, at most two pending switch requests, five successful s
 
 ## Coverage and sync
 
-Last reviewed source/model sync commit is `26f1c2ca5`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
+Last reviewed source/model sync commit is `201726a43`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
 
 MUBO-585 puts Antigravity in `HOST_AUTO_SWITCH_ORDER`, so a chat whose plan runs out can land on Antigravity and a chat already on Antigravity can move off it. `HOST_AUTO_SWITCH_TRIGGERS` and `host_usage_limit` already read the Antigravity `result` event, so the detector is unchanged; the saved order, the native probe's `FollowOrder` steps, `tools/chat-auto-switch.test.js` and the chat-auto-switch journey change instead. Merging master `764e3716f` (MUBO-532, MUBO-587) touches no file covered by this skill. The TLC provider set and bounds stay at three providers, so the model does not explore Antigravity as a target. Reader and auto-switch test hashes and sync commit `764e3716f` move; the model, bounds, decision table, replays and mutation controls are unchanged. Hosted CI must rerun the full self-test and native replay.
 
@@ -127,3 +127,9 @@ Every failing trace replays through production code, including sends that happen
 ## Read current findings
 
 See [findings.md](findings.md). Do not weaken invariants or edit product code in this verification pull request.
+
+MUBO-588 adds an effort choice to Codex and Pi chats in `host_settings`, the Codex turn parameters and the Pi thinking level on start and live (merged with master `26f1c2ca5`, whose MUBO-583, MUBO-584 and MUBO-586 commits sit outside the covered files). None of the twelve covered switch, history, usage-limit or auto-switch functions changed, and an effort choice neither switches providers nor edits the decision table. Only the reader's whole-file hash and the sync commit move; the model, bounds, decisions, probes and mutations are unchanged. Hosted CI must rerun the full self-test and native replay.
+
+Merging master `201726a43` (MUBO-585) puts `antigravity` in `HOST_AUTO_SWITCH_ORDER`, so the saved automatic order gains a fourth step, and `tools/chat-auto-switch.test.js` gains the exhausted-order and Antigravity-limit cases. None of the twelve covered switch, history, usage-limit or auto-switch functions changed; `host_auto_switch_target` reads the order from the saved settings, which it already did. The reader's whole-file hash and the sync commit move to `201726a43`; the model, bounds, decisions, replays and mutation controls are unchanged. Hosted CI must rerun the full self-test and native replay.
+
+MUBO-588 merges master `11d75ad22` (MUBO-589 Pi slash skills and MUBO-590 Pi model continuity). The twelve covered `host_switch_*`, `host_dispatch_switch`, `host_usage_limit` and `host_auto_switch_*` functions keep the bodies they had at `201726a43`; MUBO-590's `pi_model` carry and restore already sit inside `host_switch_ai_locked`'s recorded config move, and the new Pi effort choice only writes `effort` on the source and target config. The model, bounds, decision table, replays and all six planted mutation targets are unchanged, so only the reader's whole-file hash and the sync commit move. Hosted CI must rerun the full self-test and native replay.

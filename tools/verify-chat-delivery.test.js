@@ -515,7 +515,9 @@ test('background host probes are explicitly declined and unknown remote commands
   assert.ok(loopStart && loopEnd);
   const relay = literal(read('src/console.zig'), 'if test -f ~/.local/state/multiprompt/relay-v1;');
   const relayCommand = relay.slice(relay.indexOf('"') + 1, -1).replace('{s}', 'fixture-0123456789abcdef');
-  const ladder = literal(read('src/telemetry_panel.zig'), ' cat ~/.local/state/token-ladder/status.json').split(' {s} ')[1];
+  const panel = read('src/telemetry_panel.zig');
+  const ladder = literal(panel, 'cat ~/.local/state/token-ladder/status.json');
+  assert.match(panel, /captureSharedCommand\([^\n]*cat ~\/\.local\/state\/token-ladder\/status\.json/, 'the ladder status probe rides the shared channel, so it never reaches ssh as its own argv');
   const probes = [];
   for (const host of ['remote-1', 'remote-2', 'remote-3']) {
     const options = ['-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', host];
@@ -528,7 +530,6 @@ test('background host probes are explicitly declined and unknown remote commands
       probes.push({ argv: [...constant(name).trim().split(' '), '-R', '19548:127.0.0.1:12345', host], kind: 'notification-forward', output: '', code: 255 });
     }
   }
-  probes.push({ argv: ['-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', 'remote-2', ...ladder.split(' ')], kind: 'ladder-status', output: '', code: 1 });
   const unknown = [
     ['-G', 'unexpected-host'],
     ['-T', 'remote-1', 'uname -a'],

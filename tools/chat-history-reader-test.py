@@ -8541,6 +8541,112 @@ class HostAntigravityTurnTest(HostEventStreamFixture, unittest.TestCase):
         self.assertEqual(reader.host_antigravity_argv('antigravity', self.sid, ['agy'])[:3], ['agy', '--model', 'gemini-4-carbon-medium'])
 
 
+class HostCodexEffortTest(HostEventStreamFixture, unittest.TestCase):
+    provider = 'codex'
+
+    def codex_events(self, kind=None):
+        db = reader.message_store_db(self.tmux)
+        rows = [json.loads(body) for (body,) in db.execute(
+            "SELECT body FROM message_events WHERE provider='codex' AND sid=? ORDER BY seq", (self.sid,))]
+        db.close()
+        return [row for row in rows if kind is None or row.get('kind') == kind]
+
+    def write_config(self):
+        reader.host_write(reader.host_paths('codex', self.sid)['config'],
+                          dict(enabled=True, tmux=self.tmux, cwd=str(self.home), command=['codex']))
+
+    def test_a_codex_effort_choice_persists_and_reaches_the_next_turn(self):
+        self.write_config()
+        self.assertEqual(reader.host_settings('codex', self.sid), dict(model='', effort=''))
+        self.assertEqual(reader.host_reply(dict(provider='codex', sid=self.sid, op='set_effort', effort='high'))['status'], 'ok')
+        self.assertEqual(reader.host_config('codex', self.sid)['effort'], 'high')
+        self.assertEqual(reader.host_settings('codex', self.sid), dict(model='', effort='high'))
+        sent = []
+        self.session.update(seq=0, rpc={}, thread='thread-1', codex_tokens={}, state={})
+        with patch.object(reader, 'host_control_send', lambda session, payload: sent.append(payload) or True):
+            self.assertTrue(reader.host_codex_write('codex', self.sid, self.session, 'codex-token-1', 'hello'))
+        turn = [payload for payload in sent if payload.get('method') == 'turn/start'][-1]
+        self.assertEqual(turn['params']['effort'], 'high')
+        self.assertNotIn('model', turn['params'])
+
+    def test_a_live_codex_chat_reports_the_choice_the_next_turn_will_use(self):
+        self.write_config()
+        self.session['settings'] = dict(model='', effort='')
+        self.session['starting_settings'] = dict(self.session['settings'])
+        self.session['ready'] = True
+        result = reader.host_handle_request('codex', self.sid, self.tmux, self.session, dict(op='set_effort', effort='medium'))
+        self.assertEqual(result['status'], 'ok')
+        self.assertEqual(self.session['settings'], dict(model='', effort='medium'))
+        pending = self.codex_events('host.settings')
+        self.assertEqual(pending[-1]['payload']['effort'], 'medium')
+        self.assertFalse(pending[-1]['payload']['applied'])
+        self.assertEqual(reader.host_handle_request('codex', self.sid, self.tmux, self.session, dict(op='set_effort', effort='xhigh'))['reason'], 'invalid_effort')
+        self.assertEqual(reader.host_config('codex', self.sid)['effort'], 'medium')
+
+
+class HostPiEffortTest(HostEventStreamFixture, unittest.TestCase):
+    provider = 'pi'
+
+    def pi_events(self, kind=None):
+        db = reader.message_store_db(self.tmux)
+        rows = [json.loads(body) for (body,) in db.execute(
+            "SELECT body FROM message_events WHERE provider='pi' AND sid=? ORDER BY seq", (self.sid,))]
+        db.close()
+        return [row for row in rows if kind is None or row.get('kind') == kind]
+
+    def write_config(self):
+        reader.host_write(reader.host_paths('pi', self.sid)['config'],
+                          dict(enabled=True, tmux=self.tmux, cwd=str(self.home), command=['pi']))
+
+    def test_the_pi_launch_gains_one_thinking_flag_per_choice(self):
+        self.write_config()
+        self.assertNotIn('--thinking', reader.host_pi_argv('pi', self.sid, ['pi']))
+        self.assertEqual(reader.host_reply(dict(provider='pi', sid=self.sid, op='set_effort', effort='xhigh'))['status'], 'ok')
+        self.assertEqual(reader.host_config('pi', self.sid)['effort'], 'xhigh')
+        self.assertEqual(reader.host_settings('pi', self.sid),
+                         dict(provider='opencode-go', model='deepseek-v4.1-flash', effort='xhigh'))
+        argv = reader.host_pi_argv('pi', self.sid, ['pi'])
+        self.assertEqual(argv.count('--thinking'), 1)
+        self.assertEqual(argv[argv.index('--thinking') + 1], 'xhigh')
+        self.assertEqual(argv[argv.index('--session-id') + 1], self.sid)
+
+    def test_a_live_pi_chat_sends_the_thinking_level_and_persists_it(self):
+        self.write_config()
+        self.session['settings'] = dict(provider='opencode-go', model='deepseek-v4.1-flash', effort='')
+        self.session['starting_settings'] = dict(self.session['settings'])
+        self.session['ready'] = True
+        sent = []
+        with patch.object(reader, 'host_control_send', lambda session, payload: sent.append(payload) or True):
+            result = reader.host_handle_request('pi', self.sid, self.tmux, self.session, dict(op='set_effort', effort='high'))
+        self.assertEqual(result['status'], 'ok')
+        self.assertEqual(sent, [dict(type='set_thinking_level', level='high')])
+        self.assertEqual(self.session['settings'],
+                         dict(provider='opencode-go', model='deepseek-v4.1-flash', effort='high'))
+        applied = self.pi_events('host.settings')
+        self.assertTrue(applied[-1]['payload']['applied'])
+        self.assertEqual(applied[-1]['payload']['effort'], 'high')
+        self.assertEqual(reader.host_config('pi', self.sid)['effort'], 'high')
+        self.assertEqual(reader.host_settings('pi', self.sid),
+                         dict(provider='opencode-go', model='deepseek-v4.1-flash', effort='high'))
+
+    def test_a_pi_thinking_reply_is_logged_without_touching_the_turn(self):
+        reader.host_pi_event('pi', self.sid, self.tmux, self.session,
+                             dict(type='response', command='set_thinking_level', success=True))
+        self.assertEqual(self.pi_events('turn.ended'), [])
+        self.assertEqual(self.session['turn'], 't-1')
+
+    def test_an_out_of_range_pi_effort_is_refused_and_changes_nothing(self):
+        self.write_config()
+        sent = []
+        self.session['ready'] = True
+        with patch.object(reader, 'host_control_send', lambda session, payload: sent.append(payload) or True):
+            self.assertEqual(reader.host_handle_request('pi', self.sid, self.tmux, self.session, dict(op='set_effort', effort='max'))['reason'], 'invalid_effort')
+            self.assertEqual(reader.host_reply(dict(provider='pi', sid=self.sid, op='set_effort', effort='max'))['reason'], 'invalid_effort')
+        self.assertEqual(sent, [])
+        self.assertNotIn('effort', reader.host_config('pi', self.sid))
+        self.assertNotIn('--thinking', reader.host_pi_argv('pi', self.sid, ['pi']))
+
+
 class HostInterruptTest(HostControlFixture, unittest.TestCase):
     def test_interrupt_writes_the_control_request_and_ends_the_turn_as_interrupted(self):
         self.feed(self.frame(dict(type='message_start', message=dict(id='msg-1'))),
