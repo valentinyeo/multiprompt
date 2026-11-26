@@ -236,6 +236,8 @@ test('the real release proof uses the downloaded production notes and their matc
   assert.match(cardProof, /RedrawWindow/);
   assert.match(cardProof, /Card client size differs from the size the app laid out/);
   assert.match(cardProof, /Card screenshot cut the Restart button/);
+  assert.match(cardProof, /Card screenshot shows no Restart label/);
+  assert.match(cardProof, /Card screenshot put the Restart button outside the card/);
   assert.match(cardProof, /Card screenshot shows no See all row below the notes/);
   assert.match(cardProof, /images = \$script:cardImages/);
   const script = read('tools/update-card-real-release-proof.ps1');
@@ -447,6 +449,13 @@ test('IGSH-1118 native card wraps long real notes, scrolls internally, and rejec
   assert.equal(redReceipt.image.window.width, 1024, 'The old painter screenshot was not taken at the normal proof size');
   assert.equal(redReceipt.image.maximized, false, 'The old painter screenshot was taken while the window was maximized');
   assert.ok(fs.existsSync(path.join(evidence, 'red', 'released-card.png')), 'The old painter screenshot was not kept as evidence');
+  const legacyButton = redReceipt.image.legacyButton;
+  assert.ok(legacyButton, 'The old painter screenshot recorded no Restart button pixels');
+  assert.ok(legacyButton.width >= 70 && legacyButton.width <= 100, `The old painter Restart button is ${legacyButton.width} px wide`);
+  assert.ok(legacyButton.height >= 15 && legacyButton.height <= 24, `The old painter Restart button is ${legacyButton.height} px tall`);
+  assert.ok(legacyButton.labelInk >= 40, `The old painter Restart button shows ${legacyButton.labelInk} white label pixels`);
+  assert.ok(legacyButton.left >= 8 && legacyButton.right <= 260, 'The old painter Restart button is not the sidebar card control');
+  assert.ok(legacyButton.bottom <= redReceipt.image.window.height - 8, 'The old painter Restart button was cut by the window edge');
   console.log('WRAPPED_CARD_RED v0.28.983 painted its own published notes without wrapped bounds');
   const green = proof(branch, notes, 'green', 'new');
   keepEvidence('green');

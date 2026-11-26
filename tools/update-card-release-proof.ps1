@@ -130,16 +130,49 @@ function Card-Ink($Picture, [int]$Left, [int]$Top, [int]$Right, [int]$Bottom) {
     }
     return $ink
 }
-function Card-Pill($Picture) {
-    for ($y = [Math]::Max(0, $Picture.Height - 220); $y -lt $Picture.Height; $y++) {
-        $run = 0
-        for ($x = 0; $x -lt [Math]::Min($Picture.Width, 360); $x++) {
+function Test-Card-Legacy-Blue($Colour) {
+    return ($Colour.B -ge 150 -and ($Colour.B - $Colour.R) -ge 60 -and ($Colour.B - $Colour.G) -ge 40)
+}
+function Card-Legacy-Restart($Picture) {
+    $bottom = $Picture.Height - 1
+    $top = [Math]::Max(0, $Picture.Height - 320)
+    $right = [Math]::Min($Picture.Width - 1, 399)
+    $columns = [int[]]::new($right + 1)
+    for ($x = 0; $x -le $right; $x++) {
+        $count = 0
+        for ($y = $top; $y -le $bottom; $y++) {
             $colour = $Picture.GetPixel($x, $y)
-            if ($colour.R -gt 200 -and $colour.G -gt 200 -and $colour.B -gt 200) { $run += 1 } else { $run = 0 }
-            if ($run -ge 40) { return $true }
+            if (Test-Card-Legacy-Blue $colour) { $count += 1 }
+        }
+        $columns[$x] = $count
+    }
+    $left = -1
+    $scan = -1
+    $width = 0
+    for ($x = 0; $x -le $right; $x++) {
+        if ($columns[$x] -ge 10) { if ($scan -lt 0) { $scan = $x }; continue }
+        if ($scan -ge 0 -and $x - $scan -gt $width) { $width = $x - $scan; $left = $scan }
+        $scan = -1
+    }
+    if ($scan -ge 0 -and $right + 1 - $scan -gt $width) { $width = $right + 1 - $scan; $left = $scan }
+    if ($left -lt 0) { return $null }
+    $buttonRight = $left + $width - 1
+    $middle = $left + [int]($width / 2)
+    $buttonTop = -1
+    $buttonBottom = -1
+    for ($y = $top; $y -le $bottom; $y++) {
+        $colour = $Picture.GetPixel($middle, $y)
+        if (Test-Card-Legacy-Blue $colour) { if ($buttonTop -lt 0) { $buttonTop = $y }; $buttonBottom = $y }
+    }
+    if ($buttonTop -lt 0) { return $null }
+    $label = 0
+    for ($y = $buttonTop; $y -le $buttonBottom; $y++) {
+        for ($x = $left; $x -le $buttonRight; $x++) {
+            $colour = $Picture.GetPixel($x, $y)
+            if ($colour.R -ge 200 -and $colour.G -ge 200 -and $colour.B -ge 200) { $label += 1 }
         }
     }
-    return $false
+    return @{ left = $left; top = $buttonTop; right = $buttonRight; bottom = $buttonBottom; width = $width; height = $buttonBottom - $buttonTop + 1; labelInk = $label }
 }
 function Assert-Card-Image([string]$Name, [string]$File, $Geometry) {
     $picture = New-Object Drawing.Bitmap($File)
@@ -148,8 +181,13 @@ function Assert-Card-Image([string]$Name, [string]$File, $Geometry) {
         $visible = @{ restartVisible = $false; seeAllVisible = $false; notesVisible = $false }
         $restart = Card-Click 'restart button'
         if ($Contract -ne 'new') {
-            if (-not (Card-Pill $picture)) { throw ('Card ' + $Name + ' screenshot shows no Restart button') }
+            $legacy = Card-Legacy-Restart $picture
+            if ($null -eq $legacy) { throw ('Card ' + $Name + ' screenshot shows no Restart button') }
+            if ($legacy.width -lt 70 -or $legacy.width -gt 100 -or $legacy.height -lt 15 -or $legacy.height -gt 24) { throw ('Card ' + $Name + ' screenshot shows no Restart button') }
+            if ($legacy.labelInk -lt 40) { throw ('Card ' + $Name + ' screenshot shows no Restart label') }
+            if ($legacy.left -lt 8 -or $legacy.right -gt 260 -or $legacy.bottom -gt $picture.Height - 8) { throw ('Card ' + $Name + ' screenshot put the Restart button outside the card') }
             $visible.restartVisible = $true
+            $visible.legacyButton = $legacy
             return $visible
         }
         $point = Card-Bitmap-Point $restart.x $restart.y
@@ -181,7 +219,7 @@ function Capture-Card-Image([string]$Name) {
         if ($placed.Count -eq 0) { break }
         $last = $placed[$placed.Count - 1]
         if ([int]$last.Groups[1].Value -eq $geometry.client.width -and [int]$last.Groups[2].Value -eq $geometry.client.height) { break }
-        if ($process.HasExited -or [DateTime]::UtcNow -gt $deadline) { throw ('Card ' + $Name + ' client size differs from the size the app laid out') }
+        if ($process.HasExited -or [DateTime]::UtcNow -gt $deadline) { throw ('Card client size differs from the size the app laid out (' + $Name + ')') }
         Start-Sleep -Milliseconds 50
     } while ($true)
     $geometry = Card-Geometry
@@ -199,7 +237,7 @@ function Capture-Card-Image([string]$Name) {
         $last = $viewport[$viewport.Count - 1]
         $state = @{ top = [int]$last.Groups[2].Value; bottom = [int]$last.Groups[4].Value; content = [int]$last.Groups[5].Value; scroll = [int]$last.Groups[6].Value }
     }
-    $record = @{ name = $Name; file = ($Name + '.png'); window = $geometry.window; client = $geometry.client; scale = $geometry.scale; maximized = [ReleaseCardProof]::IsZoomed($process.MainWindowHandle); logOffset = $script:cardLog.Length; notes = $state; restartVisible = $visible.restartVisible; seeAllVisible = $visible.seeAllVisible; notesVisible = $visible.notesVisible }
+    $record = @{ name = $Name; file = ($Name + '.png'); window = $geometry.window; client = $geometry.client; scale = $geometry.scale; maximized = [ReleaseCardProof]::IsZoomed($process.MainWindowHandle); logOffset = $script:cardLog.Length; notes = $state; restartVisible = $visible['restartVisible']; seeAllVisible = $visible['seeAllVisible']; notesVisible = $visible['notesVisible']; legacyButton = $visible['legacyButton'] }
     $script:cardImages = @($script:cardImages) + @($record)
     return $record
 }
