@@ -177,3 +177,56 @@ test "antigravity slash skills and built-in commands match as skill pills" {
     slot.mode = .file;
     try std.testing.expect(!known(L("/valentin-mode")));
 }
+
+test "MUBO-589 pi slash skills and built-in commands match as skill pills" {
+    const L = std.unicode.utf8ToUtf16LeStringLiteral;
+    const saved_skills = app.g_palette_skills;
+    const active = app.active_shell;
+    const count = app.shell_count;
+    const shell = &app.shells[0];
+    const kind = shell.kind;
+    const agent = shell.ai_agent;
+    const host = shell.tmux_host;
+    const cwd_len = shell.claude_cwd_len;
+    const session_len = shell.tmux_session_len;
+    const slot = &app.g_chat_ac_slots[0];
+    const saved_slot = slot.*;
+    defer {
+        app.g_palette_skills = saved_skills;
+        app.active_shell = active;
+        app.shell_count = count;
+        shell.kind = kind;
+        shell.ai_agent = agent;
+        shell.tmux_host = host;
+        shell.claude_cwd_len = cwd_len;
+        shell.tmux_session_len = session_len;
+        slot.* = saved_slot;
+    }
+    app.g_palette_skills = &.{};
+    app.active_shell = 0;
+    app.shell_count = 1;
+    shell.kind = .tmux;
+    shell.ai_agent = 3;
+    shell.tmux_host = 0;
+    shell.claude_cwd_len = 0;
+    shell.tmux_session_len = 0;
+    slot.* = .{ .agent = .pi, .host = 0, .mode = .slash, .count = 4 };
+    slot.entries[0] = .{ .kind = 'S', .name = "valentin-mode", .hint = "", .desc = "" };
+    slot.entries[1] = .{ .kind = 'J', .name = "workspace-skill", .hint = "", .desc = "" };
+    slot.entries[2] = .{ .kind = 'C', .name = "pi-prompt", .hint = "", .desc = "" };
+    slot.entries[3] = .{ .kind = 'B', .name = "model", .hint = "<provider/model>", .desc = "" };
+    try std.testing.expect(known(L("/valentin-mode")));
+    try std.testing.expect(known(L("/workspace-skill")));
+    try std.testing.expect(known(L("/pi-prompt")));
+    try std.testing.expect(known(L("/model")));
+    const prompt = L("please run /valentin-mode now");
+    const found = next(prompt, 0) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqualSlices(u16, L("/valentin-mode"), prompt[found.start..found.end]);
+    slot.agent = .claude;
+    try std.testing.expect(!known(L("/valentin-mode")));
+    slot.agent = .antigravity;
+    try std.testing.expect(!known(L("/valentin-mode")));
+    slot.agent = .pi;
+    slot.mode = .file;
+    try std.testing.expect(!known(L("/valentin-mode")));
+}

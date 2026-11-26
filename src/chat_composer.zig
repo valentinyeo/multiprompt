@@ -1013,6 +1013,7 @@ pub fn chatAcAgent() chat_complete.Agent {
     return switch (app_state.shells[app_state.active_shell].ai_agent) {
         1 => .claude,
         2 => .codex,
+        3 => .pi,
         8 => .antigravity,
         else => .other,
     };
@@ -1023,6 +1024,7 @@ fn chatAcMruIndex(agent: chat_complete.Agent) usize {
         .claude => 0,
         .codex => 1,
         .antigravity => 2,
+        .pi => 3,
         .other => 0,
     };
 }
@@ -1409,6 +1411,7 @@ fn chatAcFetchThread(req: ChatAcRequest) void {
     syncAcCompleter(ac_host);
     const agent: []const u8 = switch (req.agent) {
         .codex => "codex",
+        .pi => "pi",
         .antigravity => "antigravity",
         else => "claude",
     };
@@ -3527,6 +3530,8 @@ test "antigravity maps to its own autocomplete agent and MRU bucket" {
     try std.testing.expectEqual(chat_complete.Agent.claude, chatAcAgent());
     app_state.shells[0].ai_agent = 2;
     try std.testing.expectEqual(chat_complete.Agent.codex, chatAcAgent());
+    app_state.shells[0].ai_agent = 3;
+    try std.testing.expectEqual(chat_complete.Agent.pi, chatAcAgent());
     app_state.shells[0].ai_agent = 8;
     try std.testing.expectEqual(chat_complete.Agent.antigravity, chatAcAgent());
     app_state.shells[0].ai_agent = 0;
@@ -3534,6 +3539,7 @@ test "antigravity maps to its own autocomplete agent and MRU bucket" {
     try std.testing.expectEqual(@as(usize, 0), chatAcMruIndex(.claude));
     try std.testing.expectEqual(@as(usize, 1), chatAcMruIndex(.codex));
     try std.testing.expectEqual(@as(usize, 2), chatAcMruIndex(.antigravity));
+    try std.testing.expectEqual(@as(usize, 3), chatAcMruIndex(.pi));
 }
 
 test "IGSH-884 every composer button stays on one bottom line for multiline drafts" {
