@@ -8239,7 +8239,7 @@ def message_store_request(q):
             provider not in HOST_PROVIDERS or not isinstance(sid, str) or not SESSION_ID.fullmatch(sid) or
             not isinstance(tmux, str) or not TMUX_NAME.fullmatch(tmux)):
         raise ValueError('invalid message protocol or identity')
-    if q.get('op') not in ('message_dispatch', 'message_reset'):
+    if q.get('op') not in ('message_dispatch', 'message_reset', 'message_send_now'):
         return message_store_transaction(q)
     with message_dispatch_lock_path(provider, sid).open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -8382,6 +8382,43 @@ def message_store_transaction(q):
             elif row[6] != 'cancelled':
                 raise ValueError('message already handed off')
             return dict(message=message_row(row), epoch=epoch, seq=seq)
+        if op == 'message_edit':
+            token = q.get('message_id')
+            if not isinstance(token, str) or not re.fullmatch(r'[A-Za-z0-9_-]{16,80}', token):
+                raise ValueError('invalid message')
+            text = q.get('text')
+            if text is not None and (not isinstance(text, str) or not text.strip() or '\x00' in text):
+                raise ValueError('invalid message text')
+            row = db.execute('SELECT * FROM shared_messages WHERE id=? AND provider=? AND sid=?', (token, provider, sid)).fetchone()
+            if not row:
+                raise ValueError('message not found')
+            if row[6] not in ('queued', 'failed') or row[9] != epoch:
+                return dict(message=message_row(row), epoch=epoch, seq=seq)
+            if text is None:
+                db.execute("UPDATE shared_messages SET state='cancelled',deadline=NULL WHERE id=? AND epoch=? AND state IN ('queued','failed')", (token, epoch))
+                row = db.execute('SELECT * FROM shared_messages WHERE id=?', (token,)).fetchone()
+                seq = message_event(db, provider, sid, message_row(row))
+            elif text != row[3]:
+                db.execute('UPDATE shared_messages SET text=?,deadline=? WHERE id=? AND epoch=?', (text, time.time() + 15, token, epoch))
+                row = db.execute('SELECT * FROM shared_messages WHERE id=?', (token,)).fetchone()
+                seq = message_event(db, provider, sid, message_row(row))
+            return dict(message=message_row(row), epoch=epoch, seq=seq)
+        if op == 'message_send_now':
+            token = q.get('message_id')
+            if not isinstance(token, str) or not re.fullmatch(r'[A-Za-z0-9_-]{16,80}', token):
+                raise ValueError('invalid message')
+            row = db.execute('SELECT * FROM shared_messages WHERE id=? AND provider=? AND sid=?', (token, provider, sid)).fetchone()
+            if not row:
+                raise ValueError('message not found')
+            if row[6] != 'queued' or row[9] != epoch:
+                return dict(message=message_row(row), epoch=epoch, seq=seq, promoted=False)
+            front = db.execute("SELECT MIN(position) FROM shared_messages WHERE provider=? AND sid=? AND epoch=? AND state IN ('queued','sent')", (provider, sid, epoch)).fetchone()[0]
+            if front is not None and row[4] <= front:
+                return dict(message=message_row(row), epoch=epoch, seq=seq, promoted=False)
+            db.execute('UPDATE shared_messages SET position=? WHERE id=? AND epoch=?', (front - 1 if front is not None else 0, token, epoch))
+            row = db.execute('SELECT * FROM shared_messages WHERE id=?', (token,)).fetchone()
+            seq = message_event(db, provider, sid, message_row(row))
+            return dict(message=message_row(row), epoch=epoch, seq=seq, promoted=True)
         if op == 'message_retry':
             token, request = q.get('message_id'), q.get('retry_id')
             if not isinstance(token, str) or not isinstance(request, str) or not re.fullmatch(r'[A-Za-z0-9_-]{16,80}', request):
@@ -10012,9 +10049,9 @@ def serve_request(line, source, subscriptions, lock):
         if query.get("op") in ("approval_reply", "question_reply", "plan_reply", "set_permission_mode", "set_model", "set_effort", "set_auto_switch", "interrupt", "fresh_start", "switch_ai", "login", "login_answer"):
             serve_print(dict(id=rid, message_protocol=1, result=host_reply(query)))
             return
-        if query.get("op") in ("message_submit", "message_retry", "message_dismiss", "message_dispatch", "message_status", "message_snapshot", "message_events", "message_reset"):
+        if query.get("op") in ("message_submit", "message_retry", "message_dismiss", "message_dispatch", "message_status", "message_snapshot", "message_events", "message_reset", "message_edit", "message_send_now"):
             result = message_store_request(query)
-            if query.get('op') in ('message_submit', 'message_retry', 'message_snapshot', 'message_events', 'message_status'):
+            if query.get('op') in ('message_submit', 'message_retry', 'message_snapshot', 'message_events', 'message_status', 'message_send_now'):
                 start_message_worker(query, source)
             serve_print(dict(id=rid, message_protocol=1, result=result))
             return

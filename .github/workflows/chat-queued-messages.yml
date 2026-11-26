@@ -1,0 +1,40 @@
+name: Queued messages tray
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  queue-tray:
+    name: queue-tray
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Install Zig 0.16.0
+        uses: ./.github/actions/setup-zig
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Tray model, layout, collapse and hit boxes
+        run: zig test src/chat_queue.zig
+      - name: Queued message actions in the shared store
+        run: python3 tools/chat-history-reader-test.py MUBO_594_QueuedMessageActionsTest -v
+      - name: Record the proof
+        run: |
+          mkdir -p evidence
+          printf '{"revision":"%s","zig":"chat_queue","reader":"MUBO_594_QueuedMessageActionsTest"}\n' "$GITHUB_SHA" > evidence/chat-queued-messages.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: chat-queued-messages
+          path: evidence/chat-queued-messages.json
+          if-no-files-found: error

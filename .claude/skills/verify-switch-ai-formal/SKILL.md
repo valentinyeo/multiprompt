@@ -35,6 +35,8 @@ One logical chat address, at most two pending switch requests, five successful s
 
 ## Coverage and sync
 
+MUBO-594 changes only `src/chat_history_reader.py` among the covered files. The new `message_edit` and `message_send_now` branches sit inside `message_store_transaction`, which no switch decision calls, and `message_store_request`'s flock set gains `message_send_now`. `host_switch_ai`, `host_switch_abort`, `host_switch_handover`, `host_switch_rows`, `host_switch_follow`, `host_dispatch_switch`, `host_usage_limit` and the auto-switch settings, target, set, trigger and run are unchanged, as are the fixtures and both JavaScript suites. Only the reader hash and the sync commit move; the model, bounds and replays stay unchanged.
+
 Last reviewed source/model sync commit is `697548aa7`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
 
 MUBO-591 adds a short `step` to the reader's tool events, a `workers.snapshot` slot and a `workers` list on each live page and snapshot, all on the chat view's activity path. None of the twelve covered `host_switch_*`, `host_dispatch_switch`, `host_usage_limit` or `host_auto_switch_*` functions changed, and the `antigravity` order from master `201726a43` sits in `HOST_AUTO_SWITCH_ORDER` outside them. Only the reader's whole-file hash and the sync commit `201726a43` move; the model, bounds, decision table, probes and mutation controls are unchanged. Hosted CI must rerun the full self-test and native replay.

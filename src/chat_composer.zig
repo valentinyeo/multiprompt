@@ -360,7 +360,7 @@ pub fn chatViewLayout() ChatViewLayout {
         .right = left + send_size,
         .bottom = send_btn.bottom,
     };
-    const transcript_bottom = composer_card.top - @max(gap, chatNewMessagesHeight()) - chatWorkingIndicatorH();
+    const transcript_bottom = composer_card.top - @max(gap, chatNewMessagesHeight()) - chatWorkingIndicatorH() - @import("chat_queue_view.zig").reservedHeight();
     return .{
         .pane = slot,
         .transcript = .{
@@ -2471,6 +2471,22 @@ pub fn chatShellDraftPull(shell_id: u32, status: *const chat_transcript.Status) 
 
 pub fn chatShellDraftArmPull(armed: bool) void {
     if (armed) shell_draft.armPull(GetTickCount64()) else shell_draft.disarmPull();
+}
+
+pub fn chatComposerTakeQueuedText(text: []const u16) bool {
+    if (!app_state.g_chat_active or app_state.g_chat_composer_hwnd == null or text.len == 0) return false;
+    var composer: [16400]u16 = undefined;
+    const n = @min(text.len, composer.len - 1);
+    @memcpy(composer[0..n], text[0..n]);
+    composer[n] = 0;
+    chat_draft_loading = true;
+    _ = SetWindowTextW(app_state.g_chat_composer_hwnd, @ptrCast(&composer));
+    chat_draft_loading = false;
+    _ = SendMessageW(app_state.g_chat_composer_hwnd, 0x00B1, n, @intCast(n));
+    chatComposerAutoGrow();
+    chatDraftNoteEdit();
+    _ = InvalidateRect(app_state.g_chat_composer_hwnd, null, 1);
+    return true;
 }
 
 pub fn chatShellDraftNoteSend() void {
