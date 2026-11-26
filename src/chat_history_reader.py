@@ -3467,7 +3467,7 @@ def host_reply(query):
         return host_switch_ai(provider, sid, query.get("to"))
     if query.get("op") == "set_auto_switch":
         return host_auto_switch_set(provider, sid, query)
-    if query.get("op") == "set_effort" and provider not in ("claude", "antigravity"):
+    if query.get("op") == "set_effort" and provider not in HOST_EFFORT_PROVIDERS:
         return dict(status="refused", reason="unsupported_provider")
     if query.get("op") == "set_model" and provider not in HOST_MODEL_CHOICES and provider != "pi":
         return dict(status="refused", reason="unsupported_provider")
@@ -3954,7 +3954,8 @@ def host_pi_choice(provider, sid):
 
 def host_pi_argv(provider, sid, base):
     native = host_session_state(provider, sid).get("context_session") or sid
-    return base + ["--mode", "rpc", *host_pi_choice(provider, sid), "--session-id", native, "--append-system-prompt", HOST_APPEND_PROMPT]
+    return base + ["--mode", "rpc", *host_pi_choice(provider, sid), *host_pi_thinking_arg(provider, sid),
+                   "--session-id", native, "--append-system-prompt", HOST_APPEND_PROMPT]
 
 
 def host_hax_argv(provider, sid, base):
@@ -4014,13 +4015,34 @@ HOST_MODEL_CHOICES = dict(
 )
 
 HOST_EFFORT_CHOICES = ("low", "medium", "high")
+HOST_PI_EFFORTS = ("low", "medium", "high", "xhigh")
+HOST_EFFORT_PROVIDERS = ("claude", "antigravity", "codex", "pi")
 HOST_ANTIGRAVITY_EFFORTS = ("low", "medium", "high", "xhigh")
 HOST_ANTIGRAVITY_XHIGH_MODELS = ("neon", "hydrogen")
 HOST_ANTIGRAVITY_DEFAULT = ("neon", "medium")
 
 
 def host_effort_choices(provider):
-    return HOST_ANTIGRAVITY_EFFORTS if provider == "antigravity" else HOST_EFFORT_CHOICES
+    if provider == "antigravity":
+        return HOST_ANTIGRAVITY_EFFORTS
+    if provider == "pi":
+        return HOST_PI_EFFORTS
+    return HOST_EFFORT_CHOICES
+
+
+def host_codex_effort(provider, sid):
+    effort = (host_config(provider, sid) or {}).get("effort")
+    return effort if effort in HOST_EFFORT_CHOICES else ""
+
+
+def host_pi_effort(provider, sid):
+    effort = (host_config(provider, sid) or {}).get("effort")
+    return effort if effort in HOST_PI_EFFORTS else ""
+
+
+def host_pi_thinking_arg(provider, sid):
+    effort = host_pi_effort(provider, sid)
+    return ["--thinking", effort] if effort else []
 
 
 def host_antigravity_effort(model, effort):
@@ -4085,10 +4107,13 @@ def host_settings(provider, sid):
     config = host_config(provider, sid) or {}
     if provider == "codex":
         choice = config.get("model")
-        return dict(model=choice if choice in HOST_MODEL_CHOICES["codex"] else "", effort="")
+        return dict(model=choice if choice in HOST_MODEL_CHOICES["codex"] else "",
+                    effort=host_codex_effort(provider, sid))
     if provider == "antigravity":
         model, effort = host_antigravity_choice(provider, sid)
         return dict(model=model, effort=effort)
+    if provider == "pi":
+        return dict(model="", effort=host_pi_effort(provider, sid))
     args = config.get("args") if isinstance(config.get("args"), list) else []
     command = config.get("command") if isinstance(config.get("command"), list) else []
     parts = command + args
@@ -5802,6 +5827,10 @@ def host_handle_request(provider, sid, tmux, session, request):
         return adapter["interrupt"](provider, sid, session)
     if operation == "set_model" and provider == "pi":
         return host_pi_set_model(provider, sid, tmux, session, request)
+    if operation == "set_effort" and provider == "pi":
+        if request.get("effort") not in HOST_PI_EFFORTS:
+            return host_refuse("invalid_effort")
+        return host_pi_set_effort(provider, sid, tmux, session, request["effort"])
     if operation == "login":
         if provider != "pi":
             return host_refuse("unsupported_provider")
@@ -5811,7 +5840,9 @@ def host_handle_request(provider, sid, tmux, session, request):
             return host_refuse("unsupported_provider")
         return host_pi_login_answer_op(provider, sid, tmux, session, request)
     if operation in ("set_model", "set_effort"):
-        if operation == "set_effort" and provider not in ("claude", "antigravity") or provider not in HOST_MODEL_CHOICES:
+        if provider not in HOST_MODEL_CHOICES:
+            return host_refuse("unsupported_provider")
+        if operation == "set_effort" and provider not in HOST_EFFORT_PROVIDERS:
             return host_refuse("unsupported_provider")
         key = "model" if operation == "set_model" else "effort"
         allowed = tuple(HOST_MODEL_CHOICES[provider]) if key == "model" else host_effort_choices(provider)
@@ -6356,6 +6387,9 @@ def host_codex_write(provider, sid, session, token, text):
         chosen = host_codex_model(provider, sid)
         if chosen:
             params["model"] = chosen
+        effort = host_codex_effort(provider, sid)
+        if effort:
+            params["effort"] = effort
         sent = host_codex_call(session, "turn/start", params, "turn")
     if sent:
         session["codex_tokens"][session["seq"]] = token
@@ -6755,6 +6789,9 @@ def host_pi_event(provider, sid, tmux, session, event):
         if event.get("command") == "set_model":
             host_log(provider, sid, "pi_set_model_reply", dict(success=event.get("success") is not False))
             return
+        if event.get("command") == "set_thinking_level":
+            host_log(provider, sid, "pi_set_thinking_level_reply", dict(success=event.get("success") is not False))
+            return
         if event.get("command") == "get_login_providers":
             host_pi_login_providers(provider, sid, tmux, session, data)
             return
@@ -6845,6 +6882,23 @@ def host_pi_set_model(provider, sid, tmux, session, request):
         host_write(host_paths(provider, sid)["config"], config)
     session["pi_model"] = dict(provider=model_provider, model=model)
     host_log(provider, sid, "pi_set_model", dict(provider=model_provider, model=model))
+    return dict(status="ok")
+
+
+def host_pi_set_effort(provider, sid, tmux, session, level):
+    sent = host_control_send(session, dict(type="set_thinking_level", level=level))
+    if not sent and session.get("ready"):
+        return dict(status="error", reason="stdin_write_failed")
+    config = host_config(provider, sid)
+    if config is not None:
+        config["effort"] = level
+        host_write(host_paths(provider, sid)["config"], config)
+    session["pi_effort"] = level
+    host_log(provider, sid, "pi_set_thinking_level", dict(level=level, live=sent))
+    if "settings" in session:
+        session["settings"] = host_settings(provider, sid)
+        session["applied_settings"] = dict(session["settings"]) if sent else None
+        host_settings_event(provider, sid, tmux, session)
     return dict(status="ok")
 
 
@@ -7102,7 +7156,7 @@ def host_loop(provider, sid, tmux, session, server, agent):
     host_session_reset(session, agent)
     host_history_claim(provider, sid, session)
     host_nightly_mark(provider, sid, session)
-    if provider in ("claude", "codex", "antigravity"):
+    if provider in ("claude", "codex", "antigravity", "pi"):
         session["settings"] = host_settings(provider, sid)
         session["starting_settings"] = dict(session["settings"])
         session["applied_settings"] = None

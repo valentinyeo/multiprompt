@@ -787,12 +787,17 @@ var g_chat_live_stream: ?*ChatLiveStream = null;
 pub fn chatSettingsEligible() bool {
     if (!app_state.g_chat_active or app_state.active_shell >= app_state.shell_count or !@import("room_frontend.zig").privateActionsAllowed()) return false;
     const key = chatFileIdentityForShell(app_state.active_shell);
-    return (std.mem.eql(u8, key.provider(), "claude") or std.mem.eql(u8, key.provider(), "codex") or std.mem.eql(u8, key.provider(), "antigravity")) and chatLiveWanted(key) and @import("chat_live.zig").settingsKnown(key.shell_id);
+    return (std.mem.eql(u8, key.provider(), "claude") or std.mem.eql(u8, key.provider(), "codex") or std.mem.eql(u8, key.provider(), "antigravity") or std.mem.eql(u8, key.provider(), "pi")) and chatLiveWanted(key) and @import("chat_live.zig").settingsKnown(key.shell_id);
 }
 
 pub fn chatSettingsCodex() bool {
     if (app_state.active_shell >= app_state.shell_count) return false;
     return std.mem.eql(u8, chatFileIdentityForShell(app_state.active_shell).provider(), "codex");
+}
+
+pub fn chatSettingsPi() bool {
+    if (app_state.active_shell >= app_state.shell_count) return false;
+    return std.mem.eql(u8, chatFileIdentityForShell(app_state.active_shell).provider(), "pi");
 }
 
 pub fn chatSettingsPending(shell_id: u32) bool {
@@ -801,7 +806,7 @@ pub fn chatSettingsPending(shell_id: u32) bool {
     const stream = g_chat_live_stream orelse return false;
     if (app_state.active_shell >= app_state.shell_count) return false;
     const key = chatFileIdentityForShell(app_state.active_shell);
-    return stream.identity.owner == shell_id and key.shell_id == shell_id and (std.mem.eql(u8, key.provider(), "claude") or std.mem.eql(u8, key.provider(), "codex") or std.mem.eql(u8, key.provider(), "antigravity")) and std.mem.eql(u8, stream.identity.provider(), key.provider()) and stream.pending_settings.pending();
+    return stream.identity.owner == shell_id and key.shell_id == shell_id and (std.mem.eql(u8, key.provider(), "claude") or std.mem.eql(u8, key.provider(), "codex") or std.mem.eql(u8, key.provider(), "antigravity") or std.mem.eql(u8, key.provider(), "pi")) and std.mem.eql(u8, stream.identity.provider(), key.provider()) and stream.pending_settings.pending();
 }
 
 fn chatLiveWanted(key: chat_transcript.Identity) bool {
@@ -991,7 +996,7 @@ pub fn chatLiveWrite(identity: @import("session_identity.zig").Session, line: []
     if (!stream.identity.same(identity) or stream.cancelled.load(.acquire) or stream.channel.shared == null) return false;
     if (setting) {
         const key = chatFileIdentityForShell(app_state.active_shell);
-        if (stream.identity.owner != key.shell_id or stream.identity.host.index() != key.host or !(std.mem.eql(u8, key.provider(), "claude") or std.mem.eql(u8, key.provider(), "codex") or std.mem.eql(u8, key.provider(), "antigravity")) or !std.mem.eql(u8, stream.identity.provider(), key.provider()) or !std.mem.eql(u8, std.mem.sliceTo(&stream.identity.sid, 0), std.mem.sliceTo(&key.sid, 0))) return false;
+        if (stream.identity.owner != key.shell_id or stream.identity.host.index() != key.host or !(std.mem.eql(u8, key.provider(), "claude") or std.mem.eql(u8, key.provider(), "codex") or std.mem.eql(u8, key.provider(), "antigravity") or std.mem.eql(u8, key.provider(), "pi")) or !std.mem.eql(u8, stream.identity.provider(), key.provider()) or !std.mem.eql(u8, std.mem.sliceTo(&stream.identity.sid, 0), std.mem.sliceTo(&key.sid, 0))) return false;
     }
     while (!stream.mutex.tryLock()) Sleep(1);
     defer stream.mutex.unlock();

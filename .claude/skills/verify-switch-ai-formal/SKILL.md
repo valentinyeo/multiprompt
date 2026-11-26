@@ -119,3 +119,5 @@ Every failing trace replays through production code, including sends that happen
 ## Read current findings
 
 See [findings.md](findings.md). Do not weaken invariants or edit product code in this verification pull request.
+
+MUBO-588 adds an effort choice to Codex and Pi chats in `host_settings`, the Codex turn parameters and the Pi thinking level on start and live. None of the twelve covered switch, history, usage-limit or auto-switch functions changed, and an effort choice neither switches providers nor edits the decision table. Only the reader's whole-file hash moves; the model, bounds, decisions, probes and mutations are unchanged. Hosted CI must rerun the full self-test and native replay.
