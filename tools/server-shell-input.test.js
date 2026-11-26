@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict');
+const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
@@ -59,6 +60,41 @@ test('SOFT-3048 the journey proves copy, interrupt and wheel scrollback on the n
   assert.match(journey, /WheelClientPoint/);
   assert.match(journey, /afterIndex -ge \$beforeIndex/);
   assert.match(journey, /Snapshot 'after'/, 'the harness requires an after snapshot before it reports passed');
+});
+
+test('MUBO-597 the desktop boundary accepts persistent shell creation and reattach', () => {
+  const script = String.raw`
+import ast, json, os, pathlib, re, sys, tempfile, time
+source = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8')
+names = {'state', 'record', 'session_names', 'terminal_session'}
+functions = [node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef) and node.name in names]
+with tempfile.TemporaryDirectory() as folder:
+    root = pathlib.Path(folder)
+    initial = dict(name='server-shell-input', sessions=['server-shell'], mode='idle', fake=False)
+    (root / 'state.json').write_text(json.dumps(initial), encoding='utf-8')
+    namespace = dict(ROOT=root, json=json, os=os, re=re, time=time)
+    exec(compile(ast.Module(body=functions, type_ignores=[]), '<terminal-boundary>', 'exec'), namespace)
+    terminal = namespace['terminal_session']
+    session = 'term-f098f222be05052470db859fab89c2d3'
+    attach = "export ZSB_SESSION=zss-1; tmux attach -t '=" + session + "'"
+    assert terminal(attach) == (None, None), 'attach must not create a missing session'
+    for cwd in ['cd; ', 'cd -- "$HOME"/\'projects/example\' 2>/dev/null || cd; ', "cd -- '/missing workspace' 2>/dev/null || cd; "]:
+        command = "export ZSB_SESSION=zss-1; " + cwd + "tmux new-session -A -s '" + session + "' -c \"$PWD\""
+        assert terminal(command) == (session, None), command
+        assert terminal(attach) == (session, None), 'reconnect must find the created session'
+    saved = json.loads((root / 'state.json').read_text(encoding='utf-8'))
+    assert saved['sessions'] == ['server-shell', session], saved
+    assert saved['mode'] == initial['mode'] and saved['fake'] == initial['fake'], saved
+    assert terminal('export ZSB_SESSION=zss-1; exec $' + '{SHELL:-bash} -l') == ('server-shell', None)
+    assert terminal('tmux new-session -A -s unrelated') == (None, None)
+    initial['name'] = 'another-journey'
+    (root / 'state.json').write_text(json.dumps(initial), encoding='utf-8')
+    assert terminal(command) == (None, None), 'shell fixture must not change other journeys'
+    records = [json.loads(line) for line in (root / 'invocations.jsonl').read_text(encoding='utf-8').splitlines()]
+    assert [row['kind'] for row in records] == ['create', 'attach'] * 3 + ['login'], records
+`;
+  const result = spawnSync('python3', ['-I', '-c', script, root('tools/verify-chat-delivery/boundary.py')], { encoding: 'utf8', timeout: 10000 });
+  assert.equal(result.status, 0, result.stdout + result.stderr + (result.error?.message || ''));
 });
 
 test('MUBO-209 paste leaves the window as one write with intact markers', () => {
