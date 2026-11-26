@@ -454,6 +454,7 @@ pub fn chatVoiceIdentity() ?VoiceIdentity {
         shell.claude_sid[0..shell.claude_sid_len], shell.claude_cwd[0..shell.claude_cwd_len]);
     if (key.shell_id == 0) return null;
     key.pi = shell.ai_agent == 3;
+    key.agent = shell.ai_agent;
     @memcpy(key.tmux[0..shell.tmux_session_len], shell.tmux_session[0..shell.tmux_session_len]);
     if (key.sid[0] == 0 and key.tmux[0] == 0) return null;
     return .{ .key = key, .agent = shell.ai_agent };
@@ -461,7 +462,7 @@ pub fn chatVoiceIdentity() ?VoiceIdentity {
 
 fn chatVoiceMatches(key: chat_transcript.Identity, entry: *const ChatHistoryEntry) bool {
     return !entry.retired and key.shell_id == entry.key.shell_id and key.host == entry.key.host and
-        key.codex == entry.key.codex and key.pi == entry.key.pi and std.mem.eql(u8, &key.tmux, &entry.key.tmux) and
+        key.agentId() == entry.key.agentId() and std.mem.eql(u8, &key.tmux, &entry.key.tmux) and
         std.mem.eql(u8, &key.cwd, &entry.key.cwd) and
         (key.sid[0] == 0 or std.mem.eql(u8, &key.sid, &entry.key.sid));
 }
@@ -488,6 +489,44 @@ test "voice source rejects permissive cross-session matches" {
     entry.key = key;
     entry.retired = true;
     try std.testing.expect(!chatVoiceMatches(key, &entry));
+}
+
+test "MUBO-584 a voice match keeps antigravity apart from claude" {
+    var claude = chat_transcript.Identity.initTmux(1, 2, false, "session", "/a");
+    claude.agent = 1;
+    var antigravity = claude;
+    antigravity.agent = 8;
+    var entry: ChatHistoryEntry = .{ .key = antigravity };
+    try std.testing.expect(chatVoiceMatches(antigravity, &entry));
+    try std.testing.expect(!chatVoiceMatches(claude, &entry));
+    entry.key = claude;
+    try std.testing.expect(chatVoiceMatches(claude, &entry));
+    try std.testing.expect(!chatVoiceMatches(antigravity, &entry));
+}
+
+test "MUBO-584 the voice identity carries the full agent id" {
+    const old_count = app_state.shell_count;
+    const old_shell = app_state.shells[0];
+    const old_active = app_state.active_shell;
+    defer {
+        app_state.shells[0] = old_shell;
+        app_state.shell_count = old_count;
+        app_state.active_shell = old_active;
+    }
+    app_state.shell_count = 1;
+    app_state.shells[0] = empty_shell;
+    app_state.active_shell = 0;
+    app_state.shells[0].kind = .tmux;
+    app_state.shells[0].shell_id = 42;
+    app_state.shells[0].tmux_host = 1;
+    app_state.shells[0].ai_agent = 8;
+    @memcpy(app_state.shells[0].tmux_session[0..6], "term-1");
+    app_state.shells[0].tmux_session_len = 6;
+    const voice = chatVoiceIdentity() orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(u8, 8), voice.key.agentId());
+    try std.testing.expect(!voice.key.codex);
+    try std.testing.expect(!voice.key.pi);
+    try std.testing.expectEqual(@as(u8, 8), chatFileIdentity().agentId());
 }
 
 fn chatVoiceRequestAllowed(key: chat_transcript.Identity, entries: []const *ChatHistoryEntry) bool {
@@ -1662,7 +1701,7 @@ pub fn chatFileOnReady() void {
                     changed = true;
                 }
                 if (!disk and app_state.shells[idx].ai_agent == 0) {
-                    app_state.shells[idx].ai_agent = if (entry.key.pi) 3 else if (entry.key.codex) 2 else 1;
+                    app_state.shells[idx].ai_agent = entry.key.agentId();
                     changed = true;
                 }
                 if (changed) saveSession();
@@ -1891,6 +1930,7 @@ fn chatCacheIdentity() chat_transcript.Identity {
     const shell = &app_state.shells[app_state.active_shell];
     var cache_key = chat_transcript.Identity.init(shell.shell_id, shell.tmux_host, shell.ai_agent == 2, shell.claude_sid[0..shell.claude_sid_len], shell.claude_cwd[0..shell.claude_cwd_len]);
     cache_key.pi = shell.ai_agent == 3;
+    cache_key.agent = shell.ai_agent;
     return cache_key;
 }
 
