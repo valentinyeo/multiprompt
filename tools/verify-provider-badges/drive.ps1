@@ -29,11 +29,11 @@ $result = @{passed=$false; error=$null; checks=$checks; cleanup='pending'; shell
 $job = $null
 $profile = Join-Path $env:RUNNER_TEMP "provider-badges-$PID"
 $providers = @(
-    @{name='Codex work'; agent=1; hex='D97757'},
-    @{name='Claude work'; agent=2; hex='3C78DC'},
-    @{name='Pi work'; agent=3; hex='8FCB6B'},
-    @{name='Antigravity work'; agent=8; hex='A77FE0'},
-    @{name='Plain terminal'; agent=0; hex=''}
+    @{name='Codex work'; agent=1; hex='D97757'; pinned=$true},
+    @{name='Claude work'; agent=2; hex='3C78DC'; pinned=$true},
+    @{name='Pi work'; agent=3; hex='8FCB6B'; pinned=$false},
+    @{name='Antigravity work'; agent=8; hex='A77FE0'; pinned=$false},
+    @{name='Plain terminal'; agent=0; hex=''; pinned=$false}
 )
 function Wait-For([string]$Name, [scriptblock]$Check) {
     $watch = [Diagnostics.Stopwatch]::StartNew()
@@ -183,6 +183,18 @@ function Rows([int]$Offset) {
     }
     @($found.Values)
 }
+function Ring-White([int]$X, [int]$Y, [int]$Side) {
+    $bitmap = Capture $X $Y $Side $Side
+    try {
+        $centre = [int][Math]::Floor($Side / 2)
+        $reach = [int][Math]::Floor($Side * 3 / 8)
+        foreach ($offset in @(@(($centre - $reach), $centre), @(($centre + $reach), $centre), @($centre, ($centre - $reach)), @($centre, ($centre + $reach)))) {
+            $pixel = $bitmap.GetPixel($offset[0], $offset[1])
+            if ($pixel.R -lt 200 -or $pixel.G -lt 200 -or $pixel.B -lt 200) { return $false }
+        }
+        $true
+    } finally { $bitmap.Dispose() }
+}
 function Difference($First, $Second) {
     $changed = 0
     for ($y = 0; $y -lt $First.Height; $y++) {
@@ -195,7 +207,9 @@ function Difference($First, $Second) {
 }
 try {
     [CaptionProof]::SetDpi($Dpi)
-    if ((Hash-File $Exe) -ne $ExpectedHash) { throw 'Binary checksum mismatch' }
+    $actualHash = Hash-File $Exe
+    Save @{ requestedDpi=$Dpi; exe=$Exe; expectedVersion=$ExpectedVersion; expectedHash=$ExpectedHash; actualHash=$actualHash; evidence=$Evidence; started=(Get-Date).ToString('o') } "$Evidence/provenance.json"
+    if ($actualHash -ne $ExpectedHash) { throw 'Binary checksum mismatch' }
     if (-not [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Exe)).Contains("MPVERSION=$ExpectedVersion;")) { throw 'Binary version mismatch' }
     $names = @()
     for ($i = 0; $i -lt $providers.Count; $i++) { $names += "live-badge-$i" }
@@ -215,7 +229,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Transcript seed failed' }
     $tabs = @()
     for ($i = 0; $i -lt $providers.Count; $i++) {
-        $tab = @{kind='tmux'; name=$providers[$i].name; manual=$true; tmux_host=0; tmux_session=$names[$i]; workspace=0; color=6; pinned_top=($i -lt 2); favorite=($i -eq 0); cv=$false; pid=0}
+        $tab = @{kind='tmux'; name=$providers[$i].name; manual=$true; tmux_host=0; tmux_session=$names[$i]; workspace=0; color=6; pinned_top=$providers[$i].pinned; favorite=($i -eq 0); cv=$false; pid=0}
         if ($providers[$i].agent -ne 0) {
             $tab.ai_agent = $providers[$i].agent
             $tab.csid = $sids[$names[$i]]
@@ -230,9 +244,16 @@ try {
     $main = Wait-For 'owned main window' { $h = [ChatDeliveryDesktop]::Window($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
     [void](Wait-For 'foreground owned app' { [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $main) })
     [void](Wait-For 'all restored sessions' { if (Test-Path "$settings/inbox-default.json") { $doc = Read-State 'inbox-default.json'; if (@($doc.shells).Count -eq $providers.Count) { $true } } })
-    [void](Wait-For 'restored list previews' {
+    [void](Wait-For 'restored provider identities' {
         $published = Read-State 'inbox-default.json'
-        @($published.shells | Where-Object { $_.pv -like '*answer 0*' }).Count -eq $providers.Count
+        $shells = @($published.shells)
+        $matched = $shells.Count -eq $providers.Count
+        for ($i = 0; $matched -and $i -lt $providers.Count; $i++) {
+            $field = $shells[$i].PSObject.Properties['ag']
+            $agent = if ($null -ne $field) { [int]$field.Value } else { 0 }
+            $matched = $agent -eq $providers[$i].agent -and $shells[$i].name -eq $providers[$i].name
+        }
+        $matched
     })
     $wanted = 0..($providers.Count - 1)
     $expanded = Wait-For 'every sidebar avatar' {
@@ -241,7 +262,8 @@ try {
     }
     for ($i = 0; $i -lt $providers.Count; $i++) {
         $row = @($expanded | Where-Object { $_.index -eq $i })[0]
-        if ($providers[$i].agent -eq 0) { Check-NoBadge $row "expanded-$i" } else { Check-Badge $row $providers[$i].hex "expanded-$i" }
+        $place = if ($providers[$i].pinned) { 'pinned' } else { 'recent' }
+        if ($providers[$i].agent -eq 0) { Check-NoBadge $row "$place-$i" } else { Check-Badge $row $providers[$i].hex "$place-$i" }
     }
     $listRow = @($expanded | Where-Object { $_.index -eq 2 })[0]
     $pinRow = @($expanded | Where-Object { $_.index -eq 0 })[0]
@@ -255,42 +277,44 @@ try {
         if ($yellow -lt 3) { throw "The favourite marker left the avatar bottom right while the badge is drawn: yellow=$yellow" }
         $checks.Add(@{name='badge-and-favourite-corners'; passed=$true; yellow=$yellow})
     } finally { $marker.Dispose() }
-    $hover = @($expanded | Where-Object { $_.index -eq 1 })[0]
+    $hover = @($expanded | Where-Object { $_.index -eq 2 })[0]
+    $stripLeft = $hover.right + [int][Math]::Floor(6 * $Dpi / 96)
+    $stripTop = $hover.bottom - [int][Math]::Floor(6 * $Dpi / 96)
+    $stripWidth = [int][Math]::Floor(120 * $Dpi / 96)
+    $stripHeight = [int][Math]::Floor(22 * $Dpi / 96)
     $client = [ChatDeliveryDesktop+Rect]::new()
     if (-not [ChatDeliveryDesktop]::GetClientRect($main, [ref]$client)) { throw 'Main client bounds unavailable' }
     $rest = [ChatDeliveryDesktop]::ScreenPoint($main, ($client.Right - 12), ($client.Bottom - 12))
     [ProviderBadgeInput]::Move($rest.X, $rest.Y)
     Start-Sleep -Milliseconds 400
-    $before = Capture ($hover.right + 6) ($hover.bottom - 10) 120 ([int][Math]::Floor(18 * $Dpi / 96))
+    $before = Capture $stripLeft $stripTop $stripWidth $stripHeight
     $point = [ChatDeliveryDesktop]::ScreenPoint($main, ($hover.x + [int]($hover.size / 2)), ($hover.y + [int]($hover.size / 2)))
     [ProviderBadgeInput]::Move($point.X, $point.Y)
     try {
         [void](Wait-For 'hover names the provider' {
-            $now = Capture ($hover.right + 6) ($hover.bottom - 10) 120 ([int][Math]::Floor(18 * $Dpi / 96))
+            $now = Capture $stripLeft $stripTop $stripWidth $stripHeight
             try { if ((Difference $before $now) -ge 8) { $true } else { $false } } finally { $now.Dispose() }
         })
         Shot "hover-detail-$Dpi"
-        $checks.Add(@{name='hover-detail'; passed=$true; row=1})
+        $checks.Add(@{name='hover-detail'; passed=$true; row=2})
     } finally { $before.Dispose() }
     $jump = @($expanded | Where-Object { $_.index -eq 0 })[0]
     $jumpSide = [int][Math]::Floor(16 * $Dpi / 96)
     $jumpLeft = $jump.x - [int][Math]::Floor(4 * $Dpi / 96)
     $jumpTop = $jump.y - [int][Math]::Floor(4 * $Dpi / 96)
-    $jumpX = $jumpLeft + [int][Math]::Floor($jumpSide / 4)
-    $jumpY = $jumpTop + [int][Math]::Floor($jumpSide / 2)
+    $jumpBase = Capture $jumpLeft $jumpTop $jumpSide $jumpSide
     [ProviderBadgeInput]::Control($true)
     try {
-        [void](Wait-For 'ctrl shows the jump badge' {
-            $p = Capture $jumpX $jumpY 1 1
-            try { $pixel = $p.GetPixel(0, 0); ($pixel.R -ge 200 -and $pixel.G -ge 200 -and $pixel.B -ge 200) } finally { $p.Dispose() }
-        })
+        [void](Wait-For 'ctrl shows the jump badge' { Ring-White $jumpLeft $jumpTop $jumpSide })
         Shot "jump-badge-$Dpi"
         $checks.Add(@{name='jump-badge-top-left'; passed=$true; row=0})
     } finally { [ProviderBadgeInput]::Control($false) }
-    [void](Wait-For 'ctrl release hides the jump badge' {
-        $p = Capture $jumpX $jumpY 1 1
-        try { $pixel = $p.GetPixel(0, 0); ($pixel.R -lt 150 -and $pixel.G -lt 150 -and $pixel.B -lt 150) } finally { $p.Dispose() }
-    })
+    try {
+        [void](Wait-For 'ctrl release hides the jump badge' {
+            $now = Capture $jumpLeft $jumpTop $jumpSide $jumpSide
+            try { (Difference $jumpBase $now) -eq 0 } finally { $now.Dispose() }
+        })
+    } finally { $jumpBase.Dispose() }
     $offset = (Read-Log).Length
     [ChatDeliveryDesktop]::Chord(@(0x11, 0x10, 0x42))
     $collapsed = Wait-For 'collapsed sidebar avatars' {
