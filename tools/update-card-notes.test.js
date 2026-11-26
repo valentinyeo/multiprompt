@@ -235,10 +235,10 @@ test('the real release proof uses the downloaded production notes and their matc
   assert.match(cardProof, /SetProcessDpiAwarenessContext/);
   assert.match(cardProof, /RedrawWindow/);
   assert.match(cardProof, /Card client size differs from the size the app laid out/);
-  assert.match(cardProof, /Card screenshot cut the Restart button/);
-  assert.match(cardProof, /Card screenshot shows no Restart label/);
-  assert.match(cardProof, /Card screenshot put the Restart button outside the card/);
-  assert.match(cardProof, /Card screenshot shows no See all row below the notes/);
+  assert.match(cardProof, /screenshot cut the Restart button at /);
+  assert.match(cardProof, /screenshot shows no Restart label/);
+  assert.match(cardProof, /screenshot put the Restart button outside the card/);
+  assert.match(cardProof, /screenshot shows no See all row below the notes/);
   assert.match(cardProof, /images = \$script:cardImages/);
   const script = read('tools/update-card-real-release-proof.ps1');
   assert.match(script, /\[switch\]\$Before/);
@@ -498,11 +498,11 @@ test('IGSH-1118 native card wraps long real notes, scrolls internally, and rejec
     return { width: head.readUInt32BE(16), height: head.readUInt32BE(20) };
   };
   const savedImage = (receipt, name) => receipt.images.find(image => image.name === name);
-  assert.equal(greenReceipt.image.name, 'released-card', 'The branch kept no first screenshot record');
-  assert.equal(greenReceipt.image.window.width, 1024, 'The first branch screenshot was not taken at the normal proof size');
-  assert.equal(greenReceipt.image.maximized, false, 'The first branch screenshot was taken while the window was maximized');
-  assert.deepEqual(pngSize(path.join(evidence, 'green', 'released-card.png')), { width: greenReceipt.image.window.width, height: greenReceipt.image.window.height }, 'The first branch screenshot is not the window size it records');
-  assert.equal(greenReceipt.image.restartVisible, true, 'The first branch screenshot does not show Restart');
+  assert.equal(greenReceipt.firstImage.name, 'released-card', 'The branch kept no first screenshot record');
+  assert.equal(greenReceipt.firstImage.window.width, 1024, 'The first branch screenshot was not taken at the normal proof size');
+  assert.equal(greenReceipt.firstImage.maximized, false, 'The first branch screenshot was taken while the window was maximized');
+  assert.deepEqual(pngSize(path.join(evidence, 'green', 'released-card.png')), { width: greenReceipt.firstImage.window.width, height: greenReceipt.firstImage.window.height }, 'The first branch screenshot is not the window size it records');
+  assert.equal(greenReceipt.firstImage.restartVisible, true, 'The first branch screenshot does not show Restart');
   assert.equal(greenReceipt.images.length, 5, 'The branch proof recorded no images for its captured card states');
   for (const name of ['wrapped-normal', 'wrapped-minimum', 'wrapped-scrolled', 'wrapped-collapsed']) {
     const image = savedImage(greenReceipt, name);

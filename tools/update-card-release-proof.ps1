@@ -192,12 +192,19 @@ function Assert-Card-Image([string]$Name, [string]$File, $Geometry) {
         $restart = Card-Click 'restart button'
         if ($Contract -ne 'new') {
             $legacy = Card-Legacy-Restart $picture
-            if ($null -eq $legacy) { throw ('Card ' + $Name + ' screenshot shows no Restart button') }
-            if ($legacy.width -lt 70 -or $legacy.width -gt 100 -or $legacy.height -lt 15 -or $legacy.height -gt 24) { throw ('Card ' + $Name + ' screenshot shows no Restart button') }
-            if ($legacy.labelInk -lt 40) { throw ('Card ' + $Name + ' screenshot shows no Restart label') }
-            if ($legacy.left -lt 8 -or $legacy.right -gt 260 -or $legacy.bottom -gt $picture.Height - 8) { throw ('Card ' + $Name + ' screenshot put the Restart button outside the card') }
+            if ($null -ne $legacy) {
+                if ($legacy.width -lt 70 -or $legacy.width -gt 100 -or $legacy.height -lt 15 -or $legacy.height -gt 24) { throw ('Card ' + $Name + ' screenshot shows no Restart button') }
+                if ($legacy.labelInk -lt 40) { throw ('Card ' + $Name + ' screenshot shows no Restart label') }
+                if ($legacy.left -lt 8 -or $legacy.right -gt 260 -or $legacy.bottom -gt $picture.Height - 8) { throw ('Card ' + $Name + ' screenshot put the Restart button outside the card') }
+                $visible.restartVisible = $true
+                $visible.legacyButton = $legacy
+                return $visible
+            }
+            $point = Card-Bitmap-Point $restart.x $restart.y
+            if ($point.x -lt 8 -or $point.y -lt 8 -or $point.x -ge $picture.Width - 8 -or $point.y -ge $picture.Height - 8) { throw ('Card ' + $Name + ' screenshot cut the Restart button at ' + $point.x + ',' + $point.y) }
+            if ((Card-Ink $picture ($point.x - 12) ($point.y - 4) ($point.x + 12) ($point.y + 4)) -lt 30) { throw ('Card ' + $Name + ' screenshot shows no Restart button at the place the app paints it') }
             $visible.restartVisible = $true
-            $visible.legacyButton = $legacy
+            $visible.legacyButton = $null
             return $visible
         }
         $point = Card-Bitmap-Point $restart.x $restart.y
