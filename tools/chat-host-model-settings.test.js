@@ -336,7 +336,7 @@ with tempfile.TemporaryDirectory() as directory:
         for operation, key, value in (('set_model', 'model', 'opus'), ('set_effort', 'effort', 'high')):
             request = dict(provider=other, sid=other_sid, op=operation, **{key:value})
             if other == 'pi' and operation == 'set_model':
-                assert r['host_reply'](request)['reason'] == 'host_not_running'
+                assert r['host_reply'](request)['reason'] == 'invalid_model'
                 other_session = dict(state={})
                 r['host_session_reset'](other_session)
                 assert r['host_handle_request'](other, other_sid, tmux, other_session, request)['status'] == 'refused'

@@ -363,6 +363,44 @@ def antigravity_rows(cwd):
     return "ok", rows
 
 
+PI_BUILTINS = (
+    ("B", "model", "<provider/model>", "Select a model"),
+    ("B", "login", "<provider>", "Configure provider authentication"),
+    ("B", "logout", "", "Remove provider authentication"),
+    ("B", "compact", "", "Compact the session context"),
+    ("B", "new", "", "Start a new session"),
+    ("B", "thinking", "<level>", "Set thinking level"),
+    ("B", "reload", "", "Reload extensions, skills, prompts, and context files"),
+    ("B", "name", "", "Set session display name"),
+    ("B", "session", "", "Show session info and stats"),
+    ("B", "settings", "", "Open settings menu"),
+    ("B", "tree", "", "Navigate session tree"),
+    ("B", "fork", "", "Fork from a previous user message"),
+    ("B", "clone", "", "Duplicate the current session"),
+    ("B", "resume", "", "Resume another session"),
+    ("B", "export", "", "Export session to HTML or JSONL"),
+    ("B", "copy", "", "Copy last assistant message"),
+)
+
+
+def pi_rows(cwd):
+    rows = list(PI_BUILTINS)
+    root = cwd
+    while root != HOME:
+        rows += scan(root / ".pi/skills", "", "J", {})
+        rows += scan(root / ".pi/prompts", "", "J", {}, True)
+        rows += scan(root / ".agents/skills", "", "J", {})
+        rows += scan(root / ".claude/skills", "", "J", {})
+        rows += scan(root / ".claude/commands", "", "J", {}, True)
+        if root.parent == root:
+            break
+        root = root.parent
+    for folder in (".pi/agent/skills", ".agents/skills"):
+        rows += scan(HOME / folder, "", "S", {})
+    rows += scan(HOME / ".pi/agent/prompts", "", "C", {}, True)
+    return "ok", rows
+
+
 def codex_call(method, params):
     global SERVER, SERVER_LAST, SERVER_BUFFER
     if SERVER and (SERVER.poll() is not None or time.monotonic() - SERVER_LAST > 600):
@@ -835,6 +873,8 @@ def request(line):
         status, rows = claude_rows(cwd)
     elif fields[2] == "antigravity":
         status, rows = antigravity_rows(cwd) if op == "slash" else ("ok", [])
+    elif fields[2] == "pi":
+        status, rows = pi_rows(cwd) if op == "slash" else ("ok", [])
     else:
         status, rows = codex_rows(cwd, op)
     if op == "skills":

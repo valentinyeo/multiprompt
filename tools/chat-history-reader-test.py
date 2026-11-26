@@ -8603,7 +8603,8 @@ class HostPiEffortTest(HostEventStreamFixture, unittest.TestCase):
         self.assertNotIn('--thinking', reader.host_pi_argv('pi', self.sid, ['pi']))
         self.assertEqual(reader.host_reply(dict(provider='pi', sid=self.sid, op='set_effort', effort='xhigh'))['status'], 'ok')
         self.assertEqual(reader.host_config('pi', self.sid)['effort'], 'xhigh')
-        self.assertEqual(reader.host_settings('pi', self.sid), dict(model='', effort='xhigh'))
+        self.assertEqual(reader.host_settings('pi', self.sid),
+                         dict(provider='opencode-go', model='deepseek-v4.1-flash', effort='xhigh'))
         argv = reader.host_pi_argv('pi', self.sid, ['pi'])
         self.assertEqual(argv.count('--thinking'), 1)
         self.assertEqual(argv[argv.index('--thinking') + 1], 'xhigh')
@@ -8611,7 +8612,7 @@ class HostPiEffortTest(HostEventStreamFixture, unittest.TestCase):
 
     def test_a_live_pi_chat_sends_the_thinking_level_and_persists_it(self):
         self.write_config()
-        self.session['settings'] = dict(model='', effort='')
+        self.session['settings'] = dict(provider='opencode-go', model='deepseek-v4.1-flash', effort='')
         self.session['starting_settings'] = dict(self.session['settings'])
         self.session['ready'] = True
         sent = []
@@ -8619,12 +8620,14 @@ class HostPiEffortTest(HostEventStreamFixture, unittest.TestCase):
             result = reader.host_handle_request('pi', self.sid, self.tmux, self.session, dict(op='set_effort', effort='high'))
         self.assertEqual(result['status'], 'ok')
         self.assertEqual(sent, [dict(type='set_thinking_level', level='high')])
-        self.assertEqual(self.session['settings'], dict(model='', effort='high'))
+        self.assertEqual(self.session['settings'],
+                         dict(provider='opencode-go', model='deepseek-v4.1-flash', effort='high'))
         applied = self.pi_events('host.settings')
         self.assertTrue(applied[-1]['payload']['applied'])
         self.assertEqual(applied[-1]['payload']['effort'], 'high')
         self.assertEqual(reader.host_config('pi', self.sid)['effort'], 'high')
-        self.assertEqual(reader.host_settings('pi', self.sid), dict(model='', effort='high'))
+        self.assertEqual(reader.host_settings('pi', self.sid),
+                         dict(provider='opencode-go', model='deepseek-v4.1-flash', effort='high'))
 
     def test_a_pi_thinking_reply_is_logged_without_touching_the_turn(self):
         reader.host_pi_event('pi', self.sid, self.tmux, self.session,
@@ -9864,6 +9867,156 @@ class MUBO_221_LaunchCommandTest(unittest.TestCase):
             'print(\'{"status":"enabled","sid":"x"}\' if step == "enable" else \'{"status":"started","pid":7}\')\n')
         self.assertEqual(ran.returncode, 0)
         self.assertEqual(ran.stdout.strip().splitlines()[-1], '{"status":"started","pid":7}')
+
+
+class MUBO_590_PiModelContinuityTest(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.addCleanup(patch.stopall)
+        self.home = Path(self.temp.name)
+        patch.object(reader, 'HOME', self.home).start()
+        self.provider = 'pi'
+        self.sid = '59000000-1111-4222-8333-444444444444'
+        self.tmux = 'pi-model-continuity'
+        self.write_config()
+        self.stream = io.BytesIO()
+        self.session = dict(state=reader.host_session_state(self.provider, self.sid))
+        reader.host_session_reset(self.session, types.SimpleNamespace(stdin=self.stream))
+        self.session['ready'] = True
+
+    def write_config(self, **extra):
+        config = dict(enabled=True, provider=self.provider, sid=self.sid, tmux=self.tmux,
+                      cwd=str(self.home), face='custom', login='pi-agent', **extra)
+        reader.host_write(reader.host_paths(self.provider, self.sid)['config'], config)
+        return config
+
+    def sent_rpc(self):
+        return [json.loads(line) for line in self.stream.getvalue().splitlines() if line.strip()]
+
+    def test_pi_codex_choice_persists_live_and_across_restart_idle_stop_and_fresh_start(self):
+        self.assertEqual(reader.host_settings(self.provider, self.sid),
+                         dict(provider='opencode-go', model='deepseek-v4.1-flash', effort=''))
+        self.assertEqual(reader.host_pi_choice(self.provider, self.sid),
+                         ['--provider', 'opencode-go', '--model', 'deepseek-v4.1-flash'])
+        forwarded = []
+
+        def forward(provider, sid, request):
+            forwarded.append(request)
+            return reader.host_handle_request(provider, sid, self.tmux, self.session, request)
+
+        with patch.object(reader, 'host_owned', return_value=True), \
+                patch.object(reader, 'host_request', side_effect=forward):
+            reply = reader.host_reply(dict(op='set_model', provider='pi', sid=self.sid,
+                                           provider_name='openai-codex', model='openai-codex/gpt-6.1-sol'))
+        self.assertEqual(reply, dict(status='ok'))
+        self.assertEqual(forwarded[-1].get('provider_name'), 'openai-codex')
+        self.assertEqual(self.sent_rpc()[-1], dict(type='set_model', provider='openai-codex', modelId='gpt-6.1-sol'))
+        config = reader.host_config(self.provider, self.sid)
+        self.assertEqual((config['model_provider'], config['model']), ('openai-codex', 'gpt-6.1-sol'))
+        self.assertEqual(config['pi_model'], dict(provider='openai-codex', model='gpt-6.1-sol'))
+        self.assertEqual(reader.host_settings(self.provider, self.sid),
+                         dict(provider='openai-codex', model='gpt-6.1-sol', effort=''))
+        argv = reader.host_pi_argv(self.provider, self.sid, ['pi'])
+        self.assertEqual(argv[:6], ['pi', '--mode', 'rpc', '--provider', 'openai-codex', '--model'])
+        self.assertEqual(argv[6], 'gpt-6.1-sol')
+        restarted = dict(state=reader.host_session_state(self.provider, self.sid))
+        reader.host_session_reset(restarted, types.SimpleNamespace(stdin=io.BytesIO()))
+        reader.host_pi_open(self.provider, self.sid, self.tmux, restarted)
+        self.assertEqual(restarted['pi_model'], dict(provider='openai-codex', model='gpt-6.1-sol'))
+        handover = reader.host_paths(self.provider, self.sid)['root'] / 'handover.json'
+        reader.host_write(handover, dict(text='Continue with Codex model.'))
+        state = dict(restarted['state'], fresh_start=dict(phase='reset', file=handover.name))
+        self.assertTrue(reader.host_fresh_prepare(self.provider, self.sid, state))
+        fresh_argv = reader.host_pi_argv(self.provider, self.sid, ['pi'])
+        self.assertEqual(fresh_argv[3:7], ['--provider', 'openai-codex', '--model', 'gpt-6.1-sol'])
+
+    def test_pi_codex_and_deepseek_persist_while_stopped_and_survive_restart(self):
+        with patch.object(reader, 'host_owned', return_value=False):
+            refused = reader.host_reply(dict(op='set_model', provider='pi', sid=self.sid, model='opus'))
+            self.assertEqual(refused, dict(status='refused', reason='invalid_model'))
+            self.assertNotIn('model', reader.host_config(self.provider, self.sid))
+            codex_reply = reader.host_reply(dict(op='set_model', provider='pi', sid=self.sid,
+                                                 provider_name='openai-codex', model='gpt-6.1-sol'))
+            self.assertEqual(codex_reply, dict(status='ok'))
+            self.assertEqual(reader.host_pi_argv(self.provider, self.sid, ['pi'])[3:7],
+                             ['--provider', 'openai-codex', '--model', 'gpt-6.1-sol'])
+            self.assertEqual(reader.host_settings(self.provider, self.sid),
+                             dict(provider='openai-codex', model='gpt-6.1-sol', effort=''))
+            deepseek_reply = reader.host_reply(dict(op='set_model', provider='pi', sid=self.sid,
+                                                    provider_name='opencode-go', model='deepseek-v4.2'))
+            self.assertEqual(deepseek_reply, dict(status='ok'))
+            self.assertEqual(reader.host_pi_argv(self.provider, self.sid, ['pi'])[3:7],
+                             ['--provider', 'opencode-go', '--model', 'deepseek-v4.2'])
+            self.assertEqual(reader.host_settings(self.provider, self.sid),
+                             dict(provider='opencode-go', model='deepseek-v4.2', effort=''))
+            baseten_reply = reader.host_reply(dict(op='set_model', provider='pi', sid=self.sid,
+                                                   provider_name='baseten',
+                                                   model='baseten/deepseek-ai/DeepSeek-V4-Pro-0813'))
+            self.assertEqual(baseten_reply, dict(status='ok'))
+            self.assertEqual(reader.host_pi_argv(self.provider, self.sid, ['pi'])[3:7],
+                             ['--provider', 'baseten', '--model', 'deepseek-ai/DeepSeek-V4-Pro-0813'])
+
+    def test_switching_between_pi_codex_and_pi_deepseek_preserves_history_and_applies_on_restart(self):
+        history = reader.host_paths(self.provider, self.sid)['history']
+        rows = [dict(role='user', text='Keep this history row', id='u1'),
+                dict(role='assistant', text='History stays intact', id='a1')]
+        history.write_text(''.join(json.dumps(dict(type='multiprompt_history', row=row)) + '\n' for row in rows),
+                           encoding='utf-8')
+        reader.host_state_write(self.provider, self.sid, dict(provider=self.provider, sid=self.sid, display_history=True))
+        with patch.object(reader, 'host_owned', return_value=True), \
+                patch.object(reader, 'host_request',
+                             side_effect=lambda p, s, req: reader.host_handle_request(p, s, self.tmux, self.session, req)):
+            self.assertEqual(reader.host_reply(dict(op='set_model', provider='pi', sid=self.sid,
+                                                    provider_name='openai-codex', model='gpt-6.1-sol'))['status'], 'ok')
+            self.assertEqual(reader.host_reply(dict(op='set_model', provider='pi', sid=self.sid,
+                                                    provider_name='opencode-go', model='deepseek-v4.1-flash'))['status'], 'ok')
+            self.assertEqual(reader.host_reply(dict(op='set_model', provider='pi', sid=self.sid,
+                                                    provider_name='openai-codex', model='gpt-6.1-sol'))['status'], 'ok')
+        self.assertEqual(reader.host_pi_argv(self.provider, self.sid, ['pi'])[3:7],
+                         ['--provider', 'openai-codex', '--model', 'gpt-6.1-sol'])
+        kept = reader.host_switch_rows(self.provider, self.sid, self.tmux)
+        self.assertEqual([row['text'] for row in kept], ['Keep this history row', 'History stays intact'])
+
+    def test_switch_ai_round_trip_restores_pi_codex_model_and_history(self):
+        transcript = self.home / 'pi-transcript.jsonl'
+        rows = [dict(role='user', text='First Pi Codex question', id='q1'),
+                dict(role='assistant', text='First Pi Codex answer', id='a1')]
+        transcript.write_text(''.join(json.dumps(dict(type='multiprompt_history', row=row)) + '\n' for row in rows),
+                              encoding='utf-8')
+        with patch.object(reader, 'host_owned', return_value=False):
+            self.assertEqual(reader.host_reply(dict(op='set_model', provider='pi', sid=self.sid,
+                                                    provider_name='openai-codex', model='gpt-6.1-sol'))['status'], 'ok')
+        launch_args = []
+
+        def fake_start(provider, sid):
+            if provider == 'pi':
+                launch_args.append(reader.host_pi_argv(provider, sid, ['pi']))
+            return dict(status='started')
+
+        with patch.object(reader, 'conversation_path', return_value=transcript), \
+                patch.object(reader, 'host_start', side_effect=fake_start), \
+                patch.object(reader, 'start_message_worker'):
+            to_codex = reader.host_reply(dict(op='switch_ai', provider='pi', sid=self.sid, to='codex'))
+            self.assertEqual((to_codex['status'], to_codex['provider']), ('switched', 'codex'))
+            codex_config = reader.host_config('codex', to_codex['sid'])
+            self.assertNotIn('model', codex_config)
+            self.assertEqual(codex_config['pi_model'], dict(provider='openai-codex', model='gpt-6.1-sol'))
+            to_claude = reader.host_reply(dict(op='switch_ai', provider='codex', sid=to_codex['sid'], to='claude'))
+            self.assertEqual((to_claude['status'], to_claude['provider']), ('switched', 'claude'))
+            self.assertNotIn('model', reader.host_config('claude', to_claude['sid']))
+            back_pi = reader.host_reply(dict(op='switch_ai', provider='claude', sid=to_claude['sid'], to='pi'))
+            self.assertEqual((back_pi['status'], back_pi['provider']), ('switched', 'pi'))
+        restored_config = reader.host_config('pi', back_pi['sid'])
+        self.assertEqual((restored_config['model_provider'], restored_config['model']),
+                         ('openai-codex', 'gpt-6.1-sol'))
+        self.assertEqual(reader.host_settings('pi', back_pi['sid']),
+                         dict(provider='openai-codex', model='gpt-6.1-sol', effort=''))
+        self.assertEqual(len(launch_args), 1)
+        self.assertEqual(launch_args[0][3:7], ['--provider', 'openai-codex', '--model', 'gpt-6.1-sol'])
+        restored_rows = reader.host_switch_rows('pi', back_pi['sid'], self.tmux)
+        self.assertTrue(any(row['text'] == 'First Pi Codex question' for row in restored_rows))
+        self.assertTrue(any(row['text'] == 'First Pi Codex answer' for row in restored_rows))
 
 
 def load_tests(loader, tests, pattern):
