@@ -473,6 +473,7 @@ function Open-Member([string]$Name) {
 function Clear-Composer([IntPtr]$Control, [string]$ConditionName) {
     [void](Wait-For $ConditionName {
         if ([ChatDeliveryDesktop]::Text($Control) -ceq '') { return $true }
+        Focus-Control $Control
         Press @(0x11, 0x41) 'Ctrl+A: select the draft a restored room put back'
         Press @(0x08) 'Backspace: clear the draft a restored room put back'
         return ([ChatDeliveryDesktop]::Text($Control) -ceq '')
