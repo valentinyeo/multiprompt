@@ -17,3 +17,4 @@ A send the room accepted releases the room's send control, so your next message 
 A room no longer shows a message that was sent somewhere else.
 Reopening a room that stopped refreshing loads its messages again.
 A room send that never reached a decision no longer leaves the send control waiting forever.
+A command you pick in Ctrl+K runs when you press Enter, even while the list is still refreshing.

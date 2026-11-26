@@ -5052,7 +5052,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_SEARCH_CONFIRM => {
-            if (lp != 0 and (lp != @as(isize, @intCast(app_state.g_search_revision)) or wp != @as(usize, app_state.g_search_sel) + 1)) return 0;
+            if (lp != 0 and (wp != @as(usize, app_state.g_search_sel) + 1 or (!app_state.g_search_active and lp != @as(isize, @intCast(app_state.g_search_revision))))) return 0;
             if (app_state.g_search_active and app_state.g_browser_url_mode) {
                 _ = PostMessageW(hwnd, WM_APP_BROWSER_OPEN_URL, 0, 0);
                 return 0;

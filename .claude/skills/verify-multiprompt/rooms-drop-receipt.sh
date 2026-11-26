@@ -13,7 +13,10 @@ case "$action" in
     chmod 666 "$config" "$state" "$log"
     ;;
   arm)
-    printf '%s' "$2" > "$config"
+    case "$2" in
+      ''|*[!A-Za-z0-9_-]*) echo 'arm needs a plain marker' >&2; exit 2 ;;
+    esac
+    printf '{"text":"%s"}' "$2" > "$config"
     rm -f "$state"
     : > "$log"
     ;;

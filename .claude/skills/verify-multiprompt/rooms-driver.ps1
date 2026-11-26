@@ -111,10 +111,10 @@ function Type-Text([string]$Text) {
 $journeyCommands = $null
 function Invoke-JourneyCommand {
     param([string]$Name, [string]$Text, [switch]$Session)
-    if ($null -eq $journeyCommands) {
+    if ($null -eq $script:journeyCommands) {
         $catalog = & node (Join-Path $PSScriptRoot '../../../tools/journey-commands.mjs')
         if ($LASTEXITCODE -ne 0) { throw 'Journey command catalog failed' }
-        $journeyCommands = $catalog | ConvertFrom-Json
+        $script:journeyCommands = $catalog | ConvertFrom-Json
     }
     if ($Text) {
         $query = $Text
@@ -126,28 +126,33 @@ function Invoke-JourneyCommand {
         $query = $Name
         $target = [string]$matching[0]
     } else {
-        $entry = $journeyCommands.PSObject.Properties[$Name.ToLowerInvariant()]
+        $entry = $script:journeyCommands.PSObject.Properties[$Name.ToLowerInvariant()]
         if ($null -eq $entry) { throw "Unknown journey command name: $Name" }
         $query = $entry.Value.query
         $target = [string]$entry.Value.target
     }
-    Press @(0x1B) 'Escape: dismiss overlay before the palette command'
-    $offset = (Read-Shared "$settings/debug.log").Length
-    Press @(0x11, 0x4B) 'Ctrl+K: open palette'
-    [void](Wait-For 'empty palette ready' { (Read-After $offset) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
-    Type-Text $query
     $rowsPattern = '\[palette\] rows chars=' + $query.Length + ' count=\d+ ids=([^\r\n]+)'
-    $ids = Wait-For "palette rows for $query" {
-        $rows = [regex]::Matches((Read-After $offset), $rowsPattern)
-        if ($rows.Count -eq 0) { return $null }
-        $found = @($rows[$rows.Count - 1].Groups[1].Value.Trim() -split ' ' | Where-Object { $_ })
-        if (-not $found.Count -or ($null -ne $target -and $found -notcontains $target)) { return $null }
-        ,$found
+    $confirmPattern = if ($null -eq $target) { '\[palette\] confirm target=\d+' } else { '\[palette\] confirm target=' + [regex]::Escape([string]$target) + '(?![0-9])' }
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        Press @(0x1B) 'Escape: dismiss overlay before the palette command'
+        $offset = (Read-Shared "$settings/debug.log").Length
+        Press @(0x11, 0x4B) 'Ctrl+K: open palette'
+        if (-not (Wait-Or { (Read-After $offset) -match '\[palette\] ready chars=0 count=\d+ target=\d+' } 10)) { continue }
+        Type-Text $query
+        $ids = Wait-Or {
+            $rows = [regex]::Matches((Read-After $offset), $rowsPattern)
+            if ($rows.Count -eq 0) { return $null }
+            $found = @($rows[$rows.Count - 1].Groups[1].Value.Trim() -split ' ' | Where-Object { $_ })
+            if (-not $found.Count -or ($null -ne $target -and $found -notcontains $target)) { return $null }
+            ,$found
+        } 10
+        if ($null -eq $ids) { continue }
+        $index = if ($null -eq $target) { 0 } else { [Array]::IndexOf($ids, $target) }
+        for ($i = 0; $i -lt $index; $i++) { Press @(0x28) "Down: row for $query" }
+        Press @(0x0D) "Enter: $query"
+        if (Wait-Or { (Read-After $offset) -match $confirmPattern } 10) { return }
     }
-    $index = if ($null -eq $target) { 0 } else { [Array]::IndexOf($ids, $target) }
-    for ($i = 0; $i -lt $index; $i++) { Press @(0x28) "Down: row for $query" }
-    Press @(0x0D) "Enter: $query"
-    [void](Wait-For "palette confirms $query" { (Read-After $offset) -match '\[palette\] confirm target=\d+' })
+    throw "Timed out: palette confirms $query"
 }
 function Visible-Children([string]$Class, $Parent = $main) {
     $element = [Windows.Automation.AutomationElement]::FromHandle([IntPtr]$Parent)
@@ -831,17 +836,12 @@ Host remote-1
         Open-Member 'Bravo'
         $memberEdit = Wait-For 'one visible member composer before the interrupt' { $windows = @(Visible-Children 'Edit'); if ($windows.Count -eq 1) { $windows[0] } }
         Focus-Control $memberEdit
-        for ($attempt = 1; $attempt -le 3; $attempt++) {
-            Press @(0x1B) "Escape: interrupt the running member turn (attempt $attempt)"
-            try {
-                [void](Wait-For 'the real host ended the interrupted turn' {
-                    $state = Snapshot 'interrupt-ended'
-                    $bravoHost = @($state.hosts | Where-Object { $_.state.native_session -ceq $bravoSid })
-                    $bravoHost.Count -eq 1 -and $bravoHost[0].state.result.subtype -ceq 'interrupted'
-                } 20)
-                break
-            } catch { if ($attempt -eq 3) { throw } }
-        }
+        [void](Wait-For 'the real host ended the interrupted turn' {
+            Press @(0x1B) 'Escape: interrupt the running member turn'
+            $state = Snapshot 'interrupt-ended'
+            $bravoHost = @($state.hosts | Where-Object { $_.state.native_session -ceq $bravoSid })
+            $bravoHost.Count -eq 1 -and $bravoHost[0].state.result.subtype -ceq 'interrupted'
+        } 60)
         Open-Room 'Rooms534'
         [void](Wait-For 'exactly one saved answer from the interrupted turn' {
             $saved = @(Room-Events (Snapshot 'interrupt-replies') | Where-Object { $_.type -eq 'agent_reply' -and $_.parent_event_id -ceq $interruptParent -and $_.text -ceq 'Bravo says INTERRUPT534' })
@@ -870,7 +870,8 @@ Host remote-1
         [void](Server-Drop 'arm' 'LOSTACK534')
         Send-Text 'LOSTACK534' -Room -AllowKeptDraft
         [void](Wait-For 'the disposable boundary withheld the committed receipt' {
-            (Read-Shared "$settings/debug.log") -match 'mp-room-drop-receipt: withheld the first receipt for the committed command'
+            $entered = @((Server-Drop 'log') -split "`n" | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.withheld -and $_.text -ceq 'LOSTACK534' })
+            $entered.Count -ge 1
         } 45)
         $journalPaths = @(Get-ChildItem $settings -Filter 'room-command-*.json' | Select-Object -ExpandProperty FullName)
         if ($journalPaths.Count -ne 1) { throw "Expected one room command journal on this profile, found $($journalPaths.Count)" }
