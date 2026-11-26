@@ -77,6 +77,7 @@ test "mode replies require an explicit acknowledgement" {
 }
 
 test "live slash commands route without changing terminal or custom messages" {
+    @setEvalBranchQuota(10_000);
     const w = std.unicode.utf8ToUtf16LeStringLiteral;
     try std.testing.expectEqual(Route.plan, route(true, w("/plan ")));
     try std.testing.expectEqual(Route.permissions, route(true, w("/permissions")));
