@@ -92,10 +92,11 @@ function Corners-Outside([int]$x, [int]$y, [int]$Right, [int]$Top, [int]$Legs) {
 }
 function Badge-Coverage([int]$x, [int]$y, $Box) {
     $fill = $Box.side - $Box.border * 2
-    $fillRight = $Box.right - $Box.border; $fillTop = $Box.top + $Box.border
+    $edgeRight = $Box.side; $edgeTop = 0
+    $fillRight = $edgeRight - $Box.border; $fillTop = $edgeTop + $Box.border
     if ($fill -gt 0 -and (Corners-Inside $x $y $fillRight $fillTop $fill)) { return 'inside' }
-    if (Corners-Outside $x $y $Box.right $Box.top $Box.side) { return 'outside' }
-    if ((Corners-Inside $x $y $Box.right $Box.top $Box.side) -and ($fill -le 0 -or (Fill-Clear $x $y $fillRight $fillTop $fill))) { return 'border' }
+    if (Corners-Outside $x $y $edgeRight $edgeTop $Box.side) { return 'outside' }
+    if ((Corners-Inside $x $y $edgeRight $edgeTop $Box.side) -and ($fill -le 0 -or (Fill-Clear $x $y $fillRight $fillTop $fill))) { return 'border' }
     'edge'
 }
 function Capture([int]$x, [int]$y, [int]$w, [int]$h) {
