@@ -379,8 +379,9 @@ test('the judge order is ladder-call then Codex then Claude with one ladder-call
   assert.equal([...workflow.matchAll(/valentinyeo\/token-ladder\/\.github\/actions\/ladder-call@main/g)].length, 1);
   assert.match(workflow, /id: ladder_call\n        if: steps\.evidence\.outcome == 'success' && [^\n]+\n        continue-on-error: true\n        uses: valentinyeo\/token-ladder\/\.github\/actions\/ladder-call@main\n        env:\n          AI_GATEWAY_API_KEY: /);
   assert.match(workflow, /id: ladder\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && steps\.ladder_call\.outcome == 'success'/);
-  assert.match(workflow, /id: openai\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && steps\.ladder\.outcome != 'success'\n        continue-on-error: true\n        env:\n          CODEX_AUTH_JSON: /);
-  assert.match(workflow, /id: claude\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && steps\.ladder\.outcome != 'success' && steps\.openai\.outcome != 'success'\n        continue-on-error: true\n        uses: anthropics\/claude-code-action@/);
+  assert.match(workflow, /exclude-families: \$\{\{ needs\.resolve\.outputs\.author_families \}\}/);
+  assert.match(workflow, /id: openai\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && steps\.ladder\.outcome != 'success' && needs\.resolve\.outputs\.openai_fallback == 'true'\n        continue-on-error: true\n        env:\n          CODEX_AUTH_JSON: /);
+  assert.match(workflow, /id: claude\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && steps\.ladder\.outcome != 'success' && steps\.openai\.outcome != 'success' && needs\.resolve\.outputs\.claude_fallback == 'true'\n        continue-on-error: true\n        uses: anthropics\/claude-code-action@/);
   assert.match(workflow, /LADDER_LANE: \$\{\{ steps\.ladder\.outputs\.ladder_lane \|\| '' \}\}/);
   assert.match(workflow, /VERDICT: \$\{\{ steps\.ladder\.outputs\.structured_output \|\| steps\.openai\.outputs\.structured_output \|\| steps\.claude\.outputs\.structured_output \}\}/);
   assert.match(workflow, /build-ladder-request verifier-out/);
@@ -819,4 +820,177 @@ test('comparison evidence needs paired non-empty base and head clips without jud
   fs.writeFileSync(path.join(dir, `verify-appearance-${base}`, 'before.mp4'), '');
   assert.equal(evaluate().final, 'BLOCKED');
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('standalone adjacent cleanup.json supplies validated traceable cleanup evidence when result.json omits cleanup', () => {
+  const dir = evidenceDir({ 'verify-chat-fresh-start': { feature: 'chat-fresh-start', status: 'passed' } });
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-verifier-cleanup-out-'));
+  try {
+    fs.writeFileSync(
+      path.join(dir, 'verify-chat-fresh-start', 'cleanup.json'),
+      '\uFEFF{\r\n  "evidence_preserved": true,\r\n  "scratch_removed": true,\r\n  "remaining_owned_processes": 0\r\n}',
+    );
+    fs.mkdirSync(path.join(dir, 'verify-chat-fresh-start', 'fresh-start-live'), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'verify-chat-fresh-start', 'fresh-start-live', 'cleanup.json'),
+      JSON.stringify({ evidence_preserved: true, scratch_removed: true, remaining_owned_processes: 0 }),
+    );
+    const summary = verifier.summarize(dir, ['chat-fresh-start']);
+    const run = summary.head['chat-fresh-start'][0];
+    assert.equal(run.cleanupSource, 'cleanup.json');
+    assert.equal(run.cleanupBlocked, false);
+    assert.match(run.cleanup, /^cleanup\.json: remaining_owned_processes=0, scratch_removed=true, evidence_preserved=true$/);
+    const md = verifier.evidenceMarkdown(summary, selection(['chat-fresh-start']));
+    assert.match(md, /verify-chat-fresh-start: status passed, checks 0, cleanup cleanup\.json: remaining_owned_processes=0, scratch_removed=true, evidence_preserved=true/);
+    assert.doesNotMatch(md, /cleanup none recorded/);
+    fs.writeFileSync(path.join(out, 'evidence.md'), md);
+    const material = verifier.judgeInputs(out, dir);
+    assert.match(material, /### evidence\/verify-chat-fresh-start\/cleanup\.json/);
+    assert.match(material, /remaining_owned_processes=0, scratch_removed=true, evidence_preserved=true/);
+    assert.equal(verifier.finalize({ verdict: { verdict: 'PASS', evidence: ['cleanup.json passed'] }, headSha: head, summary, selection: selection(['chat-fresh-start']), runUrl: 'u' }).final, 'PASS');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(out, { recursive: true, force: true });
+  }
+});
+
+test('missing root cleanup.json does not invent cleanup success even when a nested case cleanup exists', () => {
+  const dir = evidenceDir({ 'verify-chat-fresh-start': { feature: 'chat-fresh-start', status: 'passed' } });
+  try {
+    fs.mkdirSync(path.join(dir, 'verify-chat-fresh-start', 'fresh-start-live'), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'verify-chat-fresh-start', 'fresh-start-live', 'cleanup.json'),
+      JSON.stringify({ evidence_preserved: true, scratch_removed: true, remaining_owned_processes: 0 }),
+    );
+    const summary = verifier.summarize(dir, ['chat-fresh-start']);
+    const run = summary.head['chat-fresh-start'][0];
+    assert.equal(run.cleanup, '');
+    assert.equal(run.cleanupSource, '');
+    const md = verifier.evidenceMarkdown(summary, selection(['chat-fresh-start']));
+    assert.match(md, /cleanup none recorded/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('malformed, nonzero, or false-flag adjacent cleanup.json blocks verification and names the source and values', () => {
+  const cases = [
+    ['malformed json', '{bad json', /cleanup\.json invalid: could not parse JSON/],
+    ['non-object json', '[]', /cleanup\.json invalid: expected JSON object/],
+    ['string zero count', JSON.stringify({ remaining_owned_processes: '0', scratch_removed: true, evidence_preserved: true }), /remaining_owned_processes="0".*integer 0/],
+    ['missing fields', JSON.stringify({ remaining_owned_processes: 0 }), /scratch_removed=missing.*evidence_preserved=missing/],
+    ['nonzero alive processes', JSON.stringify({ remaining_owned_processes: 2, scratch_removed: true, evidence_preserved: true }), /remaining_owned_processes=2.*must be 0/],
+    ['negative uninitialized count', JSON.stringify({ remaining_owned_processes: -1, scratch_removed: true, evidence_preserved: true }), /remaining_owned_processes=-1.*must be 0/],
+    ['scratch_removed false', JSON.stringify({ remaining_owned_processes: 0, scratch_removed: false, evidence_preserved: true }), /scratch_removed=false.*must be true/],
+    ['evidence_preserved false', JSON.stringify({ remaining_owned_processes: 0, scratch_removed: true, evidence_preserved: false }), /evidence_preserved=false.*must be true/],
+    ['cleanup error field', JSON.stringify({ remaining_owned_processes: 0, scratch_removed: true, evidence_preserved: true, error: 'profile locked' }), /error=profile locked/],
+  ];
+  for (const [label, payload, expected] of cases) {
+    const dir = evidenceDir({ 'verify-chat-fresh-start': { feature: 'chat-fresh-start', status: 'passed' } });
+    try {
+      fs.writeFileSync(path.join(dir, 'verify-chat-fresh-start', 'cleanup.json'), payload);
+      const summary = verifier.summarize(dir, ['chat-fresh-start']);
+      const run = summary.head['chat-fresh-start'][0];
+      assert.equal(run.cleanupBlocked, true, label);
+      assert.match(run.cleanup, expected, label);
+      assert.equal(verifier.runOutcome(run), 'blocked', label);
+      const result = verifier.finalize({ verdict: { verdict: 'PASS', evidence: [] }, headSha: head, summary, selection: selection(['chat-fresh-start']), runUrl: 'u' });
+      assert.equal(result.final, 'BLOCKED', label);
+      const md = verifier.evidenceMarkdown(summary, selection(['chat-fresh-start']));
+      assert.match(md, expected, label);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+});
+
+test('explicit result.cleanup failures keep priority and conflicting cleanup files always block', () => {
+  const dir1 = evidenceDir({ 'verify-appearance': { status: 'failed', cleanup: 'Evidence lost during cleanup: action.png' } });
+  const dir2 = evidenceDir({ 'verify-appearance': { status: 'passed', cleanup: 'owned process tree stopped; scratch removed' } });
+  const dir3 = evidenceDir({ 'verify-chat-fresh-start': { status: 'passed' } });
+  try {
+    fs.writeFileSync(
+      path.join(dir1, 'verify-appearance', 'cleanup.json'),
+      JSON.stringify({ remaining_owned_processes: 0, scratch_removed: true, evidence_preserved: true }),
+    );
+    const s1 = verifier.summarize(dir1, ['appearance']);
+    assert.equal(s1.head.appearance[0].cleanupBlocked, true);
+    assert.match(s1.head.appearance[0].cleanup, /Evidence lost during cleanup: action\.png; conflicting cleanup\.json:/);
+    assert.equal(verifier.finalize({ verdict: { verdict: 'PASS', evidence: [] }, headSha: head, summary: s1, selection: selection(['appearance']), runUrl: 'u' }).final, 'BLOCKED');
+
+    fs.writeFileSync(
+      path.join(dir2, 'verify-appearance', 'cleanup.json'),
+      JSON.stringify({ remaining_owned_processes: 1, scratch_removed: true, evidence_preserved: true }),
+    );
+    const s2 = verifier.summarize(dir2, ['appearance']);
+    assert.equal(s2.head.appearance[0].cleanupBlocked, true);
+    assert.match(s2.head.appearance[0].cleanup, /Cleanup conflict: result\.json reports .* but cleanup\.json failed: remaining_owned_processes=1/);
+    assert.equal(verifier.finalize({ verdict: { verdict: 'PASS', evidence: [] }, headSha: head, summary: s2, selection: selection(['appearance']), runUrl: 'u' }).final, 'BLOCKED');
+
+    fs.writeFileSync(
+      path.join(dir3, 'verify-chat-fresh-start', 'cleanup.json'),
+      JSON.stringify({ remaining_owned_processes: 0, scratch_removed: true, evidence_preserved: true }),
+    );
+    fs.mkdirSync(path.join(dir3, 'verify-chat-fresh-start', 'fresh-start-live'), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir3, 'verify-chat-fresh-start', 'fresh-start-live', 'cleanup.json'),
+      JSON.stringify({ remaining_owned_processes: 0, scratch_removed: false, evidence_preserved: true }),
+    );
+    const s3 = verifier.summarize(dir3, ['chat-fresh-start']);
+    assert.equal(s3.head['chat-fresh-start'][0].cleanupBlocked, true);
+    assert.match(s3.head['chat-fresh-start'][0].cleanup, /Cleanup conflict: cleanup\.json: .* but fresh-start-live\/cleanup\.json failed: .*scratch_removed=false/);
+    assert.equal(verifier.finalize({ verdict: { verdict: 'PASS', evidence: [] }, headSha: head, summary: s3, selection: selection(['chat-fresh-start']), runUrl: 'u' }).final, 'BLOCKED');
+  } finally {
+    fs.rmSync(dir1, { recursive: true, force: true });
+    fs.rmSync(dir2, { recursive: true, force: true });
+    fs.rmSync(dir3, { recursive: true, force: true });
+  }
+});
+
+test('structured result.cleanup objects format cleanly and fail closed on nonzero activeAfterStop or keyRemoved false', () => {
+  const dir = evidenceDir({
+    'verify-server-chat': { status: 'passed', cleanup: { activeAfterStop: 0 }, keyRemoved: true },
+  });
+  const bad = evidenceDir({
+    'verify-server-chat': { status: 'passed', cleanup: { activeAfterStop: 1 }, keyRemoved: true },
+  });
+  try {
+    const okSummary = verifier.summarize(dir, ['server-chat']);
+    assert.equal(okSummary.head['server-chat'][0].cleanupBlocked, false);
+    assert.equal(okSummary.head['server-chat'][0].cleanup, 'result.json: activeAfterStop=0, keyRemoved=true');
+    assert.doesNotMatch(verifier.evidenceMarkdown(okSummary, selection(['server-chat'])), /\[object Object\]/);
+    assert.equal(verifier.finalize({ verdict: { verdict: 'PASS', evidence: [] }, headSha: head, summary: okSummary, selection: selection(['server-chat']), runUrl: 'u' }).final, 'PASS');
+
+    const badSummary = verifier.summarize(bad, ['server-chat']);
+    assert.equal(badSummary.head['server-chat'][0].cleanupBlocked, true);
+    assert.equal(verifier.finalize({ verdict: { verdict: 'PASS', evidence: [] }, headSha: head, summary: badSummary, selection: selection(['server-chat']), runUrl: 'u' }).final, 'BLOCKED');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(bad, { recursive: true, force: true });
+  }
+});
+
+test('judgeInputs places head result and cleanup files before base artifacts so large base logs cannot clip them', () => {
+  const dir = evidenceDir({
+    [`verify-appearance-${base}`]: { status: 'failed', error: 'base failure' },
+    'verify-server-shell-input': { status: 'passed' },
+  });
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-verifier-order-'));
+  try {
+    for (let i = 0; i < 12; i++) {
+      fs.mkdirSync(path.join(dir, `verify-appearance-${base}`, `case-${i}`), { recursive: true });
+      fs.writeFileSync(path.join(dir, `verify-appearance-${base}`, `case-${i}`, 'doctor.json'), JSON.stringify({ pad: 'x'.repeat(5500) }));
+    }
+    fs.writeFileSync(
+      path.join(dir, 'verify-server-shell-input', 'cleanup.json'),
+      JSON.stringify({ remaining_owned_processes: 0, scratch_removed: true, evidence_preserved: true }),
+    );
+    const material = verifier.judgeInputs(out, dir);
+    assert.match(material, /### evidence\/verify-server-shell-input\/result\.json/);
+    assert.match(material, /### evidence\/verify-server-shell-input\/cleanup\.json/);
+    assert.ok(material.indexOf('### evidence/verify-server-shell-input/cleanup.json') < material.indexOf(`### evidence/verify-appearance-${base}/`));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(out, { recursive: true, force: true });
+  }
 });
