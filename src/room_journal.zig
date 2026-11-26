@@ -451,6 +451,34 @@ test "a launch refusal rolls a first attempt back to prepared and leaves an earl
     try std.testing.expect(!mayRollBackLaunch(.rejected));
 }
 
+test "a refused first launch rewinds to prepared across a journal restart while an uncertain retry keeps its exact body" {
+    var scope = testScope();
+    scope.account_digest = @splat('b');
+    @memcpy(&scope.store_uuid, "10000000-0000-4000-8000-000000000002");
+    try prepare(scope, .post, test_command, test_room, 3, test_request, &[_]Binding{});
+    var guard = try lock(scope);
+    defer guard.deinit();
+    try updateLocked(&guard, test_command, .uncertain, "");
+    try restorePrepared(&guard, test_command, .prepared);
+    var first = (try load(scope)).?;
+    defer first.deinit();
+    try std.testing.expectEqual(State.prepared, first.record().state);
+    try std.testing.expectEqualStrings(test_request, first.record().request);
+    try updateLocked(&guard, test_command, .uncertain, "");
+    try std.testing.expectError(error.InvalidTransition, restorePrepared(&guard, test_command, .uncertain));
+    var retry = (try load(scope)).?;
+    defer retry.deinit();
+    try std.testing.expectEqual(State.uncertain, retry.record().state);
+    try std.testing.expectEqualStrings("", retry.record().evidence);
+    try std.testing.expectEqualStrings(test_request, retry.record().request);
+    var path_buf: [700]u8 = undefined;
+    const path = try pathFor(scope, &path_buf);
+    var wide_buf: [800]u16 = undefined;
+    const wide_path = file_io.win32WidePath(&wide_buf, path) orelse return error.InvalidPath;
+    _ = w.DeleteFileW(wide_path.ptr);
+    try std.testing.expect(null == try load(scope));
+}
+
 test "post journal record keeps the exact request through the envelope" {
     const scope = testScope();
     try std.testing.expect(try roundTrips(scope, testRecord(&scope, test_request, .prepared, "")));

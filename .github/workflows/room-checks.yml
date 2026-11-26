@@ -105,7 +105,12 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           set -o pipefail
-          timeout 120s pwsh -NoProfile -File tools/rooms-driver.test.ps1 2>&1 | tee room-check-results/driver.log
+          timeout 180s pwsh -NoProfile -File tools/rooms-driver.test.ps1 2>&1 | tee room-check-results/driver.log
+      - name: Prove the disposable lost-receipt boundary
+        if: ${{ !cancelled() }}
+        run: |
+          set -o pipefail
+          timeout 60s python tools/rooms-drop-receipt.test.py -v 2>&1 | tee room-check-results/drop-receipt.log
       - name: Run canonical room process tests
         if: ${{ !cancelled() }}
         run: |

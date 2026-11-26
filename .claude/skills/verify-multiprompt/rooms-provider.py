@@ -27,7 +27,7 @@ for line in sys.stdin:
     text = content if isinstance(content, str) else '\n'.join(block.get('text', '') for block in content)
     name = 'Alpha' if sid.endswith('0001') else 'Bravo'
     current = text.rsplit('New message from the user:\n\n', 1)[-1]
-    marker = next((word for word in ('TARGET534', 'AWAY534', 'RESTART534', 'FAIL534', 'CLOSED534', 'BROADCAST534', 'PRIVATE534', 'READY534') if word in current), 'UNKNOWN534')
+    marker = next((word for word in ('INTERRUPT534', 'TARGET534', 'AWAY534', 'RESTART534', 'FAIL534', 'CLOSED534', 'BROADCAST534', 'PRIVATE534', 'READY534') if word in current), 'UNKNOWN534')
     with (root / 'provider-input.jsonl').open('a') as out:
         out.write(json.dumps(dict(sid=sid, text=text, marker=marker, pid=os.getpid())) + '\n')
     if marker in ('AWAY534', 'RESTART534'):
@@ -47,4 +47,16 @@ for line in sys.stdin:
         out.write(json.dumps(dict(type='user', sessionId=sid, uuid=request.get('uuid', str(uuid.uuid4())), message=dict(role='user', content=content))) + '\n')
         out.write(json.dumps(dict(type='assistant', sessionId=sid, uuid=str(uuid.uuid4()), message=message)) + '\n')
     print(json.dumps(dict(type='assistant', message=message)), flush=True)
+    if marker == 'INTERRUPT534' and name == 'Bravo':
+        signal.alarm(120)
+        stopped = False
+        for control in sys.stdin:
+            message_in = json.loads(control)
+            if message_in.get('type') == 'control_request' and (message_in.get('request') or {}).get('subtype') == 'interrupt':
+                print(json.dumps(dict(type='control_response', response=dict(subtype='success', request_id=message_in['request_id'], response={}))), flush=True)
+                stopped = True
+                break
+        signal.alarm(0)
+        print(json.dumps(dict(type='result', subtype='interrupted' if stopped else 'error_during_execution', is_error=not stopped, finished_reason='interrupted' if stopped else 'no_interrupt', session_id=sid, result=reply if stopped else '')), flush=True)
+        continue
     print(json.dumps(dict(type='result', subtype='success', session_id=sid, result=reply)), flush=True)

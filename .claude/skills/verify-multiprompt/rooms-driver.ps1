@@ -14,6 +14,9 @@ $profile = Join-Path $env:RUNNER_TEMP ('rooms-' + [guid]::NewGuid().ToString('N'
 $settings = "$profile/roaming/ZigShell"
 $mainSettings = $settings
 $actions = [Collections.Generic.List[object]]::new()
+$script:copy_attempts = 0
+$script:copy_ever_read = $false
+$script:dropInstalled = $false
 $planned = [ordered]@{
     '1' = 'a: Create a room on a fresh profile'
     'private' = 'Both member chats reply through the real composer'
@@ -29,6 +32,7 @@ $planned = [ordered]@{
     '10' = 'h: Phone retry does not duplicate'
     '11' = 'Discover existing rooms on a fresh install'
     '12' = 'Recover a failed member turn'
+    '12-interrupted' = 'Preserve an interrupted partial answer once'
     '13' = 'Lost acknowledgement and retry'
     '14' = 'History stays complete after reload'
 }
@@ -68,6 +72,16 @@ function Wait-For([string]$ConditionName, [scriptblock]$Check, [int]$Seconds = 4
         [void]$watcher.WaitForChanged([IO.WatcherChangeTypes]::All, 200)
     } while ($timer.Elapsed.TotalSeconds -lt $Seconds)
     throw "Timed out: $ConditionName"
+}
+function Wait-Or([scriptblock]$Check, [int]$Seconds = 5) {
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    do {
+        $value = & $Check
+        if ($value) { return $value }
+        if ($null -ne $app -and $app.HasExited) { throw 'Owned desktop exited' }
+        [void]$watcher.WaitForChanged([IO.WatcherChangeTypes]::All, 200)
+    } while ($timer.Elapsed.TotalSeconds -lt $Seconds)
+    return $null
 }
 function Doctor {
     $app.Refresh()
@@ -357,14 +371,42 @@ function Saved-Tabs($Saved) {
     if ($null -eq $Saved -or -not $Saved.PSObject.Properties['tabs']) { return @() }
     return @($Saved.tabs)
 }
-function Copy-Chat([string]$Name) {
-    [void](Wait-For 'clipboard available for this copy' { try { [Windows.Forms.Clipboard]::Clear(); $true } catch { $false } } 10)
-    Invoke-JourneyCommand 'chat view select all'
-    Press @(0x11, 0x43) 'Ctrl+C: copy visible chat messages'
-    $text = Wait-For 'copied chat text' { try { $value = [Windows.Forms.Clipboard]::GetText(); if ($value) { $value } } catch { $null } } 10
-    [IO.File]::WriteAllText("$Evidence/$Name.txt", $text)
-    Press @(0x1B) 'Escape: return to composer'
-    return $text
+function Read-Clipboard {
+    try { return [Windows.Forms.Clipboard]::GetText() } catch { return '' }
+}
+function Clear-Clipboard {
+    try { [Windows.Forms.Clipboard]::Clear(); return $true } catch { return $false }
+}
+function Copy-Chat([string]$Name, [int]$Attempts = 4, [int]$ReadSeconds = 4) {
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        if (-not (Wait-Or { Clear-Clipboard } 10)) { throw 'Timed out: clipboard available for this copy' }
+        Invoke-JourneyCommand 'chat view select all'
+        Press @(0x11, 0x43) "Ctrl+C: copy visible chat messages (attempt $attempt)"
+        $script:copy_attempts += 1
+        $text = Wait-Or { $value = Read-Clipboard; if ($value) { $value } } $ReadSeconds
+        if ($text) {
+            [IO.File]::WriteAllText("$Evidence/$Name.txt", $text)
+            Press @(0x1B) 'Escape: return to composer'
+            return $text
+        }
+        [void]$watcher.WaitForChanged([IO.WatcherChangeTypes]::All, 250)
+    }
+    [IO.File]::WriteAllText("$Evidence/$Name-empty-copy.txt", "$($script:copy_attempts) bounded Ctrl+C attempts produced no clipboard text")
+    return $null
+}
+function Copy-Chat-Until([string]$Name, [string]$Wanted, [scriptblock]$Check, [int]$Seconds = 45, [int]$Attempts = 4, [int]$ReadSeconds = 4) {
+    $script:copy_attempts = 0
+    $script:copy_ever_read = $false
+    $failure = $null
+    try {
+        return (Wait-For $Wanted {
+            $text = Copy-Chat $Name $Attempts $ReadSeconds
+            if ($null -ne $text) { $script:copy_ever_read = $true }
+            if ($text -and (& $Check $text)) { $text }
+        } $Seconds)
+    } catch { $failure = $_ }
+    if (-not $script:copy_ever_read) { throw "No chat text was ever read from $Name's Chat View; the real Ctrl+C copy produced nothing in $($script:copy_attempts) bounded attempts, so $Wanted is unjudged" }
+    throw $failure
 }
 function Save-RoomMembers([string]$Label) {
     $offset = (Read-Shared "$settings/debug.log").Length
@@ -417,6 +459,18 @@ function Send-Text([string]$Text, [switch]$Room, [switch]$AllowKeptDraft) {
 }
 function Release-Replies([string]$Marker) {
     [void](Invoke-ServerNative -FilePath $ssh -Arguments @('-F', "$settings/ssh-key/config", 'remote-1', "python3 $repo/.claude/skills/verify-multiprompt/rooms-release.py $Marker") -Evidence $Evidence -Name ("release-$Marker"))
+}
+function Server-Python {
+    $lines = Invoke-ServerNative -FilePath $ssh -Arguments @('-F', "$settings/ssh-key/config", 'remote-1', 'command -v python3') -Evidence $Evidence -Name 'server-python'
+    return (($lines -join "`n").Trim())
+}
+function Server-Drop([string]$Action, [string]$Text) {
+    $arguments = @('-d', 'Ubuntu-24.04', '-u', 'root', '--exec', 'bash', "$repo/.claude/skills/verify-multiprompt/rooms-drop-receipt.sh", $Action)
+    if ($Text) { $arguments += $Text }
+    $lines = Invoke-ServerNative -FilePath wsl.exe -Arguments $arguments -Evidence $Evidence -Name ("drop-receipt-$Action")
+    if ($Action -ceq 'install') { $script:dropInstalled = $true }
+    if ($Action -ceq 'remove') { $script:dropInstalled = $false }
+    return (($lines -join "`n").Trim())
 }
 function Await-Replies([string]$Marker) {
     [void](Wait-For "exactly two saved $Marker replies" { @(Room-Events (Snapshot "$Marker-poll") | Where-Object { $_.type -eq 'agent_reply' -and $_.text -like "* says $Marker" }).Count -eq 2 } 60)
@@ -535,7 +589,7 @@ Host remote-1
         foreach ($name in @('Alpha', 'Bravo')) {
             Open-Member $name
             Send-Text 'PRIVATE534'
-            [void](Wait-For "$name real private reply" { (Copy-Chat "$name-private").Contains("$name says PRIVATE534") })
+            [void](Copy-Chat-Until $name "$name real private reply" { param($text) $text.Contains("$name says PRIVATE534") })
             [void](Shot "$name-private")
         }
         Save @{ status = 'PASS'; detail = 'Both chats replied through the real desktop composer, SSH, host, provider and transcript before sending a room question' } "$Evidence/preflight.json"
@@ -629,8 +683,8 @@ Host remote-1
             if ($replies.member_id -cnotcontains $member.id) { $problems += "$name has no saved reply in the room"; continue }
             $expected = @((@($own) + @($context)) | Sort-Object { [int]$_.seq })
             Open-Member $name
-            [void](Wait-For "$name chat shows its own room replies and the room context delivered to it, in room order" {
-                $text = Copy-Chat "$name-room-history"
+            $text = Copy-Chat-Until $name "$name chat shows its own room replies and the room context delivered to it, in room order" {
+                param($text)
                 $position = -1
                 foreach ($reply in $expected) {
                     $next = $text.IndexOf([string]$reply.text, [Math]::Max(0, $position + 1), [StringComparison]::Ordinal)
@@ -638,7 +692,7 @@ Host remote-1
                     $position = $next
                 }
                 return $text
-            } 60)
+            } 60
             [void](Shot "$name-room-history")
             $sid = [string]$member.provider_sid
             $transcript = @($state.transcripts.PSObject.Properties | Where-Object { $_.Name -like "*/$sid.jsonl" } | ForEach-Object { $_.Value })
@@ -677,12 +731,23 @@ Host remote-1
         Open-Room 'Rooms534'
         Send-Text 'AWAY534' -Room
         [void](Wait-For 'both providers holding unanswered away question' { @((Snapshot 'away-held').inputs | Where-Object { $_.marker -ceq 'AWAY534' }).Count -eq 2 })
+        $awayQuestion = @(Wait-For 'saved AWAY534 parent event' {
+            $events = @(Room-Events (Snapshot 'away-question') | Where-Object { $_.type -eq 'human' -and $_.text -ceq 'AWAY534' })
+            if ($events.Count -eq 1) { $events }
+        } 30)
+        $awayParent = [string]$awayQuestion[0].id
         Open-Member 'Alpha'
         [void](Shot 'away-before-release')
+        if (Room-Window) { throw 'Driver precondition failed: the room stayed open while the away replies arrived' }
         Release-Replies 'AWAY534'
-        [void](Wait-For 'both providers answered while the room was closed' { @((Snapshot 'away-answered').inputs | Where-Object { $_.marker -ceq 'AWAY534' }).Count -eq 2 } 30)
-        $savedWhileAway = @(Room-Events (Snapshot 'away-while-closed') | Where-Object { $_.type -eq 'agent_reply' -and $_.text -like '* says AWAY534' }).Count
-        $result.observations += @{ fact = 'saved room replies while the room was closed'; count = $savedWhileAway; expected = 2 }
+        $savedWhileAway = @(Wait-For 'both providers answered and the room store saved both replies with the room closed' {
+            $state = Snapshot 'away-while-closed'
+            $answered = @($state.transcripts.PSObject.Properties | ForEach-Object { $_.Value } | Where-Object { $_.type -eq 'assistant' } | ForEach-Object { $_.message.content } | Where-Object { $_.type -eq 'text' } | ForEach-Object { [string]$_.text } | Where-Object { $_ -like '* says AWAY534' })
+            $saved = @(Room-Events $state | Where-Object { $_.type -eq 'agent_reply' -and $_.parent_event_id -ceq $awayParent -and $_.text -like '* says AWAY534' })
+            if ($answered.Count -eq 2 -and $saved.Count -eq 2 -and @($saved.member_id | Select-Object -Unique).Count -eq 2) { $saved }
+        } 60)
+        if (Room-Window) { throw 'Driver precondition failed: the room was open while the away replies were saved' }
+        $result.observations += @{ fact = 'both providers answered and the room store saved both replies while the room stayed closed'; count = $savedWhileAway.Count; parent = $awayParent; members = @($savedWhileAway.member_id | Select-Object -Unique); expected = 2 }
         Open-Room 'Rooms534'
         [void](Wait-For 'both away replies saved after returning to the room' { @(Room-Events (Snapshot 'away-return-poll') | Where-Object { $_.type -eq 'agent_reply' -and $_.text -like '* says AWAY534' }).Count -eq 2 } 60)
         $visible = Shot-Room 'away-return'
@@ -743,7 +808,141 @@ Host remote-1
             if ($visible -notmatch ([regex]::Escape("$($member.display_name) says FAIL534"))) { throw "The retried room question is missing $($member.display_name)'s answer on screen" }
         }
     }
-    Case 13 '' 'No controllable lost-acknowledgement boundary in the desktop harness; retry safety is not proven by an ordinary send' {}
+    Case '12-interrupted' 'Preserve an interrupted partial answer once' $missingMembers {
+        Open-Room 'Rooms534'
+        Send-Text 'INTERRUPT534' -Room -AllowKeptDraft
+        $interruptQuestion = @(Wait-For 'saved INTERRUPT534 parent event' {
+            $events = @(Room-Events (Snapshot 'interrupt-question') | Where-Object { $_.type -eq 'human' -and $_.text -ceq 'INTERRUPT534' })
+            if ($events.Count -eq 1) { $events }
+        } 30)
+        $interruptParent = [string]$interruptQuestion[0].id
+        $bravoSid = 'a1b2c3d4-0534-4000-8000-000000000002'
+        [void](Wait-For 'the interrupted member saved its partial answer before the turn ended' {
+            $state = Snapshot 'interrupt-partial'
+            $bravo = @($state.transcripts.PSObject.Properties | Where-Object { $_.Name -like "*/$bravoSid.jsonl" } | ForEach-Object { $_.Value })
+            $texts = @($bravo | Where-Object { $_.type -eq 'assistant' } | ForEach-Object { $_.message.content } | Where-Object { $_.type -eq 'text' } | ForEach-Object { [string]$_.text })
+            $texts -ccontains 'Bravo says INTERRUPT534'
+        } 60)
+        Open-Member 'Bravo'
+        $memberEdit = Wait-For 'one visible member composer before the interrupt' { $windows = @(Visible-Children 'Edit'); if ($windows.Count -eq 1) { $windows[0] } }
+        Focus-Control $memberEdit
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+            Press @(0x1B) "Escape: interrupt the running member turn (attempt $attempt)"
+            try {
+                [void](Wait-For 'the real host ended the interrupted turn' {
+                    $state = Snapshot 'interrupt-ended'
+                    $host = @($state.hosts | Where-Object { $_.state.native_session -ceq $bravoSid })
+                    $host.Count -eq 1 -and $host[0].state.result.subtype -ceq 'interrupted'
+                } 20)
+                break
+            } catch { if ($attempt -eq 3) { throw } }
+        }
+        Open-Room 'Rooms534'
+        [void](Wait-For 'exactly one saved answer from the interrupted turn' {
+            $saved = @(Room-Events (Snapshot 'interrupt-replies') | Where-Object { $_.type -eq 'agent_reply' -and $_.parent_event_id -ceq $interruptParent -and $_.text -ceq 'Bravo says INTERRUPT534' })
+            if ($saved.Count -eq 1) { $saved }
+        } 60)
+        $visible = Shot-Room 'interrupted-answer'
+        if ($visible -notmatch 'Bravo says INTERRUPT534') { throw 'The interrupted partial answer is missing from the room view' }
+        $interruptState = Snapshot 'interrupt-final'
+        $interruptAnswers = @(Room-Events $interruptState | Where-Object { $_.type -eq 'agent_reply' -and $_.parent_event_id -ceq $interruptParent })
+        if ($interruptAnswers.Count -ne 2 -or @($interruptAnswers.member_id | Select-Object -Unique).Count -ne 2) { throw "INTERRUPT534 saved $($interruptAnswers.Count) answers from $(@($interruptAnswers.member_id | Select-Object -Unique).Count) members, expected exactly one from each" }
+        $interruptTranscript = @($interruptState.transcripts.PSObject.Properties | Where-Object { $_.Name -like "*/$bravoSid.jsonl" } | ForEach-Object { $_.Value } | Where-Object { $_.type -eq 'assistant' } | ForEach-Object { $_.message.content } | Where-Object { $_.type -eq 'text' } | ForEach-Object { [string]$_.text } | Where-Object { $_ -ceq 'Bravo says INTERRUPT534' })
+        if ($interruptTranscript.Count -ne 1) { throw "The interrupted turn transcript holds $($interruptTranscript.Count) partial answers, expected exactly one" }
+        $result.observations += @{ fact = 'the real host interrupted a running turn after its partial text and the room saved that text once'; parent = $interruptParent; status = 'interrupted'; answers = $interruptAnswers.Count }
+    }
+    $dropBoundary = ''
+    if ($hasMembers) {
+        try {
+            $pythonBefore = Server-Python
+            if ($pythonBefore -cne '/usr/bin/python3') { $dropBoundary = "The disposable receipt boundary cannot be installed safely: the room transport resolves python3 to $pythonBefore" }
+        } catch { $dropBoundary = "Could not read the room transport python3 path: $($_.Exception.Message)" }
+    }
+    Case 13 'Lost acknowledgement and retry' $(if (-not $hasMembers) { 'The room has fewer than two saved members' } elseif ($dropBoundary) { $dropBoundary } else { '' }) {
+        [void](Server-Drop 'install')
+        if ((Server-Python) -cne '/usr/local/bin/python3') { throw "The disposable receipt boundary is not on the room transport python3 path: $(Server-Python)" }
+        Open-Room 'Rooms534'
+        [void](Server-Drop 'arm' 'LOSTACK534')
+        Send-Text 'LOSTACK534' -Room -AllowKeptDraft
+        [void](Wait-For 'the disposable boundary withheld the committed receipt' {
+            (Read-Shared "$settings/debug.log") -match 'mp-room-drop-receipt: withheld the first receipt for the committed command'
+        } 45)
+        $journalPaths = @(Get-ChildItem $settings -Filter 'room-command-*.json' | Select-Object -ExpandProperty FullName)
+        if ($journalPaths.Count -ne 1) { throw "Expected one room command journal on this profile, found $($journalPaths.Count)" }
+        $journalPath = $journalPaths[0]
+        $original = (Read-Shared $journalPath | ConvertFrom-Json).record
+        if ($original.state -cne 'uncertain' -or $original.evidence) { throw "The withheld send was saved as $($original.state) with evidence '$($original.evidence)', expected an uncertain command without evidence" }
+        $originalBody = ($original.request | ConvertFrom-Json).text
+        if ($originalBody -cne 'LOSTACK534') { throw "The saved uncertain command body is '$originalBody', expected LOSTACK534" }
+        $dropLog = @((Server-Drop 'log') -split "`n" | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json })
+        $withheld = @($dropLog | Where-Object { $_.withheld -and $_.text -ceq 'LOSTACK534' })
+        if ($withheld.Count -ne 1) { throw "Expected one withheld room request for LOSTACK534, got $($withheld.Count)" }
+        if ($withheld[0].command_id -cne [string]$original.command_id -or $withheld[0].room_id -cne [string]$original.room_id) { throw 'The withheld request does not carry the original room and command id' }
+        $receipt = $withheld[0].reply | ConvertFrom-Json
+        if (-not $receipt.ok -or $null -eq $receipt.result.event) { throw 'The withheld reply is not the real server receipt for a committed command' }
+        if ([string]$receipt.result.event.room_id -cne [string]$original.room_id -or [string]$receipt.result.event.text -cne 'LOSTACK534') { throw 'The committed receipt names another room or body' }
+        $committed = @(Room-Events (Snapshot 'lost-ack-committed') | Where-Object { $_.type -eq 'human' -and $_.text -ceq 'LOSTACK534' })
+        if ($committed.Count -ne 1 -or [string]$committed[0].id -cne [string]$receipt.result.event.id) { throw "The server shows $($committed.Count) LOSTACK534 human rows for a single committed command" }
+        [void](Shot 'lost-ack-withheld')
+        $room = Room-Window
+        $draftEdit = Wait-For 'one visible room composer' { $windows = @(Visible-Children 'Edit' $room); if ($windows.Count -eq 1) { $windows[0] } }
+        if ([ChatDeliveryDesktop]::Text($draftEdit) -cne 'LOSTACK534') { throw "The withheld send did not keep its own draft in the room composer: '$([ChatDeliveryDesktop]::Text($draftEdit))'" }
+        Focus-Control $draftEdit
+        Press @(0x11, 0x41) 'Ctrl+A: select the kept uncertain draft'
+        Press @(0x08) 'Backspace: clear the kept uncertain draft before the edited one'
+        for ($attempt = 0; $attempt -lt 3; $attempt++) {
+            $kept = [ChatDeliveryDesktop]::Text($draftEdit)
+            if ($kept.Length -eq 0) { break }
+            for ($i = 0; $i -lt $kept.Length; $i++) { Press @(0x08) 'Backspace: delete the kept draft one character at a time' }
+        }
+        [void](Wait-For 'empty room composer before the edited draft' { [ChatDeliveryDesktop]::Text($draftEdit) -ceq '' } 10)
+        Type-Text 'EDITED534'
+        [void](Wait-For 'the edited draft is in the room composer' { [ChatDeliveryDesktop]::Text($draftEdit) -ceq 'EDITED534' } 10)
+        [void](Wait-For 'the edited room draft is saved on this computer' {
+            $stores = @(Get-ChildItem $settings -Filter 'room-ui-*.json')
+            @($stores | Where-Object { (Read-Shared $_.FullName) -match 'EDITED534' }).Count -ge 1
+        } 20)
+        Restart-Desktop
+        [void](Wait-For 'the app retried the withheld command to an accepted receipt' {
+            $current = (Read-Shared $journalPath | ConvertFrom-Json).record
+            $current.state -ceq 'accepted'
+        } 120)
+        $retried = (Read-Shared $journalPath | ConvertFrom-Json).record
+        if ([string]$retried.command_id -cne [string]$original.command_id) { throw 'The restart retry used a different command id than the original uncertain send' }
+        if (-not [string]::Equals([string]$retried.request, [string]$original.request, [StringComparison]::Ordinal)) { throw 'The restart retry sent a different room, revision, recipients or body than the original uncertain send' }
+        $accepted = $retried.evidence | ConvertFrom-Json
+        if ([string]$accepted.event.id -cne [string]$receipt.result.event.id -or [string]$accepted.event.text -cne 'LOSTACK534') { throw 'The accepted receipt does not name the single human row the server committed for the original command' }
+        $retryLog = @((Server-Drop 'log') -split "`n" | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json })
+        $attempts = @($retryLog | Where-Object { $_.text -ceq 'LOSTACK534' })
+        $retryAttempts = @($attempts | Where-Object { -not $_.withheld })
+        if ($retryAttempts.Count -lt 1) { throw 'The app never sent the saved command again through the real transport after the restart' }
+        foreach ($attempt in $retryAttempts) {
+            if ([string]$attempt.command_id -cne [string]$original.command_id -or [string]$attempt.room_id -cne [string]$original.room_id -or [string]$attempt.text -cne 'LOSTACK534') { throw 'The retry did not use the exact original room, command id and body' }
+        }
+        [void](Wait-For 'each member answered the replayed message exactly once' {
+            $state = Snapshot 'lost-ack-replies'
+            $human = @(Room-Events $state | Where-Object { $_.type -eq 'human' -and $_.text -ceq 'LOSTACK534' })
+            if ($human.Count -ne 1) { return $false }
+            $replies = @(Room-Events $state | Where-Object { $_.type -eq 'agent_reply' -and $_.parent_event_id -ceq [string]$human[0].id -and $_.text -like '* says LOSTACK534' })
+            $human.Count -eq 1 -and $replies.Count -eq 2 -and @($replies.member_id | Select-Object -Unique).Count -eq 2
+        } 120)
+        Open-Room 'Rooms534'
+        $visible = Shot-Room 'lost-ack-recovered'
+        if ($visible -notmatch 'LOSTACK534') { throw 'The replayed message is missing from the room view after restart recovery' }
+        $room = Room-Window
+        $draftEdit = Wait-For 'one visible room composer after the restart' { $windows = @(Visible-Children 'Edit' $room); if ($windows.Count -eq 1) { $windows[0] } }
+        [void](Wait-For 'the edited draft survived the restart and retry' { [ChatDeliveryDesktop]::Text($draftEdit) -ceq 'EDITED534' } 15)
+        if ([ChatDeliveryDesktop]::Text($draftEdit) -cne 'EDITED534') { throw "The edited draft did not survive the restart and retry: '$([ChatDeliveryDesktop]::Text($draftEdit))'" }
+        Focus-Control $draftEdit
+        for ($attempt = 0; $attempt -lt 3; $attempt++) {
+            $kept = [ChatDeliveryDesktop]::Text($draftEdit)
+            if ($kept.Length -eq 0) { break }
+            for ($i = 0; $i -lt $kept.Length; $i++) { Press @(0x08) 'Backspace: clear the edited draft after the proof' }
+        }
+        $result.observations += @{ fact = 'a withheld acknowledgement was recovered by the real restart retry with the original room, command id and body'; withheld = $withheld.Count; retries = $retryAttempts.Count; human_rows = 1; answers = 2; edited_draft = 'EDITED534' }
+        [void](Server-Drop 'remove')
+        if ((Server-Python) -cne '/usr/bin/python3') { throw "The disposable receipt boundary was not removed: $(Server-Python)" }
+    }
     $historyReplies = @(Room-Events (Snapshot 'before-history') | Where-Object { $_.type -eq 'agent_reply' })
     Case 14 '' $(if (-not $sent) { 'No saved room question to reload' } elseif ($historyReplies.Count -eq 0) { 'No saved replies to check for stale or missing history' } else { '' }) {
         $before = @(Room-Events (Snapshot 'history-before') | Where-Object { $_.type -eq 'agent_reply' })
@@ -810,7 +1009,7 @@ Host remote-1
         if ($visible -notmatch 'Rooms534') { throw 'Existing room is missing on a fresh install of the same account' }
         if ($sent -and $visible -notmatch 'BROADCAST534') { throw 'Freshly discovered room has stale or empty saved history' }
     }
-    if (@($result.cases | Where-Object { $_.status -ne 'PASS' -and $_.step -notin @('9', '10', '13') }).Count -eq 0 -and $result.driverErrors.Count -eq 0) { $result.status = 'passed' }
+    if (@($result.cases | Where-Object { $_.status -ne 'PASS' -and $_.step -notin @('9', '10') }).Count -eq 0 -and $result.driverErrors.Count -eq 0) { $result.status = 'passed' }
 } catch {
     $result.driverErrors += $_.ToString()
     if ($null -ne $app -and -not $app.HasExited) { try { [void](Shot 'driver-failure') } catch {} }
@@ -827,6 +1026,9 @@ Host remote-1
     [IO.File]::WriteAllBytes($hostsFile, $hostsOriginal)
     if ($null -ne $cert) { Remove-Item "Cert:\LocalMachine\Root\$($cert.Thumbprint)" -Force -ErrorAction SilentlyContinue; Remove-Item "Cert:\LocalMachine\My\$($cert.Thumbprint)" -Force -ErrorAction SilentlyContinue }
     if ($null -ne $watcher) { $watcher.Dispose() }
+    try {
+        if ($script:dropInstalled) { [void](Server-Drop 'remove') }
+    } catch { $result.driverErrors += $_.ToString(); $result.status = 'failed' }
     try {
         [void](Invoke-ServerNative -FilePath wsl.exe -Arguments @('--terminate', 'Ubuntu-24.04') -Evidence $Evidence -Name 'wsl-terminate')
         Remove-Item $profile -Recurse -Force

@@ -207,3 +207,58 @@ MUBO-533 and recorder MUBO-579 tickets on board 13734, not duplicate tickets or 
 This worker has no board login and made no board writes. The owner must record them there.
 No local tests, syntax probes, compilers, linters or installs ran. `rooms-breaks.md` is preserved.
 Manual no-comments review found no added code comments or suppressions. Deslop is unavailable.
+
+## Driver recovery, interrupted turn and lost-receipt proof
+
+The independent hosted verifier failed the head on the Rooms journey with `Timed out: copied chat text` in the
+private-chat precondition. The artifacts show why. `actions.json` records four select-all and Ctrl+C pairs for
+Bravo at 99.85s to 101.50s, and `Bravo-private.txt` was saved from an earlier copy that held the user message but
+not the reply. The app copies only an active transcript selection, so the reply's re-render can drop the selection
+between select-all and Ctrl+C and leave the cleared clipboard empty. The old one-shot copy turned that transient
+empty clipboard into a case abort, which killed the outer wait that exists to retry until the reply arrives. The
+screenshot showing the reply does not prove copy worked, so the driver keeps reading the clipboard.
+
+Corrections in the driver and its hosted regressions:
+
+- `Copy-Chat` is now a bounded real-UI transaction. It clears, selects all, presses Ctrl+C and reads the clipboard
+  with a short window, then retries the transaction a few times. A copy that never produces text returns no text
+  and writes `*-empty-copy.txt`; `Copy-Chat-Until` keeps the caller's reply wait alive across empty copies and, if no
+  text was ever copied, fails with the copy diagnosis instead of the reply timeout. Copied text without the reply
+  still fails on the reply. The same transaction serves the private-chat precondition and the member history check.
+- The away-reply observation is now a gate. The case captures the AWAY534 parent, proves the room is closed, and
+  waits bounded for both provider transcripts and both saved room replies with two distinct member ids under that
+  parent while the room stays closed. The room is opened only after that passes. The old code sampled once at 684-685
+  and recorded 1 of 2, which read as a product gap.
+- A native interrupted-turn case sends INTERRUPT534, waits for Bravo's partial text in its real transcript, opens
+  Bravo's Chat View, focuses its composer and presses Escape, which sends the host's real interrupt to the
+  deterministic stream-json provider. It requires the saved host state `result.subtype` to be `interrupted`, one
+  saved room answer from the interrupted member, one transcript row with that text, and exactly one answer from each
+  of the two members. A duplicate, a turn that was never interrupted and a missing partial text each fail it.
+- Case 13 is reachable. A disposable server-side wrapper is installed as `/usr/local/bin/python3` on the runner WSL
+  for one case. It matches only the production room bootstrap and only the case's own `post_human` body, runs the
+  real room helper, records the committed receipt and withholds that one reply; every later attempt passes through.
+  The case requires an uncertain journal record with the exact original request, one committed human row equal to
+  the withheld receipt, a real desktop restart, and the app's own saved-command retry through the same transport and
+  SSH with the exact original room, command id, body and revision. The retried receipt must be accepted, the room
+  must still hold one human row, each member must answer once, and an edited room draft typed during the uncertain
+  window must survive the restart. The case first proves the transport resolves `python3` to `/usr/bin/python3`;
+  otherwise it reports the missing capability as UNREACHABLE. It removes the wrapper at the end and fails if the
+  transport still resolves to the wrapper.
+- `tools/rooms-driver.test.ps1` now runs the real copy transaction against a controlled clipboard: a transient empty
+  copy then the reply passes, a copy that never produces text fails with the copy diagnosis, copied text without the
+  reply fails on the reply, and the private case refuses a chat whose copy never holds the reply. It also runs the
+  away case (passes only when both rows are saved while closed; fails when the second row appears only after the
+  room opens) and the interrupted case (passes once; fails on a duplicate, a missing interrupt and a missing partial
+  answer).
+- `tools/rooms-drop-receipt.test.py` runs the real wrapper file on the Linux runner with a fake room helper. It
+  proves one committed receipt is withheld, the next attempt replays the same command and returns the stored
+  receipt, another body or another operation keeps its receipt, and an unarmed wrapper changes nothing.
+- `src/room_journal.zig` adds a real-file transition test: prepare, uncertain, prepared-only rollback, reload as a
+  fresh journal read (the restart precondition), then an already uncertain retry that must not be rewound and must
+  keep its exact request. A launch that fails after the record is written cannot be induced through the production
+  transport without a seam, so this covers the journal state machine and its file, not a native launch refusal.
+
+No product source changed for the copy or away findings: both are harness bugs, not product faults. The withheld
+receipt surfaces the transport failure as an unknown outcome, and the app keeps the draft and recovers it, which is
+the behaviour this proof now measures end to end. The final-head run links live in PR 1396's Verification section.
+The owned phone read and retry cases remain UNREACHABLE under MUBO-536, not passes.
