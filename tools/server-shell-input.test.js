@@ -107,3 +107,40 @@ test('MUBO-209 a tmux attach tab keeps scrollback so the wheel moves', () => {
   const cell = body(read('terminal_model.c'), 'int mp_terminal_cell(');
   assert.doesNotMatch(cell, /alternate\) scroll = 0/, 'the wheel must scroll the alternate screen history too');
 });
+
+function auditClipboardChords(chars) {
+  assert.match(chars, /int plain = !shift && \(mod & \(VTERM_MOD_CTRL \| VTERM_MOD_ALT\)\) == VTERM_MOD_CTRL;/, 'the chords are Ctrl without Shift and without Alt, so AltGr keeps typing');
+  const paste = chars.indexOf('if (plain && wp == 22) { mp_terminal_window_paste(hwnd); return 0; }');
+  const copy = chars.indexOf('if (plain && wp == 3 && t->selected) { mp_terminal_window_copy(hwnd); return 0; }');
+  const typed = chars.indexOf('character(t, (WCHAR)wp, mod)');
+  assert.ok(typed >= 0, 'every other character still reaches the shell');
+  assert.ok(paste >= 0, 'plain Ctrl+V must paste instead of typing ^V');
+  assert.ok(copy >= 0, 'plain Ctrl+C with a selection must copy it');
+  assert.ok(typed > paste && typed > copy, 'a copied or pasted chord must return before any byte reaches the shell');
+}
+
+test('MUBO-225 plain Ctrl+C copies a selection and plain Ctrl+V pastes in a shell or tmux tab', () => {
+  const source = read('terminal_window.c');
+  const chars = body(source, 'case WM_CHAR: case WM_SYSCHAR: {');
+  auditClipboardChords(chars);
+  const mutations = [
+    ['if (plain && wp == 3 && t->selected) { mp_terminal_window_copy(hwnd); return 0; }', 'if (plain && wp == 3) { mp_terminal_window_copy(hwnd); return 0; }'],
+    ['if (plain && wp == 22) { mp_terminal_window_paste(hwnd); return 0; }', ''],
+    ['int plain = !shift && (mod & (VTERM_MOD_CTRL | VTERM_MOD_ALT)) == VTERM_MOD_CTRL;', 'int plain = (mod & VTERM_MOD_CTRL) == VTERM_MOD_CTRL;'],
+  ];
+  for (const [before, after] of mutations) {
+    assert.ok(source.includes(before), before);
+    assert.throws(
+      () => auditClipboardChords(body(source.replace(before, after), 'case WM_CHAR: case WM_SYSCHAR: {')),
+      `mutation must fail: ${before}`,
+    );
+  }
+});
+
+test('MUBO-225 Ctrl+Shift+C and Ctrl+Shift+V keep their own handler', () => {
+  const keys = body(read('terminal_window.c'), 'case WM_KEYDOWN: case WM_SYSKEYDOWN: {');
+  assert.match(keys, /\(mod & \(VTERM_MOD_CTRL \| VTERM_MOD_SHIFT\)\) == \(VTERM_MOD_CTRL \| VTERM_MOD_SHIFT\) && \(wp == 'C' \|\| wp == 'V'\)/);
+  assert.match(keys, /if \(wp == 'C'\) mp_terminal_window_copy\(hwnd\); else mp_terminal_window_paste\(hwnd\);/);
+  const chars = body(read('terminal_window.c'), 'case WM_CHAR: case WM_SYSCHAR: {');
+  assert.match(chars, /if \(shift && \(mod & VTERM_MOD_CTRL\) && \(wp == 3 \|\| wp == 22\)\) return 0;/, 'the character left behind by Ctrl+Shift must not reach the shell');
+});
