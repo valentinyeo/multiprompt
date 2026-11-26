@@ -365,6 +365,15 @@ function Copy-Chat([string]$Name) {
     Press @(0x1B) 'Escape: return to composer'
     return $text
 }
+function Save-RoomMembers([string]$Label) {
+    $offset = (Read-Shared "$settings/debug.log").Length
+    Press @(0x11, 0x0D) "Ctrl+Enter: $Label"
+    [void](Wait-For "the app saved the room members: $Label" {
+        $log = Read-Shared "$settings/debug.log"
+        if ($log.Length -le $offset) { return $false }
+        $log.Substring($offset) -match '(?s)\[rooms\] command finished kind=edit state=accepted.*\[rooms\] view presented room='
+    } 30)
+}
 function Open-Member([string]$Name) {
     Invoke-JourneyCommand $Name -Session
     if (-not @(Visible-Children 'ZigShellChatTranscript').Count) { Press @(0x12, 0x43) 'Alt+C: open member Chat View' }
@@ -563,7 +572,7 @@ Host remote-1
         Type-Text 'Bravo'
         [void](Wait-For 'Bravo visible in member list' { (Picker-Shot 'members-bravo') -match '\bBravo\b' })
         Press @(0x0D) 'Enter: select Bravo'
-        Press @(0x11, 0x0D) 'Ctrl+Enter: save room members'
+        Save-RoomMembers 'save the room with both member chats'
         [void](Wait-For 'both saved members' { $s = Snapshot 'members-poll'; @($s.rooms | ForEach-Object { $_.tables.members } | Where-Object { $_.active -eq 1 }).Count -eq 2 })
         $visible = Shot 'members-after'
         if ($visible -notmatch 'Rooms534') { throw 'Room did not reopen after saving members' }
@@ -603,28 +612,53 @@ Host remote-1
     $savedReplies = @(Room-Events (Snapshot 'before-order') | Where-Object { $_.type -eq 'agent_reply' })
     Case 6 'Same replies in room and both member views' $(if (-not $sent) { 'No saved room question' } elseif ($savedReplies.Count -lt 2) { 'Fewer than two saved replies; shared reply order cannot be compared' } else { '' }) {
         $state = Snapshot 'order-before'
-        $replies = @(Room-Events $state | Where-Object { $_.type -eq 'agent_reply' })
+        $events = @(Room-Events $state)
+        $replies = @($events | Where-Object { $_.type -eq 'agent_reply' } | Sort-Object { [int]$_.seq })
         if ($replies.Count -lt 2) { throw 'Saved room contains fewer than two member replies; there is no shared reply order' }
         $problems = @()
-        foreach ($name in @('Alpha', 'Bravo')) {
-            Open-Member $name
-            $copied = Copy-Chat "$name-room-history"
-            [void](Shot "$name-room-history")
-            $sid = if ($name -ceq 'Alpha') { 'a1b2c3d4-0534-4000-8000-000000000001' } else { 'a1b2c3d4-0534-4000-8000-000000000002' }
-            $canonical = @($state.transcripts.PSObject.Properties | Where-Object { $_.Name -like "*/$sid.jsonl" } | ForEach-Object { $_.Value } | Where-Object { $_.type -eq 'assistant' } | ForEach-Object { $_.message.content } | Where-Object { $_.type -eq 'text' } | ForEach-Object { $_.text })
-            Save $canonical "$Evidence/$name-canonical-replies.json"
-            $canonicalPosition = -1
-            foreach ($reply in $replies) {
-                $next = -1
-                for ($index = $canonicalPosition + 1; $index -lt $canonical.Count; $index++) {
-                    if ($canonical[$index] -ceq $reply.text) { $next = $index; break }
-                }
-                if ($next -lt 0) { $problems += "$name saved transcript is missing or reorders assistant reply '$($reply.text)'" } else { $canonicalPosition = $next }
+        foreach ($member in @($state.rooms | ForEach-Object { $_.tables.members } | Where-Object { $_.active -eq 1 })) {
+            $name = [string]$member.display_name
+            $own = @($replies | Where-Object { $_.member_id -ceq $member.id })
+            $context = @()
+            $previous = 0
+            foreach ($delivery in @($events | Where-Object { $_.type -eq 'human' -and @($_.recipients) -contains $member.id } | Sort-Object { [int]$_.seq })) {
+                $context += @($replies | Where-Object { $_.member_id -cne $member.id -and [int]$_.seq -gt $previous -and [int]$_.seq -lt [int]$delivery.seq })
+                $previous = [int]$delivery.seq
             }
+            if ($own.Count -eq 0) { $problems += "$name has no saved reply in the room"; continue }
+            $expected = @((@($own) + @($context)) | Sort-Object { [int]$_.seq })
+            Open-Member $name
+            [void](Wait-For "$name chat shows its own room replies and the room context delivered to it, in room order" {
+                $text = Copy-Chat "$name-room-history"
+                $position = -1
+                foreach ($reply in $expected) {
+                    $next = $text.IndexOf([string]$reply.text, [Math]::Max(0, $position + 1), [StringComparison]::Ordinal)
+                    if ($next -lt 0) { return $null }
+                    $position = $next
+                }
+                return $text
+            } 60)
+            [void](Shot "$name-room-history")
+            $sid = [string]$member.provider_sid
+            $transcript = @($state.transcripts.PSObject.Properties | Where-Object { $_.Name -like "*/$sid.jsonl" } | ForEach-Object { $_.Value })
+            $assistant = @($transcript | Where-Object { $_.type -eq 'assistant' } | ForEach-Object { $_.message.content } | Where-Object { $_.type -eq 'text' } | ForEach-Object { [string]$_.text })
+            $user = @($transcript | Where-Object { $_.type -eq 'user' } | ForEach-Object { $_.message.content } | Where-Object { $_.type -eq 'text' } | ForEach-Object { [string]$_.text })
+            Save $assistant "$Evidence/$name-canonical-replies.json"
+            Save @{ assistant = $assistant; user = $user } "$Evidence/$name-transcript-roles.json"
             $position = -1
-            foreach ($reply in $replies) {
-                $next = $copied.IndexOf($reply.text, [Math]::Max(0, $position + 1), [StringComparison]::Ordinal)
-                if ($next -lt 0) { $problems += "$name chat is missing or reorders '$($reply.text)'" } else { $position = $next }
+            foreach ($reply in $own) {
+                $next = -1
+                for ($index = $position + 1; $index -lt $assistant.Count; $index++) {
+                    if ($assistant[$index] -ceq [string]$reply.text) { $next = $index; break }
+                }
+                if ($next -lt 0) { $problems += "$name saved transcript is missing or reorders its own assistant reply '$($reply.text)'" } else { $position = $next }
+            }
+            $userText = $user -join "`n"
+            $position = -1
+            foreach ($reply in $context) {
+                if ($assistant -ccontains [string]$reply.text) { $problems += "$name saved transcript records the peer reply '$($reply.text)' as its own assistant message" }
+                $next = $userText.IndexOf([string]$reply.text, [Math]::Max(0, $position + 1), [StringComparison]::Ordinal)
+                if ($next -lt 0) { $problems += "$name saved transcript is missing the room context '$($reply.text)' delivered to it" } else { $position = $next }
             }
         }
         Invoke-JourneyCommand -Text 'Rooms534'
@@ -730,7 +764,7 @@ Host remote-1
         Type-Text 'Bravo'
         if ((Picker-Shot 'closed-bravo') -notmatch '\bBravo\b') { throw 'A chat whose tab is closed is missing from the room member list' }
         Press @(0x0D) 'Enter: deselect Bravo before adding it back'
-        Press @(0x11, 0x0D) 'Ctrl+Enter: save the room without Bravo'
+        Save-RoomMembers 'save the room without Bravo'
         [void](Wait-For 'one member after removing the closed chat' { @((Snapshot 'closed-removed').rooms | ForEach-Object { $_.tables.members } | Where-Object { $_.active -eq 1 }).Count -eq 1 })
         Invoke-JourneyCommand 'Edit room'
         [void](Wait-For 'room editor for the closed-chat add' { Room-Window })
@@ -739,7 +773,7 @@ Host remote-1
         Type-Text 'Bravo'
         if ((Picker-Shot 'closed-bravo-add') -notmatch '\bBravo\b') { throw 'A chat whose tab is closed is missing from the room member list when it is added' }
         Press @(0x0D) 'Enter: select the closed chat'
-        Press @(0x11, 0x0D) 'Ctrl+Enter: save room members'
+        Save-RoomMembers 'save the room with the closed chat added back'
         [void](Wait-For 'two members after adding the closed chat' { @((Snapshot 'closed-added').rooms | ForEach-Object { $_.tables.members } | Where-Object { $_.active -eq 1 }).Count -eq 2 })
         Send-Text '@Bravo CLOSED534' -Room
         [void](Wait-For 'saved answer from the closed member chat' { @(Room-Events (Snapshot 'closed-reply-poll') | Where-Object { $_.type -eq 'agent_reply' -and $_.text -ceq 'Bravo says CLOSED534' }).Count -eq 1 } 60)

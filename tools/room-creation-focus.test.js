@@ -36,8 +36,7 @@ var context: u8 = 0;
 fn onCreate(_: *anyopaque, _: ActionToken, _: []const u16, _: []const []const u8) ActionResult { return .pending; }
 fn onEdit(_: *anyopaque, _: ActionToken, _: []const u8, _: u64, _: []const u16, _: []const []const u8) ActionResult { return .pending; }
 fn onSubmit(_: *anyopaque, _: ActionToken, _: []const u8, _: u64, _: []const u16) ActionResult { return .pending; }
-fn onRestart(_: *anyopaque, _: ActionToken, _: []const u8, _: []const u8) ActionResult { return .pending; }
-const callbacks = Callbacks{ .context = &context, .create = onCreate, .edit = onEdit, .submit = onSubmit, .restart = onRestart };
+const callbacks = Callbacks{ .context = &context, .create = onCreate, .edit = onEdit, .submit = onSubmit };
 ` + view + String.raw`
 test "accepted creation retains creation focus and prevents another admission until the room model arrives" {
     defer {

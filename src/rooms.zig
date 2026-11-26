@@ -1,6 +1,5 @@
 const std = @import("std");
 const transport = @import("room_transport.zig");
-const room_view = @import("room_view.zig");
 
 const allocator = std.heap.page_allocator;
 
@@ -243,10 +242,6 @@ pub const Controller = struct {
         return self.launchTypedPrepared(.edit, command_id, room_id, revision, .{ .op = "edit", .host_uuid = self.host_uuid[0..], .command_id = command_id, .room_id = room_id, .expected_revision = revision, .name = name, .members = members });
     }
 
-    pub fn restart(_: *Controller) room_view.ActionResult {
-        return .unsupported;
-    }
-
     fn roomJobCleanup(job: *transport.Job, thread: std.Thread) void {
         thread.join();
         allocator.free(job.request);
@@ -341,5 +336,4 @@ test "room controller pins remote UUID before catalog operations" {
     try std.testing.expectEqualStrings("10000000-0000-4000-8000-000000000001", &controller.host_uuid);
     try std.testing.expect(!controller.bindHost("20000000-0000-4000-8000-000000000002"));
     try std.testing.expect(!controller.live_send);
-    try std.testing.expectEqual(room_view.ActionResult.unsupported, controller.restart());
 }

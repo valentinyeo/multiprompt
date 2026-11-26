@@ -227,6 +227,10 @@ class RoutingTest(unittest.TestCase):
         replies = [e for e in page['events'] if e['type'] == 'agent_reply']
         self.assertEqual(2, len(replies))
         self.assertTrue(all('No answer' in e['text'] and 'again' in e['text'] for e in replies))
+        names = {m['id']: m['display_name'] for m in self.bridge.store.members(self.room)}
+        for reply in replies:
+            self.assertIn('@' + names[reply['member_id']], reply['text'])
+            self.assertNotIn('@' + names[[i for i in names if i != reply['member_id']][0]], reply['text'])
         self.runtime.answer = True
         self.post('question')
         self.sweep()

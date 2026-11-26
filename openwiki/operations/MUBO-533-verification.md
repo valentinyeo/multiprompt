@@ -29,14 +29,14 @@ No build, test suite or app verification ran on the shared server. These checks 
 | 6 | `tools/room_bridge_test.py`: real runtime symlink installation, retained stderr, old running host and lost-ack tests |
 | 7 | `tools/room-routing.test.py`: `test_host_schedule_completes_offline_work_once_without_room_requests`; `tools/room-agent-replies.test.js`: real host processes, no room reader |
 | 8 | `tools/room-reliability.test.js`: restart refreshes older unanswered questions after a newer answer |
-| 9 | `tools/room-routing.test.py`: empty/failed turn and failed-admission resend tests; hidden Restart harness |
+| 9 | `tools/room-routing.test.py`: empty/failed turn and failed-admission resend tests; the failure sentence names the member and the `@name` retry, and the room view has no restart action |
 | 10 | `tools/room-routing.test.py`: `test_agents_see_the_same_ordered_conversation` |
 
 `test_legacy_reader_cannot_claim_capability_gated_work` runs the original helper from the hosted baseline checkout against a new store. It checks old history reads and legacy posting without allowing the old collector to submit enhanced work. Protocol receipts and events retain their original shapes.
 
 [Run at `ab4bcfa19`](https://github.com/valentinyeo/multiprompt/actions/runs/45528029107) passed Python baseline reproduction, all current Python suites, real fixture-host completion without a reader, desktop baseline reproduction, all new desktop regression cases, source limits and timer checks. The combined run failed on a controller method name shadowing existing parameters and an older queued-command fixture missing the new request enum value. Both are corrected in the following commit; a full rerun is still required before this branch is ready to ship.
 
-The branch’s latest [Room safety run](https://github.com/valentinyeo/multiprompt/actions/workflows/room-checks.yml?query=branch%3Amubo-533-rooms-reliable) is the source of current results. Queued or incomplete checks are not a pass. No PR was opened.
+The branch’s latest [Room safety run](https://github.com/valentinyeo/multiprompt/actions/workflows/room-checks.yml?query=branch%3Amubo-533-rooms-reliable) is the source of current results. Queued or incomplete checks are not a pass. Pull request 1396 carries the branch.
 
 ## Decisions
 
@@ -100,3 +100,36 @@ foreign-room receipt and a refusal leave the room untouched.
 - Step 3 at a56ae6d7b reports "Saved room message is not visible in the room" while the owner reads
   `BROADCAST534` on the step 3 screenshot. That is a check boundary in the journey, not missing paint;
   it belongs to the Rooms journey owner on MUBO-534 and no UI code was changed for it.
+
+## Step 6 roles and the closed-member race at dd6331199
+
+The run at `dd6331199` (Verify desktop rooms 45722205958) passed cases 1, private, 2, 3, 4, 5, 7, 8, 12,
+14, 11 and failed 6 and 2-closed. Evidence: `step-6-state.json`, `order-before-state.json`,
+`Alpha-room-history.png`, `Bravo-room-history.png`, `Alpha-transcript`, `closed-bravo-add.png`,
+`closed-removed-state.json`, `closed-added-state.json` and `debug.log` from artifact `verify-rooms`.
+
+- Case 6 asserted that every saved room reply appears as an assistant message in each member's own
+  provider transcript. A member's transcript only ever holds its own assistant replies; the other
+  member's reply reaches it as the room context line inside a user message
+  (`step-6-state.json`: Alpha seq 6 is the delivery text `agent_3314…: Bravo says BROADCAST534`).
+  Requiring the peer reply in the assistant role could only pass by forging transcripts. The canonical
+  room order for that snapshot is Alpha `BROADCAST534` (seq 4), Bravo `BROADCAST534` (seq 5), Alpha
+  `TARGET534` (seq 7), and the room view held all three in that order.
+- The member Chat View half was a real measurement taken too early. Alpha's tab was opened at
+  `23:49:26.226`, its transcript request ran at `23:49:26.674` and returned in 15 ms, and the copy had
+  already run before the request. The view is correct a moment later; the driver now waits for the saved
+  room turns to appear before it copies.
+- Case 6 now checks the roles instead: each member's own replies appear as assistant messages in room
+  order; the peer replies inside that member's delivery windows appear only as user-role room context,
+  in order, and never as assistant text; and each member's own Chat View shows its own replies plus the
+  room context delivered to it in the saved room order. The room view keeps the full-order check.
+- Case 2-closed: `closed-removed-state.json` and `closed-added-state.json` both hold Bravo inactive at
+  room revision 3, and `debug.log` has the removal edit accepted at `23:51:11.164` but no second
+  `[rooms] request sent kind=edit`. The driver reopened the member editor at `23:51:11.146`, 18 ms
+  before the app finished the removal. That editor seeded Bravo from the old member list and kept the
+  old revision, so its save was refused locally. `Save-RoomMembers` now waits for the app's own
+  `[rooms] command finished kind=edit state=accepted` and the refreshed `[rooms] view presented`
+  before the next editor opens. That does not prove the re-added closed chat answers yet.
+- The saved failure sentence asked the user to resend the question to the room, which asks every member
+  again. It now names the member and asks for `@<name>`, so the retry asks only that chat. The room view
+  had no restart control and now has no restart plumbing either.

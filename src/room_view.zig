@@ -38,14 +38,13 @@ pub const ViewModel = struct {
     candidates: []const Member,
     messages: []const Message,
 };
-pub const ActionKind = enum { create, edit, submit, restart };
+pub const ActionKind = enum { create, edit, submit };
 pub const ActionToken = struct { generation: u64, serial: u64, kind: ActionKind };
 pub const Callbacks = struct {
     context: *anyopaque,
     create: *const fn (*anyopaque, ActionToken, []const u16, []const []const u8) ActionResult,
     edit: *const fn (*anyopaque, ActionToken, []const u8, u64, []const u16, []const []const u8) ActionResult,
     submit: *const fn (*anyopaque, ActionToken, []const u8, u64, []const u16) ActionResult,
-    restart: *const fn (*anyopaque, ActionToken, []const u8, []const u8) ActionResult,
     draft_changed: ?*const fn (*anyopaque) void = null,
     still_working: ?*const fn (*anyopaque, ActionToken) bool = null,
 };
@@ -118,8 +117,6 @@ pub const View = struct {
     error_len: usize = 0,
     title_hit: w.RECT = empty_rect,
     send_hit: w.RECT = empty_rect,
-    restart_hit: w.RECT = empty_rect,
-    restart_member: ?[]const u8 = null,
     cancel_hit: w.RECT = empty_rect,
     confirm_hit: w.RECT = empty_rect,
     picker_hits: [64]w.RECT = @splat(empty_rect),
@@ -445,8 +442,6 @@ pub const View = struct {
     fn clearHits(self: *View) void {
         self.title_hit = empty_rect;
         self.send_hit = empty_rect;
-        self.restart_hit = empty_rect;
-        self.restart_member = null;
         self.cancel_hit = empty_rect;
         self.confirm_hit = empty_rect;
         self.picker_count = 0;
@@ -524,16 +519,6 @@ pub const View = struct {
             self.callbacks.create(self.callbacks.context, action, name[0..len], ids[0..self.selected_count])
         else
             self.callbacks.edit(self.callbacks.context, action, self.model.room_id, self.edit_revision, name[0..len], ids[0..self.selected_count]);
-        self.completeAction(action, result);
-    }
-
-    fn restart(self: *View) void {
-        refreshHits(self);
-        if (self.pending != null or self.too_small) return;
-        const id = self.restart_member orelse return;
-        const action = self.token(.restart);
-        self.pending = action;
-        const result = self.callbacks.restart(self.callbacks.context, action, self.model.room_id, id);
         self.completeAction(action, result);
     }
 
@@ -681,10 +666,8 @@ fn draw(view: *View, dc: w.HANDLE, bounds: w.RECT) void {
     const count_len = std.unicode.utf8ToUtf16Le(&count_w, count) catch 0;
     _ = w.SelectObject(dc, small);
     text(dc, count_w[0..count_len], .{ .left = view.title_hit.right - view.px(26), .top = view.title_hit.top, .right = view.title_hit.right - view.px(4), .bottom = view.title_hit.bottom }, 0x8a8a8a, w.DT_SINGLELINE | w.DT_VCENTER);
-    view.restart_hit = empty_rect;
-    view.restart_member = null;
     const top = view.px(78);
-    const bottom = @max(top, height - view.px(if (view.restart_member == null) 90 else 130));
+    const bottom = @max(top, height - view.px(90));
     const left = @max(view.px(20), center - view.px(380));
     const right = @min(width - view.px(20), center + view.px(380));
     const clip = w.CreateRectRgn(left, top, right, bottom);
@@ -1064,7 +1047,7 @@ fn editProc(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w.
                     if (reverse) { view.focus_target = 1; view.setFocus(view.hwnd); } else view.setFocus(view.search_edit);
                 } else if (reverse) view.setFocus(view.name_edit) else { view.focus_target = 0; view.setFocus(view.hwnd); }
             } else {
-                view.focus_target = if (reverse and view.restart_member != null) 1 else 0;
+                view.focus_target = 0;
                 view.setFocus(view.hwnd);
             }
             view.invalidate();
@@ -1129,12 +1112,12 @@ fn windowProc(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(
                     }
                 }
             } else if (wp == 0x0d or wp == 0x20) {
-                if (view.focus_target == 0) view.openEdit() else view.restart();
+                view.openEdit();
             } else if (wp == 0x09) {
                 if (reverse) {
                     if (view.focus_target == 1) view.focus_target = 0 else view.setFocus(view.composer);
                 } else {
-                    if (view.focus_target == 0 and view.restart_member != null) view.focus_target = 1 else view.setFocus(view.composer);
+                    view.setFocus(view.composer);
                 }
             }
             view.invalidate();
@@ -1163,9 +1146,7 @@ fn windowProc(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(
                 };
                 view.picker = false;
                 view.invalidate();
-            } else if (inside(view.title_hit, x, y)) view.openEdit() else if (inside(view.send_hit, x, y)) view.submit() else if (inside(view.restart_hit, x, y)) {
-                view.restart();
-            }
+            } else if (inside(view.title_hit, x, y)) view.openEdit() else if (inside(view.send_hit, x, y)) view.submit();
             return 0;
         },
         w.WM_MOUSEWHEEL => {
@@ -1276,7 +1257,6 @@ test "IGSH-1697 synthetic native create and room paint" {
         }
         fn edit(_: *anyopaque, _: ActionToken, _: []const u8, _: u64, _: []const u16, _: []const []const u8) ActionResult { return .failed; }
         fn submit(_: *anyopaque, _: ActionToken, _: []const u8, _: u64, _: []const u16) ActionResult { return .failed; }
-        fn restart(_: *anyopaque, _: ActionToken, _: []const u8, _: []const u8) ActionResult { return .failed; }
     };
 
     const parent = w.CreateWindowExW(0, L("STATIC"), L("Rooms synthetic test"), w.WS_POPUP | w.WS_VISIBLE, 0, 0, 1200, 900, null, null, w.GetModuleHandleW(null), null) orelse return error.TestUnexpectedResult;
@@ -1296,7 +1276,7 @@ test "IGSH-1697 synthetic native create and room paint" {
             const create_model = ViewModel{ .room_id = "", .name = &.{}, .revision = 0, .members = &.{}, .candidates = members, .messages = &.{} };
             var fixture = Fixture{ .response = response };
             var view: View = undefined;
-            try std.testing.expect(view.create(parent, &create_model, .{ .context = &fixture, .create = Fixture.create, .edit = Fixture.edit, .submit = Fixture.submit, .restart = Fixture.restart }));
+            try std.testing.expect(view.create(parent, &create_model, .{ .context = &fixture, .create = Fixture.create, .edit = Fixture.edit, .submit = Fixture.submit }));
             defer view.destroy();
             try std.testing.expect(view.setDpi(96));
             view.setBounds(.{ .left = 0, .top = 0, .right = 1000, .bottom = 800 });

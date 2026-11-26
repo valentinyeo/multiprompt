@@ -297,10 +297,7 @@ fn onEntry(_: *anyopaque, _: ActionToken, _: []const u16, _: []const []const u8)
 fn onEdit(_: *anyopaque, _: ActionToken, _: []const u8, _: u64, _: []const u16, _: []const []const u8) ActionResult {
     return .failed;
 }
-fn onRestart(_: *anyopaque, _: ActionToken, _: []const u8, _: []const u8) ActionResult {
-    return .failed;
-}
-const callbacks = Callbacks{ .context = &context, .create = onEntry, .edit = onEdit, .submit = onSubmit, .restart = onRestart };
+const callbacks = Callbacks{ .context = &context, .create = onEntry, .edit = onEdit, .submit = onSubmit };
 fn reset() void {
     sent = 0;
     sent_room = "";
@@ -363,8 +360,7 @@ var context: u8 = 0;
 fn onSubmit(_: *anyopaque, _: ActionToken, _: []const u8, _: u64, _: []const u16) ActionResult { sent += 1; return .pending; }
 fn onEntry(_: *anyopaque, _: ActionToken, _: []const u16, _: []const []const u8) ActionResult { return .failed; }
 fn onEdit(_: *anyopaque, _: ActionToken, _: []const u8, _: u64, _: []const u16, _: []const []const u8) ActionResult { return .failed; }
-fn onRestart(_: *anyopaque, _: ActionToken, _: []const u8, _: []const u8) ActionResult { return .failed; }
-const callbacks = Callbacks{ .context = &context, .create = onEntry, .edit = onEdit, .submit = onSubmit, .restart = onRestart };
+const callbacks = Callbacks{ .context = &context, .create = onEntry, .edit = onEdit, .submit = onSubmit };
 ${roomView.view({ source, stub: stubs })}
 test "a send the room accepted keeps the draft until the answer arrives" {
     const room = ViewModel{ .room_id = "room-a", .revision = 4 };
@@ -490,9 +486,8 @@ var context: u8 = 0;
 fn onSubmit(_: *anyopaque, _: ActionToken, _: []const u8, _: u64, _: []const u16) ActionResult { sent += 1; return .pending; }
 fn onEntry(_: *anyopaque, _: ActionToken, _: []const u16, _: []const []const u8) ActionResult { return .failed; }
 fn onEdit(_: *anyopaque, _: ActionToken, _: []const u8, _: u64, _: []const u16, _: []const []const u8) ActionResult { return .failed; }
-fn onRestart(_: *anyopaque, _: ActionToken, _: []const u8, _: []const u8) ActionResult { return .failed; }
 fn stillWorking(_: *anyopaque, _: ActionToken) bool { return send_in_flight; }
-const callbacks = Callbacks{ .context = &context, .create = onEntry, .edit = onEdit, .submit = onSubmit, .restart = onRestart, .still_working = stillWorking };
+const callbacks = Callbacks{ .context = &context, .create = onEntry, .edit = onEdit, .submit = onSubmit, .still_working = stillWorking };
 ${roomView.view({ source, stub: stubs })}
 test "a send the frontend still runs keeps the composer waiting" {
     const room = ViewModel{ .room_id = "room-a", .revision = 4 };
@@ -587,11 +582,12 @@ test('unavailable creation reports a reason instead of silently returning', () =
   run(`${fixture}\n${declaration(source, 'pub fn openCreate(')}`, { 'workspaces.zig': 'pub fn updateMainWindowTitle() void {}\n' });
 });
 
-test('room picker inserts the shown name and does not offer a stub restart', () => {
+test('room picker inserts the shown name and the room view offers no restart control', () => {
   const source = read('room_view.zig');
   const fixture = fs.readFileSync(path.join(__dirname, 'fixtures/MUBO-533/mention-picker.zig'), 'utf8');
   run(`${fixture}\n${declaration(source, 'fn chooseMention(')}\n${declaration(source, 'fn mentionStart(')}`);
   assert.doesNotMatch(source, /text\(dc, L\("Restart"\)/);
+  assert.doesNotMatch(source, /restart/i);
 });
 
 test('the room bridge builds its python command line the way the chat path does', () => {

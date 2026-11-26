@@ -439,7 +439,7 @@ class RoomBridge:
                         fail('runtime_unavailable')
                     if submitted['message'].get('state') in ('failed', 'cancelled'):
                         response_id = str(uuid.uuid5(uuid.NAMESPACE_URL, 'multibot-room-reply:' + work['message_id']))
-                        self.store.command(dict(op='agent_reply', command_id=response_id, room_id=work['room_id'], parent_event_id=work['parent_event_id'], member_id=work['member_id'], response_id=response_id, text='No answer. The agent could not accept this question. Send your question again to retry.'))
+                        self.store.command(dict(op='agent_reply', command_id=response_id, room_id=work['room_id'], parent_event_id=work['parent_event_id'], member_id=work['member_id'], response_id=response_id, text=self.retry_sentence(work['member_id'], 'could not accept this question')))
                         self.store.db.execute('UPDATE reply_progress SET done=1 WHERE delivery_id=?', (work['message_id'],))
                     self.store.db.execute('COMMIT')
                     if submitted['message'].get('state') in ('failed', 'cancelled'):
@@ -460,6 +460,13 @@ class RoomBridge:
             self.collect_reply(work, scope, progress, page)
             if not self.store.db.execute('SELECT done FROM reply_progress WHERE delivery_id=?', (work['message_id'],)).fetchone()['done']:
                 waiting.add(delivery['member_id'])
+
+    def retry_sentence(self, member_id, detail):
+        row = self.store.db.execute('SELECT display_name FROM members WHERE id=?', (member_id,)).fetchone()
+        name = str(row['display_name']) if row is not None and row['display_name'] else ''
+        if re.fullmatch(r'[A-Za-z0-9_-]{1,64}', name) is None:
+            return 'No answer. The agent %s. Send the question again as a mention of that chat to retry only it.' % detail
+        return 'No answer. %s %s. Send it again in the room as @%s to retry only that chat.' % (name, detail, name)
 
     def collect_reply(self, work, scope, progress, page):
         turn = progress['turn']
@@ -509,7 +516,7 @@ class RoomBridge:
                 elif turn is not None and event.get('turn') == turn and event.get('kind') == 'turn.ended':
                     reply = '\n\n'.join(part[1] for part in parts)
                     answered = payload.get('status') == 'completed' and bool(reply.strip())
-                    text = reply if answered else 'No answer. The agent did not complete a reply. Send your question again to retry.'
+                    text = reply if answered else self.retry_sentence(work['member_id'], 'did not complete a reply')
                     response_id = str(uuid.uuid5(uuid.NAMESPACE_URL, 'multibot-room-reply:' + work['message_id']))
                     self.store.command(dict(op='agent_reply', command_id=response_id, room_id=work['room_id'], parent_event_id=work['parent_event_id'], member_id=work['member_id'], response_id=response_id, text=text))
                     reply_note('delivery=%s turn=%s after=%s rows=%d parts=%d bytes=%d status=%s answered=%d' % (work['message_id'], str(turn)[:REPLY_DIAGNOSTIC_ID], start, rows, len(parts), len(reply.encode('utf-8')), str(payload.get('status'))[:32], int(answered)))

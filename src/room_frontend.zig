@@ -2436,9 +2436,6 @@ fn editRoom(_: *anyopaque, token: room_view.ActionToken, room_id: []const u8, re
 fn submit(_: *anyopaque, token: room_view.ActionToken, room_id: []const u8, revision: u64, text: []const u16) room_view.ActionResult {
     return beginPost(token, room_id, revision, text);
 }
-fn restart(_: *anyopaque, _: room_view.ActionToken, _: []const u8, _: []const u8) room_view.ActionResult {
-    return .unsupported;
-}
 
 pub fn isActive() bool {
     return enabled and !scope_blocked and front != .hidden;
@@ -2674,7 +2671,7 @@ pub fn restoreAfterOverlay() bool {
 pub fn init(parent: w.HANDLE) void {
     if (!enabled or created or !ui_store.bindOwner()) return;
     if (account_len > 0 and !ui_ready and !ui_dirty) _ = loadUiAccount();
-    created = view.create(parent, &model, .{ .context = &context, .create = createRoom, .edit = editRoom, .submit = submit, .restart = restart, .draft_changed = draftChanged, .still_working = stillWorking });
+    created = view.create(parent, &model, .{ .context = &context, .create = createRoom, .edit = editRoom, .submit = submit, .draft_changed = draftChanged, .still_working = stillWorking });
 }
 pub fn resize(parent: w.HANDLE) void {
     if (!enabled or !created) return;
