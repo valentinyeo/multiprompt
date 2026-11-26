@@ -34,7 +34,7 @@ Full procedure and toolchain notes: [openwiki/operations/build-and-install.md](o
 - **Never use Ctrl+Alt shortcuts** (AltGr on US-International layouts).
 - The browser extension targets Chrome and loads unpacked from `extension/`.
 - **The Chat View shows no status elements around messages:** no sending clock, "Sending...", read checks, ETA, model or capacity badges. Only a real send failure may show. Valentin removed these one by one; do not add new ones.
-- **Minimal chat UI:** add a chat or sidebar element only when a ticket asks for it. Tickets filed by Valentin or the design lead need no further yes; a wrong change is rolled back. New actions go into Ctrl+K. Busy state is only the three ticking dots.
+- **Minimal chat UI:** add a chat or sidebar element only when a ticket asks for it. Tickets filed by Valentin or the design lead need no further yes; a wrong change is rolled back. New actions go into Ctrl+K. Busy state is the three ticking dots, one activity line at the end of the stream, and the small activity pill floating at the top of the Chat View.
 - Keep this file under 80 lines.
 
 ## Rules and what enforces them

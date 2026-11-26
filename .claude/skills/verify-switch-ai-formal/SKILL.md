@@ -35,7 +35,11 @@ One logical chat address, at most two pending switch requests, five successful s
 
 ## Coverage and sync
 
-Last reviewed source/model sync commit is `201726a43`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
+Last reviewed source/model sync commit is `bc3bb898b`. [coverage.json](coverage.json) records full-file hashes. Update hashes and move the sync commit forward only after confirming the verification still describes the code.
+
+MUBO-591 adds a short `step` to the reader's tool events, a `workers.snapshot` slot and a `workers` list on each live page and snapshot, all on the chat view's activity path. None of the twelve covered `host_switch_*`, `host_dispatch_switch`, `host_usage_limit` or `host_auto_switch_*` functions changed, and the `antigravity` order from master `201726a43` sits in `HOST_AUTO_SWITCH_ORDER` outside them. Only the reader's whole-file hash and the sync commit `201726a43` move; the model, bounds, decision table, probes and mutation controls are unchanged. Hosted CI must rerun the full self-test and native replay.
+
+MUBO-591 merges master `bc3bb898b` (MUBO-588, MUBO-589, MUBO-590) and keeps the activity path beside master's Pi model and slash changes. None of the twelve covered `host_switch_*`, `host_dispatch_switch`, `host_usage_limit` or `host_auto_switch_*` functions changed, and every covered reader body is byte-identical to that master. Only the reader's whole-file hash and the sync commit move; the model, bounds, decision table, probes and mutation controls are unchanged. Hosted CI must rerun the full self-test and native replay.
 
 MUBO-585 puts Antigravity in `HOST_AUTO_SWITCH_ORDER`, so a chat whose plan runs out can land on Antigravity and a chat already on Antigravity can move off it. `HOST_AUTO_SWITCH_TRIGGERS` and `host_usage_limit` already read the Antigravity `result` event, so the detector is unchanged; the saved order, the native probe's `FollowOrder` steps, `tools/chat-auto-switch.test.js` and the chat-auto-switch journey change instead. Merging master `764e3716f` (MUBO-532, MUBO-587) touches no file covered by this skill. The TLC provider set and bounds stay at three providers, so the model does not explore Antigravity as a target. Reader and auto-switch test hashes and sync commit `764e3716f` move; the model, bounds, decision table, replays and mutation controls are unchanged. Hosted CI must rerun the full self-test and native replay.
 
