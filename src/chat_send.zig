@@ -4800,12 +4800,18 @@ pub fn chatSettingNotice(setting: @import("chat_live.zig").Setting) void {
             .terra => "Model: Terra",
             .luna => "Model: Luna",
             .astra => "Model: Astra",
+            .neon => "Model: Neon",
+            .carbon => "Model: Carbon",
+            .argon => "Model: Argon",
+            .hydrogen => "Model: Hydrogen",
+            .flash => "Model: Flash",
             .unknown => return,
         },
         .effort => |effort| switch (effort) {
             .low => "Effort: Low",
             .medium => "Effort: Medium",
             .high => "Effort: High",
+            .xhigh => "Effort: XHigh",
             .unknown => return,
         },
     };

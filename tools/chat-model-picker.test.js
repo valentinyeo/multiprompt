@@ -15,8 +15,8 @@ test('host events and snapshots own settings, without optimistic updates', () =>
   assert.match(live, /seq < live\.settings_seq/);
   assert.match(read('src/chat_send.zig'), /host_settings/);
   assert.match(read('src/chat_send.zig'), /applySettingsSnapshot/);
-  assert.match(live, /pub const Model = enum \{ unknown, opus, sonnet, haiku, fable, sol, terra, luna, astra \}/);
-  assert.match(live, /pub const Effort = enum \{ unknown, low, medium, high \}/);
+  assert.match(live, /pub const Model = enum \{ unknown, opus, sonnet, haiku, fable, sol, terra, luna, astra, neon, carbon, argon, hydrogen, flash\b/);
+  assert.match(live, /pub const Effort = enum \{ unknown, low, medium, high, xhigh \}/);
   const send = read('src/chat_send.zig').split('pub fn chatSetLiveSetting')[1].split('\n}')[0];
   assert.match(send, /chatLiveReply\(\.\{ \.identity = identity, \.bytes = line \}\)/);
   assert.doesNotMatch(send, /settings\s*=/);

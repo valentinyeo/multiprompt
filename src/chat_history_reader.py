@@ -3467,7 +3467,7 @@ def host_reply(query):
         return host_switch_ai(provider, sid, query.get("to"))
     if query.get("op") == "set_auto_switch":
         return host_auto_switch_set(provider, sid, query)
-    if query.get("op") == "set_effort" and provider not in ("claude",):
+    if query.get("op") == "set_effort" and provider not in ("claude", "antigravity"):
         return dict(status="refused", reason="unsupported_provider")
     if query.get("op") == "set_model" and provider not in HOST_MODEL_CHOICES and provider != "pi":
         return dict(status="refused", reason="unsupported_provider")
@@ -3489,7 +3489,7 @@ def host_reply(query):
             value = mode
         else:
             key = "model" if operation == "set_model" else "effort"
-            allowed = tuple(HOST_MODEL_CHOICES[provider]) if key == "model" else ("low", "medium", "high")
+            allowed = tuple(HOST_MODEL_CHOICES[provider]) if key == "model" else host_effort_choices(provider)
             value = query.get(key)
             if value not in allowed:
                 return dict(status="refused", reason="invalid_" + key)
@@ -3503,6 +3503,8 @@ def host_reply(query):
             if config is None:
                 return dict(status="refused", reason="host_disabled")
             config[key] = value
+            if provider == "antigravity" and key in ("model", "effort"):
+                config = host_antigravity_normalize(config)
             host_write(host_paths(provider, sid)["config"], config)
             if mode is not None:
                 state = host_session_state(provider, sid)
@@ -3972,7 +3974,9 @@ def host_cursor_argv(provider, sid, base, mode=None):
 
 
 def host_antigravity_argv(provider, sid, base, mode=None):
-    model = [] if any(part == "--model" or part.startswith("--model=") for part in base[1:]) else ["--model", "gemini-4-neon-medium"]
+    chosen = host_antigravity_model_arg(provider, sid)
+    explicit = any(part == "--model" or part.startswith("--model=") for part in base[1:])
+    model = [] if explicit or not chosen else ["--model", chosen]
     command = base + model + ["--input-format", "stream-json", "--output-format", "stream-json",
                               "--dangerously-skip-permissions", "--print="]
     native = host_session_state(provider, sid).get("native_session")
@@ -4004,7 +4008,72 @@ def host_permission_mode(provider, sid, state=None):
 HOST_MODEL_CHOICES = dict(
     claude=dict(opus="opus", sonnet="sonnet", haiku="haiku", fable="fable"),
     codex=dict(sol="gpt-6.1-sol", terra="gpt-6.1-terra", luna="gpt-6-luna", astra="gpt-6-astra"),
+    antigravity=dict(neon="gemini-4-neon", carbon="gemini-4-carbon", argon="gemini-4-argon",
+                     hydrogen="gemini-4-hydrogen", flash="gemini-3.8-flash",
+                     opus="claude-opus-5-5", sonnet="claude-sonnet-5-5"),
 )
+
+HOST_EFFORT_CHOICES = ("low", "medium", "high")
+HOST_ANTIGRAVITY_EFFORTS = ("low", "medium", "high", "xhigh")
+HOST_ANTIGRAVITY_XHIGH_MODELS = ("neon", "hydrogen")
+HOST_ANTIGRAVITY_DEFAULT = ("neon", "medium")
+
+
+def host_effort_choices(provider):
+    return HOST_ANTIGRAVITY_EFFORTS if provider == "antigravity" else HOST_EFFORT_CHOICES
+
+
+def host_antigravity_effort(model, effort):
+    if model not in HOST_MODEL_CHOICES["antigravity"]:
+        model = HOST_ANTIGRAVITY_DEFAULT[0]
+    if effort not in HOST_ANTIGRAVITY_EFFORTS:
+        effort = HOST_ANTIGRAVITY_DEFAULT[1]
+    return "high" if effort == "xhigh" and model not in HOST_ANTIGRAVITY_XHIGH_MODELS else effort
+
+
+def host_antigravity_flag(parts):
+    for index, part in enumerate(parts):
+        if part == "--model":
+            return parts[index + 1] if index + 1 < len(parts) else ""
+        if isinstance(part, str) and part.startswith("--model="):
+            return part.split("=", 1)[1]
+    return None
+
+
+def host_antigravity_split(value):
+    if isinstance(value, str):
+        for model, prefix in HOST_MODEL_CHOICES["antigravity"].items():
+            effort = value[len(prefix) + 1:] if value.startswith(prefix + "-") else None
+            if effort in HOST_ANTIGRAVITY_EFFORTS:
+                return model, effort
+    return None, None
+
+
+def host_antigravity_choice(provider, sid):
+    config = host_config(provider, sid) or {}
+    args = config.get("args") if isinstance(config.get("args"), list) else []
+    command = config.get("command") if isinstance(config.get("command"), list) else []
+    explicit = host_antigravity_flag(command + args)
+    if explicit is not None:
+        model, effort = host_antigravity_split(explicit)
+        return (model, effort) if model else ("", "")
+    model = config.get("model")
+    if model not in HOST_MODEL_CHOICES["antigravity"]:
+        model = HOST_ANTIGRAVITY_DEFAULT[0]
+    return model, host_antigravity_effort(model, config.get("effort"))
+
+
+def host_antigravity_model_arg(provider, sid):
+    model, effort = host_antigravity_choice(provider, sid)
+    prefix = HOST_MODEL_CHOICES["antigravity"].get(model)
+    return prefix + "-" + effort if prefix else ""
+
+
+def host_antigravity_normalize(config):
+    model = config.get("model") if config.get("model") in HOST_MODEL_CHOICES["antigravity"] else HOST_ANTIGRAVITY_DEFAULT[0]
+    config["model"] = model
+    config["effort"] = host_antigravity_effort(model, config.get("effort"))
+    return config
 
 
 def host_codex_model(provider, sid):
@@ -4017,6 +4086,9 @@ def host_settings(provider, sid):
     if provider == "codex":
         choice = config.get("model")
         return dict(model=choice if choice in HOST_MODEL_CHOICES["codex"] else "", effort="")
+    if provider == "antigravity":
+        model, effort = host_antigravity_choice(provider, sid)
+        return dict(model=model, effort=effort)
     args = config.get("args") if isinstance(config.get("args"), list) else []
     command = config.get("command") if isinstance(config.get("command"), list) else []
     parts = command + args
@@ -5739,10 +5811,10 @@ def host_handle_request(provider, sid, tmux, session, request):
             return host_refuse("unsupported_provider")
         return host_pi_login_answer_op(provider, sid, tmux, session, request)
     if operation in ("set_model", "set_effort"):
-        if operation == "set_effort" and provider != "claude" or provider not in HOST_MODEL_CHOICES:
+        if operation == "set_effort" and provider not in ("claude", "antigravity") or provider not in HOST_MODEL_CHOICES:
             return host_refuse("unsupported_provider")
         key = "model" if operation == "set_model" else "effort"
-        allowed = tuple(HOST_MODEL_CHOICES[provider]) if key == "model" else ("low", "medium", "high")
+        allowed = tuple(HOST_MODEL_CHOICES[provider]) if key == "model" else host_effort_choices(provider)
         value = request.get(key)
         if value not in allowed:
             return host_refuse("invalid_" + key)
@@ -5750,9 +5822,14 @@ def host_handle_request(provider, sid, tmux, session, request):
         if config is None:
             return host_refuse("host_disabled")
         config[key] = value
+        if provider == "antigravity":
+            config = host_antigravity_normalize(config)
         host_write(host_paths(provider, sid)["config"], config)
         if "settings" in session:
-            session["settings"][key] = value
+            if provider == "antigravity":
+                session["settings"] = host_settings(provider, sid)
+            else:
+                session["settings"][key] = value
             host_settings_event(provider, sid, tmux, session)
         return dict(status="ok")
     if operation == "send_now":
@@ -5771,7 +5848,7 @@ def host_handle_request(provider, sid, tmux, session, request):
         return adapter["set_mode"](provider, sid, session, request["mode"])
     if operation != "deliver":
         return dict(status="error", reason="invalid_op")
-    if provider == "claude" and "settings" in session and (session.get("agent") is None or session.get("starting_settings") != session["settings"]):
+    if provider in ("claude", "antigravity") and "settings" in session and (session.get("agent") is None or session.get("starting_settings") != session["settings"]):
         return dict(status="busy", reason="settings_pending")
     if (provider == "claude" and session.get("ready") and session.get("settings", {}).get("model")
             and session.get("init_model") and session["init_model"] != session["settings"]["model"]):
@@ -6051,6 +6128,10 @@ def host_antigravity_event(provider, sid, tmux, session, event):
             session["state"]["native_session"] = native
         host_state_write(provider, sid, session["state"])
         host_log(provider, sid, "init", dict(session=native))
+        if "settings" in session:
+            started = session.get("starting_settings") == session["settings"]
+            session["applied_settings"] = dict(session["settings"]) if started else None
+            host_settings_event(provider, sid, tmux, session)
         host_event(provider, sid, tmux, session, "host.status", dict(state="ready"))
         return
     if kind == "step_update":
@@ -7021,7 +7102,7 @@ def host_loop(provider, sid, tmux, session, server, agent):
     host_session_reset(session, agent)
     host_history_claim(provider, sid, session)
     host_nightly_mark(provider, sid, session)
-    if provider in ("claude", "codex"):
+    if provider in ("claude", "codex", "antigravity"):
         session["settings"] = host_settings(provider, sid)
         session["starting_settings"] = dict(session["settings"])
         session["applied_settings"] = None
@@ -7063,7 +7144,7 @@ def host_loop(provider, sid, tmux, session, server, agent):
                 HOST_ADAPTERS[provider]["open"](provider, sid, tmux, session)
             host_fresh_retry(provider, sid, tmux, session)
             host_fresh_resume(provider, sid, tmux, session)
-            if (provider == "claude" and session["settings"] != session["starting_settings"]
+            if (provider in ("claude", "antigravity") and session["settings"] != session["starting_settings"]
                     and session["turn"] is None and not session["inflight"] and not session["sends"] and not session["parked"]):
                 selector.unregister(agent.stdout)
                 host_agent_stop(agent)
