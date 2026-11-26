@@ -243,7 +243,7 @@ class RoutingTest(unittest.TestCase):
         for status in ('completed', 'interrupted', 'cancelled', 'failed', 'error'):
             for text in ('Bravo says BROADCAST534', '', ' \t\n'):
                 with self.subTest(status=status, text=text):
-                    sent = self.post('question', ['beta'])
+                    sent = self.post('@beta question', ['beta'])
                     self.sweep()
                     delivery = sent['deliveries'][0]
                     member = next(m for m in self.bridge.store.members(self.room) if m['id'] == delivery['member_id'])
