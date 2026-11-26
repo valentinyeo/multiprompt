@@ -31,7 +31,7 @@ test('native session spawn keeps remote tabs off per-tab ssh', () => {
   assert.match(build, /terminal_model\.c/);
   assert.match(build, /libvterm/);
   assert.match(body(consoleSource, 'respawnShellInPlace'), /native_terminal\) return @import\("native_session\.zig"\)\.reconnect/);
-  assert.match(body(consoleSource, 'spawnNativeShell'), /chat_view_on or app_state\.g_chat_active/);
+  assert.match(body(consoleSource, 'spawnNativeShell'), /chat_view_on or \(app_state\.g_chat_active and !app_state\.g_restoring\)/);
   assert.match(body(read('src/chat_composer.zig'), 'showShellConsole'), /native_terminal and !@import\("native_session\.zig"\)\.alive/);
   console.log('native session spawn keeps remote tabs off per-tab ssh');
 });
@@ -90,8 +90,8 @@ test('MUBO-598 a server shell opens at the full pane height and re-applies it on
   assert.doesNotMatch(worker, /current_rows != rows/, 'the size no longer depends on a race with the first resize');
 
   const ready = body(native, 'ready');
-  const gate = ready.indexOf('if (idx == app_state.active_shell and !app_state.g_chat_active and shell.hwnd != null)');
-  assert.ok(gate >= 0, 'showing the console stays limited to the active tab');
+  const gate = ready.indexOf('if (idx == app_state.active_shell and !app_state.g_chat_active and shell.hwnd != null and !@import("sidebar.zig").isTabHidden(@intCast(idx)))');
+  assert.ok(gate >= 0, 'showing the console stays limited to the active tab in the visible workspace');
   assert.ok(ready.indexOf('if (shell.hwnd) |hwnd| mp_terminal_window_report(hwnd);', gate) > gate, 'a ready shell reports its size even when another tab or the chat view is on screen');
 
   assert.match(main, /WM_APP_NATIVE_SIZE\) \{\s*@import\("native_session\.zig"\)\.reportSize/, 'the frame forwards the size report to the native session');

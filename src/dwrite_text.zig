@@ -766,7 +766,11 @@ test "IGSH-1089 color emoji preserve source and GDI advances with chromatic pixe
         std.mem.writeInt(u32, bmp[10..14], 54, .little);
         @memcpy(bmp[14..54], std.mem.asBytes(&info.header));
         @memcpy(bmp[54..], pixels);
-        const file = w.CreateFileW(if (color) L("emoji-after.bmp") else L("emoji-before.bmp"), 0x40000000, 0, null, 2, 0x80, null);
+        var path_buf: [64]u8 = undefined;
+        const path = try std.fmt.bufPrint(&path_buf, "emoji-{s}-{d}.bmp", .{ if (color) "after" else "before", w.GetCurrentProcessId() });
+        const wide_path = try std.unicode.utf8ToUtf16LeAllocZ(std.testing.allocator, path);
+        defer std.testing.allocator.free(wide_path);
+        const file = w.CreateFileW(wide_path, 0x40000000, 0, null, 2, 0x80, null);
         try std.testing.expect(file != null and file != @as(w.HANDLE, @ptrFromInt(std.math.maxInt(usize))));
         defer _ = w.CloseHandle(file);
         var written: u32 = 0;

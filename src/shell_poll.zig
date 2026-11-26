@@ -1899,7 +1899,7 @@ pub fn pollShellNames() void {
             } else {
                 app_state.shells[i].adopt_streak = 0;
             }
-        } else if (app_state.shells[i].kind != .tmux and det_pid != 0) {
+        } else if (app_state.shells[i].kind != .tmux and app_state.shells[i].tmux_session_len == 0 and det_pid != 0) {
             var detected: [64]u8 = undefined;
             var detected_len: u32 = 0;
             if (isTmuxRunningInConsole(det_pid) and extractTmuxSessionFromStatus(det_pid, &detected, &detected_len)) {

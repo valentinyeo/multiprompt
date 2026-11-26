@@ -2092,6 +2092,7 @@ test "IGSH-1266 a tab that wants chat but has no chat window still shows its con
 pub fn shellConsoleShouldBeVisible(idx: u32) bool {
     if (!@import("room_frontend.zig").privateActionsAllowed()) return false;
     if (idx >= app_state.shell_count or app_state.shells[idx].hwnd == null or app_state.shells[idx].disconnected) return false;
+    if (@import("sidebar.zig").isTabHidden(idx)) return false;
     const tab_wants_chat = chatViewShouldShowForTab(app_state.shells[idx].chat_view_on);
     return shellConsoleVisibilityAllowed(
         idx == app_state.active_shell,
