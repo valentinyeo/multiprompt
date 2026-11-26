@@ -456,41 +456,61 @@ def session_catalog(send, listing):
     return sorted(rows.values(), key=lambda row: ((row.get("name") or row["tmux"]).casefold(), row["tmux"]))
 
 
-def pick_target(send, listing, target, workspace=None):
+def describe_rows(rows):
+    return "; ".join((row.get("name") or row["tmux"]) + " {" + row["tmux"] + "} in " + (row.get("workspace") or "no workspace")
+                     for row in rows)
+
+
+def pick_row(send, rows, target):
     wanted = target.strip()
     mention = send.MENTION.match(wanted)
     if mention:
         wanted = mention.group(2)
-        for row in session_catalog(send, listing):
+        for row in rows:
             if row["tmux"].casefold() == wanted.casefold():
                 return row
         raise ValueError("no chat in terminal session " + wanted)
     key = send.squash(wanted.lstrip("@"))
     if not key:
         raise ValueError("empty chat name")
-    rows = session_catalog(send, listing)
     exact = [row for row in rows if send.squash(row.get("name") or "") == key]
     if len(exact) == 1:
         return exact[0]
     if len(exact) > 1:
-        if workspace:
-            scoped = [row for row in exact if (row.get("workspace") or "") == workspace]
-            if len(scoped) == 1:
-                return scoped[0]
-        raise ValueError("more than one chat is named " + repr(target) + "; pass the {session} form")
+        raise ValueError("more than one chat is named " + repr(target) + ": " + describe_rows(exact) + "; pass the {session} form")
     prefixed = [row for row in rows if send.squash(row.get("name") or "").startswith(key)]
     if len(prefixed) == 1:
         return prefixed[0]
     if len(prefixed) > 1:
-        if workspace:
-            scoped = [row for row in prefixed if (row.get("workspace") or "") == workspace]
-            if len(scoped) == 1:
-                return scoped[0]
-        raise ValueError(repr(target) + " matches more than one chat; type more of the name")
+        raise ValueError(repr(target) + " matches more than one chat: " + describe_rows(prefixed) + "; type more of the name")
     for row in rows:
         if row["tmux"].casefold() == key:
             return row
     raise ValueError("no chat named " + repr(target) + "; run mp-sessions list")
+
+
+def pick_target(send, listing, target):
+    return pick_row(send, session_catalog(send, listing), target)
+
+
+def workspace_named_target(send, peers, workspace, text):
+    key = send.squash(text)
+    matches = []
+    for row in peers:
+        name = send.squash(row.get("name") or "")
+        if name and (key == name or key.startswith(name + " ")):
+            matches.append((name, row))
+    if not matches:
+        return None, text
+    longest = max(matches, key=lambda match: len(match[0]))
+    best = [row for name, row in matches if len(name) == len(longest[0])]
+    if len(best) > 1:
+        raise ValueError("more than one chat in workspace " + repr(workspace) + " is named " +
+                         repr(best[0].get("name")) + ": " + describe_rows(best) + "; pass --to with the {session} form")
+    body = " ".join(text.split()[len(longest[0].split()):])
+    if not body:
+        raise ValueError("the message is only the chat name " + repr(best[0].get("name")) + "; add the text to send")
+    return best[0], body
 
 
 def find_existing(send, listing, slot, display, folder):
@@ -721,22 +741,35 @@ def cmd_whoami(args):
 
 def parse_send(argv):
     workspace = None
+    to = None
+    every = False
     rest = list(argv)
-    if "--workspace" in rest:
-        index = rest.index("--workspace")
-        if index + 1 >= len(rest):
-            raise ValueError("send --workspace needs a workspace name or mine")
-        workspace = rest[index + 1].strip()
-        if not workspace:
-            raise ValueError("send --workspace needs a workspace name or mine")
+    for flag in ("--workspace", "--to"):
+        if flag not in rest:
+            continue
+        index = rest.index(flag)
+        value = rest[index + 1].strip() if index + 1 < len(rest) else ""
+        if not value:
+            raise ValueError("send " + flag + (" needs a workspace name or mine" if flag == "--workspace" else " needs a chat name or a {session} form"))
         del rest[index:index + 2]
-    if workspace is not None:
+        if flag == "--workspace":
+            workspace = value
+        else:
+            to = value
+    if "--all" in rest:
+        del rest[rest.index("--all")]
+        every = True
+    if every and workspace is None:
+        raise ValueError("send --all needs --workspace")
+    if every and to is not None:
+        raise ValueError("send takes --to or --all, not both")
+    if workspace is not None or to is not None:
         if not rest:
             raise ValueError("send needs message text")
-        return argparse.Namespace(workspace=workspace, name=None, text=" ".join(rest))
+        return argparse.Namespace(workspace=workspace, name=to, text=" ".join(rest), every=every)
     if len(rest) < 2:
-        raise ValueError("send needs NAME and message text, or send --workspace mine TEXT")
-    return argparse.Namespace(workspace=None, name=rest[0], text=" ".join(rest[1:]))
+        raise ValueError("send needs NAME and message text, or send --workspace mine --all TEXT")
+    return argparse.Namespace(workspace=None, name=rest[0], text=" ".join(rest[1:]), every=False)
 
 
 def cmd_send(args):
@@ -748,27 +781,35 @@ def cmd_send(args):
     rows = session_catalog(send, listing)
     caller, mine = caller_mark(send, listing, rows)
     results = []
-    if args.workspace is not None:
+    fanout = False
+    if args.workspace is None:
+        target = pick_target(send, listing, args.name)
+        if caller and caller == target["tmux"]:
+            raise ValueError("that is this chat; pick another chat")
+        results.append(session_message(send, target, text))
+    else:
         if args.workspace == "mine":
             if not caller or not mine:
                 raise ValueError("cannot tell which workspace is yours; run from inside a chat on the desktop")
             target_workspace = mine
         else:
             target_workspace = args.workspace
-        targets = [row for row in filter_workspace(rows, target_workspace) if row["tmux"] != caller and row.get("running")]
-        if not targets:
+        peers = [row for row in filter_workspace(rows, target_workspace) if row["tmux"] != caller and row.get("running")]
+        if not peers:
             raise ValueError("no other running chats in workspace " + repr(target_workspace))
-        for target in targets:
-            results.append(session_message(send, target, text))
-    else:
-        target = pick_target(send, listing, args.name, workspace=mine)
-        if caller and caller == target["tmux"]:
-            raise ValueError("that is this chat; pick another chat")
-        results.append(session_message(send, target, text))
-    if args.workspace is not None:
-        print(json.dumps(results, separators=(",", ":")))
-    else:
-        print(json.dumps(results[0], separators=(",", ":")))
+        if args.name is not None:
+            results.append(session_message(send, pick_row(send, peers, args.name), text))
+        elif args.every:
+            fanout = True
+            results.extend(session_message(send, row, text) for row in peers)
+        else:
+            target, body = workspace_named_target(send, peers, target_workspace, text)
+            if target is None:
+                fanout = True
+                results.extend(session_message(send, row, text) for row in peers)
+            else:
+                results.append(session_message(send, target, body))
+    print(json.dumps(results if fanout else results[0], separators=(",", ":")))
     failed = [row for row in results if row.get("state") in ("failed", "cancelled")]
     return 3 if failed else 0
 
@@ -1157,6 +1198,8 @@ def parse(argv):
     identity.add_argument("--json", action="store_true")
     sending = commands.add_parser("send", help="send one message to a chat by app name")
     sending.add_argument("--workspace", default=None)
+    sending.add_argument("--to", default=None)
+    sending.add_argument("--all", action="store_true", dest="every")
     sending.add_argument("name", nargs="?")
     sending.add_argument("text", nargs=argparse.REMAINDER)
     begin = commands.add_parser("start", help="start or reuse a top-level chat")

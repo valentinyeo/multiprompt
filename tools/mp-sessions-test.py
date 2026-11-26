@@ -559,6 +559,100 @@ class MpSessionsTest(unittest.TestCase):
         with sqlite3.connect(store) as db:
             return db.execute("SELECT id, provider, sid, text, origin FROM shared_messages ORDER BY position").fetchall()
 
+    def store_exists(self):
+        return (self.home / ".local/state/multiprompt/shared-messages/store.sqlite3").exists()
+
+    def synced_chats(self, chats):
+        layout = self.home / ".local/share/multiprompt/layout.json"
+        layout.parent.mkdir(parents=True, exist_ok=True)
+        layout.write_text(json.dumps(dict(tabs=[
+            dict(name=chat["name"], workspace=chat["workspace"], tmux_session=chat["tmux"]) for chat in chats])),
+            encoding="utf-8")
+        names = {chat["tmux"]: dict(name=chat["name"], workspace=chat["workspace"]) for chat in chats}
+        (self.home / ".local/state/multiprompt/chat-names.json").write_text(json.dumps(names), encoding="utf-8")
+        self.host.mkdir(parents=True, exist_ok=True)
+        for chat in chats:
+            key = hashlib.sha256(("claude:" + chat["sid"]).encode()).hexdigest()[:32]
+            (self.host / (key + ".config.json")).write_text(json.dumps(dict(
+                cwd=str(self.work), enabled=True, provider="claude", sid=chat["sid"], tmux=chat["tmux"],
+                spawn_display=chat["name"])), encoding="utf-8")
+            (self.host / (key + ".state.json")).write_text(json.dumps(dict(
+                sid=chat["sid"], provider="claude", pid=os.getpid(), tmux=chat["tmux"])), encoding="utf-8")
+        return dict(MP_SESSIONS_TEST_LIST=json.dumps(dict(ok=False, error="bridge_offline")),
+                    MULTIPROMPT_READER_SOURCE=str(READER))
+
+    def test_MUBO_556_a_send_by_chat_id_reaches_only_that_chat(self):
+        fixture = self.synced_chats([
+            dict(name="HT Bugs", tmux="live-bugs", sid="11111111-1111-4111-8111-111111111111", workspace="Studio"),
+            dict(name="HT Verification", tmux="live-verify", sid="22222222-2222-4222-8222-222222222222", workspace="Studio"),
+        ])
+        for target, text in (("live-bugs", "first note"), ("@HT Bugs{live-bugs}", "second note")):
+            with self.subTest(target=target):
+                done = self.run_sessions("send", target, text, **fixture)
+                self.assertIn(done.returncode, (0, 3), done.stderr)
+                self.assertEqual(json.loads(done.stdout)["tmux"], "live-bugs")
+        self.assertEqual({row[2] for row in self.message_rows()}, {"11111111-1111-4111-8111-111111111111"})
+
+    def test_MUBO_556_a_shared_name_is_refused_with_every_match(self):
+        fixture = self.synced_chats([
+            dict(name="HT Bugs", tmux="live-bugs", sid="11111111-1111-4111-8111-111111111111", workspace="Studio"),
+            dict(name="HT Bugs", tmux="live-bugs-old", sid="22222222-2222-4222-8222-222222222222", workspace="Lab"),
+        ])
+        done = self.run_sessions("send", "HT Bugs", "hand over the board", **fixture)
+        self.assertEqual(done.returncode, 2, done.stderr)
+        self.assertEqual(done.stdout, "")
+        for listed in ("HT Bugs", "live-bugs", "live-bugs-old", "Studio", "Lab"):
+            self.assertIn(listed, done.stderr)
+        self.assertFalse(self.store_exists())
+
+    def test_MUBO_556_a_shared_name_is_refused_even_when_one_match_shares_the_callers_workspace(self):
+        fixture = self.synced_chats([
+            dict(name="Studio Lead", tmux="live-caller", sid="99999999-9999-4999-8999-999999999999", workspace="Studio"),
+            dict(name="HT Bugs", tmux="live-bugs", sid="11111111-1111-4111-8111-111111111111", workspace="Studio"),
+            dict(name="HT Bugs", tmux="live-bugs-old", sid="22222222-2222-4222-8222-222222222222", workspace="Lab"),
+        ])
+        done = self.run_sessions("send", "HT Bugs", "hand over the board", MULTIPROMPT_TAB="live-caller", **fixture)
+        self.assertEqual(done.returncode, 2, done.stderr)
+        self.assertEqual(done.stdout, "")
+        for listed in ("live-bugs", "live-bugs-old", "Studio", "Lab"):
+            self.assertIn(listed, done.stderr)
+        self.assertFalse(self.store_exists())
+
+    def test_MUBO_556_a_workspace_send_naming_a_chat_reaches_only_that_chat(self):
+        fixture = self.synced_chats([
+            dict(name="HT Product Lead", tmux="live-lead", sid="99999999-9999-4999-8999-999999999999", workspace="HT Product"),
+            dict(name="HT Bugs", tmux="live-bugs", sid="11111111-1111-4111-8111-111111111111", workspace="HT Product"),
+            dict(name="HT Verification", tmux="live-verify", sid="22222222-2222-4222-8222-222222222222", workspace="HT Product"),
+        ])
+        done = self.run_sessions("send", "--workspace", "HT Product", "HT Bugs", "hand over the board", **fixture)
+        self.assertIn(done.returncode, (0, 3), done.stderr)
+        payload = json.loads(done.stdout)
+        self.assertIsInstance(payload, dict, done.stdout)
+        self.assertEqual(payload["tmux"], "live-bugs")
+        self.assertEqual([row[2] for row in self.message_rows()], ["11111111-1111-4111-8111-111111111111"])
+
+    def test_MUBO_556_a_workspace_send_with_all_still_reaches_every_chat(self):
+        fixture = self.synced_chats([
+            dict(name="HT Bugs", tmux="live-bugs", sid="11111111-1111-4111-8111-111111111111", workspace="HT Product"),
+            dict(name="HT Verification", tmux="live-verify", sid="22222222-2222-4222-8222-222222222222", workspace="HT Product"),
+        ])
+        done = self.run_sessions("send", "--workspace", "HT Product", "--all", "board note", **fixture)
+        self.assertIn(done.returncode, (0, 3), done.stderr)
+        payload = json.loads(done.stdout)
+        self.assertIsInstance(payload, list, done.stdout)
+        self.assertEqual({row["tmux"] for row in payload}, {"live-bugs", "live-verify"})
+
+    def test_MUBO_556_a_workspace_send_with_text_only_still_reaches_every_chat(self):
+        fixture = self.synced_chats([
+            dict(name="HT Bugs", tmux="live-bugs", sid="11111111-1111-4111-8111-111111111111", workspace="HT Product"),
+            dict(name="HT Verification", tmux="live-verify", sid="22222222-2222-4222-8222-222222222222", workspace="HT Product"),
+        ])
+        done = self.run_sessions("send", "--workspace", "HT Product", "planning starts at noon", **fixture)
+        self.assertIn(done.returncode, (0, 3), done.stderr)
+        payload = json.loads(done.stdout)
+        self.assertIsInstance(payload, list, done.stdout)
+        self.assertEqual({row["tmux"] for row in payload}, {"live-bugs", "live-verify"})
+
     def test_MUBO_194_hosted_chat_lists_workspace_mine_from_synced_chat_names_when_zsb_offline(self):
         fixture = json.loads((MUBO_194_FIXTURES / "chat-names.json").read_text(encoding="utf-8"))
         self.seed_hosted_fixture(fixture)

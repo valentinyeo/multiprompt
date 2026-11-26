@@ -116,7 +116,7 @@ class MpSendTest(unittest.TestCase):
         self.assertEqual(chats[tmux]["state"], "stopped")
         self.assertEqual(chats[tmux]["name"], "Paused Lead")
 
-    def hosted_fixture(self, tmux, sid, name, pid, physical=()):
+    def hosted_fixture(self, tmux, sid, name, pid, physical=(), workspace=None):
         host = self.home / ".local/state/multiprompt/agent-host"
         host.mkdir(parents=True, exist_ok=True)
         key = "k" + str(len(list(host.glob("*.config.json"))))
@@ -124,7 +124,10 @@ class MpSendTest(unittest.TestCase):
         (host / (key + ".state.json")).write_text(json.dumps(dict(sid=sid, pid=pid, provider="claude", started=1.0)))
         names = self.home / ".local/state/multiprompt/chat-names.json"
         known = json.loads(names.read_text()) if names.is_file() else {}
-        known[tmux] = dict(name=name, at=1.0)
+        entry = dict(name=name, at=1.0)
+        if workspace is not None:
+            entry["workspace"] = workspace
+        known[tmux] = entry
         names.write_text(json.dumps(known))
         bin_dir = self.home / "bin"
         bin_dir.mkdir(exist_ok=True)
@@ -133,6 +136,27 @@ class MpSendTest(unittest.TestCase):
                            "; exit 0; fi\nexit 1\n")
         tmux_sh.chmod(0o755)
         return dict(HOME=str(self.home), PATH=str(bin_dir) + os.pathsep + os.environ.get("PATH", ""))
+
+    def test_MUBO_556_a_send_by_chat_id_reaches_only_that_chat(self):
+        self.hosted_fixture("live-bugs", SID, "HT Bugs", os.getpid(), workspace="Studio")
+        self.hosted_fixture("live-verify", "22222222-2222-4222-8222-222222222222", "HT Verification", os.getpid(),
+                            workspace="Studio")
+        for target in ("live-bugs", "@HT Bugs{live-bugs}"):
+            with self.subTest(target=target):
+                done = self.run_send("--to", target, "note " + target, MULTIPROMPT_TAB="live-verify")
+                self.assertIn(done.returncode, (0, 3), done.stderr)
+        self.assertEqual([row[2] for row in self.rows()], [SID, SID])
+
+    def test_MUBO_556_a_shared_name_is_refused_with_every_match(self):
+        self.hosted_fixture("live-bugs", SID, "HT Bugs", os.getpid(), workspace="Studio")
+        self.hosted_fixture("live-bugs-old", "22222222-2222-4222-8222-222222222222", "HT Bugs", os.getpid(),
+                            workspace="Lab")
+        done = self.run_send("--to", "HT Bugs", "hand over the board")
+        self.assertEqual(done.returncode, 2, done.stderr)
+        self.assertEqual(done.stdout, "")
+        for listed in ("HT Bugs", "live-bugs", "live-bugs-old", "Studio", "Lab"):
+            self.assertIn(listed, done.stderr)
+        self.assertFalse(self.store().exists())
 
     def test_SOFT_3093_a_hosted_chat_without_a_terminal_is_listed(self):
         module = load_mp_send()
