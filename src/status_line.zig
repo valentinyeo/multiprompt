@@ -4,6 +4,8 @@ pub fn providerShortLabel(provider: []const u8) []const u8 {
     if (std.mem.eql(u8, provider, "claude")) return "CL";
     if (std.mem.eql(u8, provider, "codex")) return "CX";
     if (std.mem.eql(u8, provider, "kimi")) return "KM";
+    if (std.mem.eql(u8, provider, "antigravity") or std.mem.eql(u8, provider, "google")) return "AG";
+    if (std.mem.eql(u8, provider, "pi")) return "PI";
     return "AI";
 }
 
@@ -44,7 +46,19 @@ test "status line provider labels are the short Claude and Codex names" {
     try std.testing.expectEqualStrings("CL", providerShortLabel("claude"));
     try std.testing.expectEqualStrings("CX", providerShortLabel("codex"));
     try std.testing.expectEqualStrings("KM", providerShortLabel("kimi"));
+    try std.testing.expectEqualStrings("AG", providerShortLabel("antigravity"));
+    try std.testing.expectEqualStrings("AG", providerShortLabel("google"));
+    try std.testing.expectEqualStrings("PI", providerShortLabel("pi"));
     try std.testing.expectEqualStrings("AI", providerShortLabel("unknown"));
+}
+
+test "MUBO-596 Antigravity and Pi pools keep distinct short labels" {
+    var buf: [16]u8 = undefined;
+    try std.testing.expectEqualStrings("AG", poolShortLabel(&buf, "antigravity", 1, 1));
+    try std.testing.expectEqualStrings("AG1", poolShortLabel(&buf, "antigravity", 1, 2));
+    try std.testing.expectEqualStrings("AG2", poolShortLabel(&buf, "google", 2, 2));
+    try std.testing.expectEqualStrings("PI", poolShortLabel(&buf, "pi", 1, 1));
+    try std.testing.expectEqualStrings("PI1", poolShortLabel(&buf, "pi", 1, 3));
 }
 
 test "status line week segments round to whole percent" {
