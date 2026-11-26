@@ -69,7 +69,7 @@ function Snapshot([string]$Name) {
 }
 function Send-Text([string]$Text, [switch]$Room) {
     if ($Text -ceq '@Alpha FAIL534') {
-        $targets = if ($script:retryEveryone) { @('alpha', 'bravo') } else { @('alpha') }
+        $targets = @(if ($script:retryEveryone) { 'alpha', 'bravo' } else { 'alpha' })
         $script:events += @{ type = 'human'; id = 'retry'; seq = 7; text = $Text; recipients = $targets }
         $script:events += @{ type = 'agent_reply'; id = 'recovered'; seq = 8; text = 'Alpha says FAIL534'; member_id = 'alpha'; parent_event_id = 'retry' }
         $script:inputs += @{ marker = 'FAIL534'; sid = 'sid-alpha' }
