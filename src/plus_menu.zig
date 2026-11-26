@@ -211,8 +211,34 @@ test "MUBO-582 claude and codex menus keep their own rows" {
     var codex: State = .{};
     markCodex(&codex, .{ .model = .sol, .effort = .high });
     try std.testing.expect(codex.active[@intFromEnum(Item.model_sol)]);
-    try std.testing.expect(!codex.shown[@intFromEnum(Item.effort_low)] and !codex.shown[@intFromEnum(Item.effort_xhigh)]);
+    try std.testing.expect(codex.shown[@intFromEnum(Item.effort_low)] and codex.shown[@intFromEnum(Item.effort_medium)] and codex.shown[@intFromEnum(Item.effort_high)]);
+    try std.testing.expect(!codex.shown[@intFromEnum(Item.effort_xhigh)]);
     for (antigravity_models) |item| try std.testing.expect(!codex.shown[@intFromEnum(item)]);
+}
+
+test "MUBO-588 a codex chat ticks its effort and a pi chat offers only effort rows" {
+    var codex: State = .{};
+    markCodex(&codex, .{ .model = .terra, .effort = .medium });
+    try std.testing.expect(codex.active[@intFromEnum(Item.effort_medium)]);
+    try std.testing.expect(!codex.active[@intFromEnum(Item.effort_low)] and !codex.active[@intFromEnum(Item.effort_high)]);
+    var pi: State = .{};
+    pi.shown[@intFromEnum(Item.attach)] = true;
+    markPi(&pi, .{ .effort = .xhigh });
+    for (antigravity_efforts) |item| try std.testing.expect(pi.shown[@intFromEnum(item)]);
+    try std.testing.expect(pi.active[@intFromEnum(Item.effort_xhigh)]);
+    try std.testing.expect(!pi.active[@intFromEnum(Item.effort_high)]);
+    for (antigravity_models) |item| try std.testing.expect(!pi.shown[@intFromEnum(item)]);
+    for ([_]Item{ .model_opus, .model_sol }) |item| try std.testing.expect(!pi.shown[@intFromEnum(item)]);
+    for ([_]i32{ 360, 480, 640, 900 }) |height| {
+        const bounds = RECT{ .left = 0, .top = 0, .right = 700, .bottom = height };
+        const anchor = RECT{ .left = 20, .top = height - 60, .right = 52, .bottom = height - 28 };
+        const g = geometry(bounds, anchor, &pi.shown);
+        try std.testing.expect(g.section_shown[4] and !g.section_shown[1] and !g.section_shown[2] and !g.section_shown[3]);
+        for (antigravity_efforts) |item| {
+            const cell = g.cells[@intFromEnum(item)];
+            try std.testing.expectEqual(@as(?Item, item), hitItem(&g, &pi.shown, @divTrunc(cell.left + cell.right, 2), @divTrunc(cell.top + cell.bottom, 2)));
+        }
+    }
 }
 
 fn shrink(rc: RECT, by: i32) RECT {
@@ -318,11 +344,22 @@ fn markAntigravity(state: *State, selected: chat_live.Settings) void {
 }
 
 fn markCodex(state: *State, selected: chat_live.Settings) void {
-    for ([_]Item{ .model_sol, .model_terra, .model_luna, .model_astra }) |item| state.shown[@intFromEnum(item)] = true;
+    for ([_]Item{ .model_sol, .model_terra, .model_luna, .model_astra, .effort_low, .effort_medium, .effort_high }) |item| state.shown[@intFromEnum(item)] = true;
     state.active[@intFromEnum(Item.model_sol)] = selected.model == .sol;
     state.active[@intFromEnum(Item.model_terra)] = selected.model == .terra;
     state.active[@intFromEnum(Item.model_luna)] = selected.model == .luna;
     state.active[@intFromEnum(Item.model_astra)] = selected.model == .astra;
+    state.active[@intFromEnum(Item.effort_low)] = selected.effort == .low;
+    state.active[@intFromEnum(Item.effort_medium)] = selected.effort == .medium;
+    state.active[@intFromEnum(Item.effort_high)] = selected.effort == .high;
+}
+
+fn markPi(state: *State, selected: chat_live.Settings) void {
+    for (antigravity_efforts) |item| state.shown[@intFromEnum(item)] = true;
+    state.active[@intFromEnum(Item.effort_low)] = selected.effort == .low;
+    state.active[@intFromEnum(Item.effort_medium)] = selected.effort == .medium;
+    state.active[@intFromEnum(Item.effort_high)] = selected.effort == .high;
+    state.active[@intFromEnum(Item.effort_xhigh)] = selected.effort == .xhigh;
 }
 
 fn markClaude(state: *State, selected: chat_live.Settings, status: []const u16) void {
@@ -350,6 +387,8 @@ fn snapshot(state: *State) void {
         markAntigravity(state, selected);
     } else if (session.chatSettingsEligible() and session.chatSettingsCodex()) {
         markCodex(state, selected);
+    } else if (session.chatSettingsEligible() and session.chatSettingsPi()) {
+        markPi(state, selected);
     } else if (session.chatSettingsEligible()) {
         const status: []const u16 = if (session.chatHistoryEntry(session.chatFileIdentity())) |entry| entry.history.status.model[0..entry.history.status.model_len] else &.{};
         markClaude(state, selected, status);

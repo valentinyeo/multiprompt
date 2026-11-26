@@ -671,7 +671,7 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
         @memcpy(json_buf[pos .. pos + cfp.len], cfp);
         pos += cfp.len;
     }
-    const mru_agents = [_][]const u8{ "claude", "codex", "antigravity" };
+    const mru_agents = [_][]const u8{ "claude", "codex", "antigravity", "pi" };
     for (mru_agents, 0..) |agent_name, a| for (0..app_state.g_chat_ac_mru_count[a]) |i| {
         const name = std.mem.sliceTo(&app_state.g_chat_ac_mru[a][i], 0);
         if (name.len == 0 or pos + name.len * 2 + 64 >= json_buf.len) continue;
@@ -1768,7 +1768,7 @@ pub fn restoreSession() u32 {
     app_state.clean_chat = json_reader.boolTrue(json, "clean_chat");
     const chat_font = json_reader.uint(json, "chat_font_pt");
     if (chat_font >= 10 and chat_font <= 28) app_state.g_chat_font_pt = @intCast(chat_font);
-    const mru_agents = [_][]const u8{ "claude", "codex", "antigravity" };
+    const mru_agents = [_][]const u8{ "claude", "codex", "antigravity", "pi" };
     for (mru_agents, 0..) |agent_name, a| {
         var i: usize = 20;
         while (i > 0) {
