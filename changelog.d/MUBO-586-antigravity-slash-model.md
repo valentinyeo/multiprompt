@@ -1,1 +1,1 @@
-Typing /model in an Antigravity chat now opens the model and effort choices instead of sending the text to the agent.
+Antigravity chats open the model picker when you ask to pick a model.
