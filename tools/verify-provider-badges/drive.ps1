@@ -160,7 +160,7 @@ function Check-Badge($Row, [string]$Hex, [int]$Tolerance, [string]$Name) {
                     $edge++
                     [void]$classRow.Append('E')
                 }
-                if ($class -ne 'outside' -and $pixel.R -ge 225 -and $pixel.G -ge 225 -and $pixel.B -ge 225) { $glyph++ }
+                if (($class -eq 'inside' -or $class -eq 'border') -and $pixel.R -ge 225 -and $pixel.G -ge 225 -and $pixel.B -ge 225) { $glyph++ }
                 [void]$colourRow.Append(('{0:X2}{1:X2}{2:X2}' -f $pixel.R, $pixel.G, $pixel.B))
             }
             $classes.Add($classRow.ToString())
