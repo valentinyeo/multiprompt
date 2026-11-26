@@ -48,9 +48,9 @@ var stamp: u64 = 0;
 var synced_stamp: u64 = 0;
 
 fn nowMs() u64 {
-    var stamp: [2]DWORD = undefined;
-    GetSystemTimeAsFileTime(&stamp);
-    const ticks = (@as(u64, stamp[1]) << 32) | stamp[0];
+    var filetime: [2]DWORD = undefined;
+    GetSystemTimeAsFileTime(&filetime);
+    const ticks = (@as(u64, filetime[1]) << 32) | filetime[0];
     return ticks / 10_000 -| @as(u64, @intCast(FILETIME_UNIX_EPOCH_DELTA_100NS / 10_000));
 }
 
@@ -195,7 +195,7 @@ fn subtitleColor() u32 {
 pub fn paintLine(hdc: HANDLE, scroll_y: i32, dots: bool) void {
     if (!visible) return;
     const source = line_rect orelse return;
-    var rc = RECT{ .left = source.left, .top = source.top - scroll_y, .right = source.right, .bottom = source.bottom - scroll_y };
+    const rc = RECT{ .left = source.left, .top = source.top - scroll_y, .right = source.right, .bottom = source.bottom - scroll_y };
     const old_font = SelectObject(hdc, metadataFont());
     defer _ = SelectObject(hdc, old_font);
     _ = SetBkMode(hdc, TRANSPARENT);
