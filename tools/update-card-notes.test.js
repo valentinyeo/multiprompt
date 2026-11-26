@@ -363,7 +363,6 @@ test('IGSH-1118 native card wraps long real notes, scrolls internally, and rejec
   const { spawnSync } = require('node:child_process');
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'wrapped-card-'));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
-  const fragment = 'Update notes wrap in full, with scrolling for longer lists.';
   const api = async endpoint => {
     const response = await fetch(`https://api.github.com/repos/valentinyeo/multiprompt/${endpoint}`);
     assert.equal(response.status, 200);
@@ -382,15 +381,12 @@ test('IGSH-1118 native card wraps long real notes, scrolls internally, and rejec
   const notes = path.join(directory, 'notes.json');
   await download(latest, 'release-notes.json', notes);
   const history = JSON.parse(fs.readFileSync(notes, 'utf8'));
-  const shipped = history.releases.find(release => release.changes.some(change => change.startsWith('IGSH-1118 ') || change === fragment));
-  let exe = path.join(root, 'zig-out/bin/multiprompt.exe');
-  if (shipped) {
-    const release = shipped.version === latest.tag_name.slice(1) ? latest : await api(`releases/tags/v${shipped.version}`);
-    exe = path.join(directory, 'released.exe');
-    await download(release, 'multiprompt-x64.exe', exe);
-    history.version = shipped.version;
-    fs.writeFileSync(notes, JSON.stringify(history));
-  }
+  const branch = path.join(root, 'zig-out/bin/multiprompt.exe');
+  assert.ok(fs.existsSync(branch), 'Branch build is missing');
+  const branchBytes = fs.readFileSync(branch);
+  const branchDigest = `sha256:${createHash('sha256').update(branchBytes).digest('hex')}`;
+  const branchVersion = (branchBytes.toString('latin1').match(/MPVERSION=(\d+\.\d+\.\d+);/) || [])[1];
+  assert.ok(branchVersion, 'Branch build carries no version marker');
   const old = await api('releases/tags/v0.28.983');
   const before = path.join(directory, 'before.exe');
   await download(old, 'multiprompt-x64.exe', before);
@@ -436,8 +432,16 @@ test('IGSH-1118 native card wraps long real notes, scrolls internally, and rejec
   assert.deepEqual(redReceipt.ids, []);
   assert.equal(redReceipt.seeAll, false);
   console.log('WRAPPED_CARD_RED v0.28.983 painted its own published notes without wrapped bounds');
-  const green = proof(exe, notes, 'green', 'new');
+  const green = proof(branch, notes, 'green', 'new');
   keepEvidence('green');
+  fs.writeFileSync(path.join(evidence, 'green', 'provenance.json'), JSON.stringify({
+    revision: process.env.GITHUB_SHA || 'local',
+    workflowRun: process.env.GITHUB_RUN_ID || '',
+    binary: branchDigest,
+    binaryVersion: branchVersion,
+    notes: `sha256:${createHash('sha256').update(fs.readFileSync(notes)).digest('hex')}`,
+    notesVersion: history.version,
+  }, null, 2));
   assert.equal(green.status, 0, green.stdout + green.stderr);
   assert.match(green.stdout, /WRAPPED_CARD_RECEIPT=/);
   assert.match(green.stdout, /WRAPPED_CARD_IMAGE=wrapped-normal:/);
@@ -446,7 +450,23 @@ test('IGSH-1118 native card wraps long real notes, scrolls internally, and rejec
   assert.match(green.stdout, /WRAPPED_CARD_IMAGE=wrapped-collapsed:/);
   const greenReceipt = JSON.parse(fs.readFileSync(path.join(directory, 'green', 'wrapped-card.json'), 'utf8'));
   assert.equal(greenReceipt.contract, 'new');
-  assert.equal(greenReceipt.painted.length, 3);
+  assert.equal(greenReceipt.sha256, branchDigest.replace('sha256:', ''));
+  assert.equal(greenReceipt.binaryVersion, branchVersion);
+  assert.equal(greenReceipt.version, history.version);
+  const strip = change => change.trim().replace(/^(?:IGSH|MUBO)-\d+ /, '');
+  const paintedLines = greenReceipt.changes.map(strip);
+  assert.equal(greenReceipt.painted.length, 3, 'The branch card did not paint three real notes');
+  for (const [index, line] of greenReceipt.painted.entries()) {
+    assert.ok(paintedLines.includes(line), `Branch card painted a line its notes never published: ${line}`);
+    assert.ok(/^(?:IGSH|MUBO)-\d+$/.test(greenReceipt.ids[index]), `Branch card gave note ${index} no ticket id: ${greenReceipt.ids[index]}`);
+    assert.ok(greenReceipt.changes.some(change => change.trim() === `${greenReceipt.ids[index]} ${line}`), `Branch card paired note ${index} with an id its notes never published: ${greenReceipt.ids[index]}`);
+    assert.ok(line.length >= 80, `Branch card painted a short note, so the proof did not exercise wrapping: ${line}`);
+  }
+  assert.equal(greenReceipt.noteHeights.length, 3);
+  for (const height of greenReceipt.noteHeights) assert.ok(height > 24, `Long real note did not wrap: ${height}`);
+  assert.ok(greenReceipt.scrolled.content > greenReceipt.scrolled.bottom - greenReceipt.scrolled.top, 'The wrapped notes fit without scrolling, so the proof exercised no overflow');
+  assert.ok(greenReceipt.scrolled.scroll > 0, 'The wrapped notes did not scroll');
+  assert.deepEqual(greenReceipt.restartAfter, greenReceipt.restartBefore, 'Scrolling moved Restart');
   assert.equal(greenReceipt.scrollVerified, true);
   console.log(green.stdout);
 });

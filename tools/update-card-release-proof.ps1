@@ -6,7 +6,9 @@ New-Item -ItemType Directory -Force $Evidence | Out-Null
 $document = Get-Content $Notes -Raw | ConvertFrom-Json
 $changes = @($document.releases | Where-Object { $_.version -eq $document.version } | ForEach-Object { $_.changes })
 if ($Wrapped) {
-    $changes = @($document.releases | ForEach-Object { $_.changes } | Sort-Object { $_.Length } -Descending | Select-Object -First 16)
+    $candidates = @($document.releases | ForEach-Object { $_.changes })
+    if ($Contract -eq 'new') { $candidates = @($candidates | Where-Object { $_ -match '^(?:IGSH|MUBO)-\d+ \S' }) }
+    $changes = @($candidates | Sort-Object -Unique | Sort-Object { $_.Length } -Descending | Select-Object -First 40)
 }
 if ($changes.Count -eq 0) { throw 'Released card proof needs real product notes' }
 $binaryVersion = [regex]::Match([Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Exe)), 'MPVERSION=(\d+\.\d+\.\d+);')
@@ -32,10 +34,12 @@ $mutexName = 'Local\MultipromptUpdate-' + ([BitConverter]::ToString([Security.Cr
 $mutex = New-Object Threading.Mutex($false, $mutexName)
 $null = $mutex.WaitOne()
 $process = $null
+$log = Join-Path $env:APPDATA 'ZigShell/debug.log'
+Add-Type -AssemblyName System.Drawing
+Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class ReleaseCardProof { [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int command); [DllImport("user32.dll")] public static extern bool IsZoomed(IntPtr h); [StructLayout(LayoutKind.Sequential)] public struct Point { public int X,Y; } [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int w, int height, uint flags); [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h, ref Point p); [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr wp, IntPtr lp); [StructLayout(LayoutKind.Sequential)] public struct Rect { public int L,T,R,B; } [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out Rect r); [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags); }'
 try {
     $process = Start-Process $cardExe -ArgumentList "--update-ready $eventName" -PassThru
     if (-not $event.WaitOne(15000)) { throw 'Released app did not report readiness' }
-    $log = Join-Path $env:APPDATA 'ZigShell/debug.log'
     $deadline = [DateTime]::UtcNow.AddSeconds(30)
     do {
         $text = if (Test-Path $log) { Get-Content $log -Raw } else { '' }
@@ -43,8 +47,6 @@ try {
         if ($process.HasExited -or [DateTime]::UtcNow -gt $deadline) { throw 'Released app did not paint the card' }
         Start-Sleep -Milliseconds 100
     } while ($true)
-    Add-Type -AssemblyName System.Drawing
-    Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class ReleaseCardProof { [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int command); [DllImport("user32.dll")] public static extern bool IsZoomed(IntPtr h); [StructLayout(LayoutKind.Sequential)] public struct Point { public int X,Y; } [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int w, int height, uint flags); [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h, ref Point p); [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr wp, IntPtr lp); [StructLayout(LayoutKind.Sequential)] public struct Rect { public int L,T,R,B; } [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out Rect r); [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags); }'
     $process.Refresh()
     $rectangle = New-Object ReleaseCardProof+Rect
     if (-not [ReleaseCardProof]::GetWindowRect($process.MainWindowHandle, [ref]$rectangle)) { throw 'Released window unavailable' }
@@ -54,7 +56,6 @@ try {
     try { if (-not [ReleaseCardProof]::PrintWindow($process.MainWindowHandle, $dc, 2)) { throw 'Released screenshot failed' } } finally { $graphics.ReleaseHdc($dc); $graphics.Dispose() }
     $image = Join-Path $Evidence 'released-card.png'
     try { $bitmap.Save($image) } finally { $bitmap.Dispose() }
-    Copy-Item -LiteralPath $log -Destination (Join-Path $Evidence 'debug.log') -ErrorAction SilentlyContinue
     $published = @($changes)
     $plainLines = @($published | ForEach-Object { ($_ -replace '^(?:IGSH|MUBO)-\d+ ', '') })
     $publishedIds = @($published | ForEach-Object { [regex]::Match($_, '^((?:IGSH|MUBO)-\d+)').Groups[1].Value })
@@ -74,14 +75,23 @@ try {
     } else {
         if ($named.Count -eq 0) { throw 'New card painted no published change lines' }
         if ($named.Count -ne [Math]::Min(3, $published.Count)) { throw 'New card painted a different number of change lines than published' }
+        $matchedIds = @()
+        $cursor = 0
         for ($i = 0; $i -lt $named.Count; $i++) {
-            if ($named[$i] -cne $plainLines[$i]) { throw 'New card differs from the published change text' }
+            $at = $i
+            if ($Wrapped) {
+                $at = -1
+                for ($j = $cursor; $j -lt $plainLines.Count; $j++) { if ($plainLines[$j] -ceq $named[$i]) { $at = $j; break } }
+            }
+            if ($at -lt 0 -or $at -ge $plainLines.Count -or $plainLines[$at] -cne $named[$i]) { throw 'New card differs from the published change text' }
+            $cursor = $at + 1
             $id = [regex]::Match($text, '\[update\] card note id ' + $i + '=([^\r\n]*)')
-            if (-not $id.Success -or $id.Groups[1].Value -cne $publishedIds[$i]) { throw 'New card lost the published ticket id' }
+            if (-not $id.Success -or $id.Groups[1].Value -cne $publishedIds[$at]) { throw 'New card lost the published ticket id' }
+            $matchedIds += $publishedIds[$at]
         }
         if ($text -match '\[update\] card note \d+=.*(?:IGSH|MUBO)-\d+') { throw 'New card painted a ticket number into the change text' }
         if ($text -notmatch '\[update\] card see all=https://github\.com/valentinyeo/multiprompt/releases/tag/v') { throw 'New card has no See all destination' }
-        $paintedIds = $publishedIds
+        $paintedIds = @($matchedIds)
         $seeAll = $true
     }
     if ((Get-FileHash $cardExe -Algorithm SHA256).Hash.ToLowerInvariant() -ne $hash) { throw 'Released binary changed during proof' }
@@ -140,14 +150,27 @@ try {
         Wait-Card { -not [ReleaseCardProof]::IsZoomed($process.MainWindowHandle) } 'Card window did not restore before resizing'
         Resize-Card 1024 768
         $normal = Card-Bounds
-        $heights = [regex]::Matches($script:cardLog, '\[update\] note height \d+=(\d+)')
-        if ($heights.Count -lt 3 -or @($heights | Where-Object { [int]$_.Groups[1].Value -gt 24 }).Count -ne $heights.Count) { throw 'Long real notes did not wrap onto multiple lines' }
+        $noteHeights = @(foreach ($index in 0..2) {
+            $match = [regex]::Matches($script:cardLog, '\[update\] note height ' + $index + '=(\d+)')
+            if ($match.Count -eq 0) { throw 'Long real notes did not wrap onto multiple lines' }
+            [int]$match[$match.Count - 1].Groups[1].Value
+        })
+        if (@($noteHeights | Where-Object { $_ -le 24 }).Count -ne 0) { throw 'Long real notes did not wrap onto multiple lines' }
         Capture-Card 'wrapped-normal'
         Resize-Card 640 480
         Capture-Card 'wrapped-minimum'
+        $minimum = Card-Bounds
+        $restartMinimum = Card-Click 'restart button'
+        if ($minimum.top -lt 0 -or $restartMinimum.y -le $minimum.bottom) { throw 'Restart is not visible below the notes at the minimum size' }
+        $overflowHeight = 0
+        foreach ($candidate in @(400, 360, 320, 280, 240)) {
+            Resize-Card 640 $candidate
+            $fitted = Card-Bounds
+            if ($fitted.content -gt $fitted.bottom - $fitted.top) { $overflowHeight = $candidate; break }
+        }
+        if ($overflowHeight -eq 0) { throw 'Long real notes did not require scrolling' }
         $collapsed = Card-Bounds
         $restartBefore = Card-Click 'restart button'
-        if ($collapsed.content -le $collapsed.bottom - $collapsed.top) { throw 'Long real notes did not require scrolling' }
         $local = New-Object ReleaseCardProof+Point
         $local.X = [int](($collapsed.left + $collapsed.right) / 2)
         $local.Y = [int](($collapsed.top + $collapsed.bottom) / 2)
@@ -159,7 +182,7 @@ try {
         Wait-Card { $script:cardLog -match '\[update\] card remaining=' -and (Card-Bounds).scroll -gt 0 } 'Notes did not scroll inside their card'
         $scrolled = Card-Bounds
         $restartAfter = Card-Click 'restart button'
-        if ($restartBefore.x -ne $restartAfter.x -or $restartBefore.y -ne $restartAfter.y -or $restartAfter.y -le $scrolled.bottom -or $scrolled.top -lt 0 -or $restartAfter.y -ge 480) { throw 'Scrolling moved or hid Restart' }
+        if ($restartBefore.x -ne $restartAfter.x -or $restartBefore.y -ne $restartAfter.y -or $restartAfter.y -le $scrolled.bottom -or $scrolled.top -lt 0) { throw 'Scrolling moved or hid Restart' }
         Capture-Card 'wrapped-scrolled'
         for ($i = 0; $i -lt 20 -and (Card-Bounds).scroll -gt 0; $i++) {
             $null = [ReleaseCardProof]::PostMessage($process.MainWindowHandle, 0x20A, [IntPtr](120 -shl 16), $wheelPoint)
@@ -167,17 +190,31 @@ try {
         }
         Wait-Card { (Card-Bounds).scroll -eq 0 -and $script:cardLog -match '\[update\] card remaining=' } 'Notes did not return to their first line'
         Capture-Card 'wrapped-collapsed'
-        $wrappedReceipt = @{ contract = $Contract; binaryVersion = $binaryVersion; version = $document.version; sha256 = $hash; wrapped = $true; scrollVerified = $true; normal = $normal; collapsed = $collapsed; scrolled = $scrolled; restartBefore = $restartBefore; restartAfter = $restartAfter; changes = $published; painted = $named; simulatedOffer = '999.0.0'; success = $true }
+        $wrappedReceipt = @{ contract = $Contract; binaryVersion = $binaryVersion; version = $document.version; sha256 = $hash; wrapped = $true; scrollVerified = $true; noteHeights = $noteHeights; overflowWindow = ('640x' + $overflowHeight); normal = $normal; minimum = $minimum; collapsed = $collapsed; scrolled = $scrolled; restartBefore = $restartBefore; restartAfter = $restartAfter; changes = $published; painted = $named; ids = $paintedIds; seeAll = $seeAll; simulatedOffer = '999.0.0'; success = $true }
         $wrappedReceipt | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 (Join-Path $Evidence 'wrapped-card.json')
         Write-Output ('WRAPPED_CARD_RECEIPT=' + [Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $Evidence 'wrapped-card.json'))))
     }
     Write-Output ('RELEASE_CARD_RECEIPT=' + [Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $Evidence 'released-card.json'))))
     Write-Output ('RELEASE_CARD_PNG=' + [Convert]::ToBase64String([IO.File]::ReadAllBytes($image)))
 } finally {
+    if ($process -and -not (Test-Path (Join-Path $Evidence 'released-card.png'))) {
+        try {
+            $process.Refresh()
+            $shotRect = New-Object ReleaseCardProof+Rect
+            if ([ReleaseCardProof]::GetWindowRect($process.MainWindowHandle, [ref]$shotRect) -and $shotRect.R -gt $shotRect.L -and $shotRect.B -gt $shotRect.T) {
+                $shot = New-Object Drawing.Bitmap(($shotRect.R - $shotRect.L), ($shotRect.B - $shotRect.T))
+                $shotGraphics = [Drawing.Graphics]::FromImage($shot)
+                $shotDc = $shotGraphics.GetHdc()
+                try { $null = [ReleaseCardProof]::PrintWindow($process.MainWindowHandle, $shotDc, 2) } finally { $shotGraphics.ReleaseHdc($shotDc); $shotGraphics.Dispose() }
+                try { $shot.Save((Join-Path $Evidence 'released-card.png')) } finally { $shot.Dispose() }
+            }
+        } catch { $null = $_ }
+    }
     if ($process) {
         Get-CimInstance Win32_Process | Where-Object { $_.ParentProcessId -eq $process.Id -and $_.Name -ieq 'powershell.exe' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
         if (-not $process.HasExited) { $process.Kill(); $process.WaitForExit() }
     }
+    if ($Wrapped -and (Test-Path $log)) { Copy-Item -LiteralPath $log -Destination (Join-Path $Evidence 'debug.log') -Force -ErrorAction SilentlyContinue }
     if ($Wrapped -and (Test-Path $log)) { Get-Content $log | Select-Object -Last 80 | ForEach-Object { Write-Output ('WRAPPED_CARD_LOG=' + $_) } }
     $mutex.ReleaseMutex()
     $mutex.Dispose()
