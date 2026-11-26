@@ -16,7 +16,7 @@ from pathlib import Path
 TERMINAL_STATES = ("accepted", "started", "failed", "cancelled")
 HANDOFF_STATES = ("sent", "accepted", "started", "failed", "cancelled")
 HANDOFF_TIMEOUT = 15.0
-PROVIDERS = ("claude", "codex", "pi", "hax", "cursor")
+PROVIDERS = ("claude", "codex", "pi", "hax", "cursor", "antigravity")
 TARGET_PER_MINUTE = 6
 SENDER_PER_MINUTE = 12
 ANSWER_TAIL_BYTES = 4 * 1024 * 1024
@@ -461,9 +461,36 @@ def transcript_path(reader, chat):
     return None
 
 
+def host_history_answer(reader, chat):
+    provider, sid = chat["provider"], chat["sid"]
+    try:
+        state = reader.host_session_state(provider, sid)
+        if not state.get("display_history"):
+            return None
+        path = reader.host_paths(provider, sid)["history"]
+    except (AttributeError, KeyError, OSError, TypeError, ValueError):
+        return None
+    if not path.is_file():
+        return None
+    for raw in reversed(tail_lines(path)):
+        try:
+            entry = json.loads(raw)
+        except (ValueError, UnicodeError):
+            continue
+        row = entry.get("row") if isinstance(entry, dict) else None
+        if (isinstance(row, dict) and row.get("role") == "assistant" and
+                isinstance(row.get("text"), str) and row["text"].strip()):
+            return row["text"]
+    return None
+
+
 def last_answer(reader, chat):
     if chat["provider"] in ("hax", "cursor"):
         raise ValueError("reading answers is not available for " + chat["provider"] + " chats")
+    if chat["provider"] in getattr(reader, "HOST_HISTORY_OWNERS", ()):
+        answer = host_history_answer(reader, chat)
+        if answer is not None:
+            return answer
     path = transcript_path(reader, chat)
     if path is None:
         return None

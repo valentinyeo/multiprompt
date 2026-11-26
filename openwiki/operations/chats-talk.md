@@ -1,6 +1,6 @@
 # Chats talk to each other
 
-Agent sessions on the server, Claude, Codex, Pi, hax or Cursor, can list the live chats by the name shown in the desktop app, read a chat's last answer and put a message into another live chat. Every chat gets the same tool: `mp-send` has `list`, `read` and `--to`. Use it only when Valentin asks.
+Agent sessions on the server, Claude, Codex, Pi, hax, Cursor or Antigravity, can list the live chats by the name shown in the desktop app, read a chat's last answer and put a message into another live chat. Every chat gets the same tool: `mp-send` has `list`, `read` and `--to`. Use it only when Valentin asks.
 
 ## Install
 
@@ -69,7 +69,7 @@ This is an agent-only command. It needs no Ctrl+K entry, keyboard shortcut or sh
 mp-send read "Pi Helper"
 ```
 
-Prints the newest assistant answer of a Claude, Codex or Pi chat. Names match as for `--to`. A chat with no answer yet exits 3. hax and Cursor chats can be listed and messaged but not read.
+Prints the newest assistant answer of a Claude, Codex, Pi or Antigravity chat. Names match as for `--to`. A chat with no answer yet exits 3. hax and Cursor chats can be listed and messaged but not read.
 
 ## Send a message
 

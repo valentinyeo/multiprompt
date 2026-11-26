@@ -11,7 +11,7 @@ import sys
 import uuid
 from pathlib import Path
 
-PROVIDERS = ("claude", "codex", "pi", "cursor")
+PROVIDERS = ("claude", "codex", "pi", "cursor", "antigravity")
 
 
 def load_send(session_api=True):
