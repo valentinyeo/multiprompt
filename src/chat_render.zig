@@ -5836,6 +5836,7 @@ pub fn chatPaintTranscriptContent(mem_dc: HANDLE, w: i32, h: i32, paint: RECT) v
     chatPaintTopFade(mem_dc, w);
     chat_activity_view.paintPill(mem_dc, w, app_state.g_chat_top_pad);
     chatPaintScrollUi(&canvas, mem_dc, w, @max(1, h - app_state.g_chat_bottom_inset));
+    @import("chat_queue_view.zig").paint(mem_dc);
     @import("chat_find_ui.zig").paint(mem_dc, w);
 }
 
@@ -6362,8 +6363,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
         },
         @import("win32.zig").WM_DESTROY => {
             resetTranscriptBackbuffer();
-            return 0;
-        },
+            return 0; },
         WM_ERASEBKGND => return 1,
         WM_SIZE => {
             var client_rc: RECT = std.mem.zeroes(RECT);
@@ -6471,6 +6471,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
         },
         WM_LBUTTONDOWN => {
             if (app_state.g_chat_find_open and GET_Y(lp) < uiScaled(app_state.CHAT_FIND_TOP_H)) return 0;
+            if (@import("chat_queue_view.zig").click(GET_X(lp), GET_Y(lp))) return 0;
             _ = KillTimer(hwnd, selection_offer_timer);
             if (chatMessageActionAt(GET_X(lp), GET_Y(lp))) |action| {
                 const index = chat_hover_message orelse return 0;

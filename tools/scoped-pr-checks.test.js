@@ -75,7 +75,7 @@ test('the sign-in page check is service-filtered, bounded and Linux-only', () =>
 });
 
 test('heavy workflows run nightly and manually, not on pull requests', () => {
-  const allowed = new Set(['test.yml', 'gitleaks.yml', 'no-comments.yml', 'pr-verifier.yml', 'emergency-lane.yml', 'chat-delivery-formal.yml', 'chat-switch-ai-formal.yml', 'chat-auto-switch.yml', 'ci-repair-receipt.yml', 'verify-cli.yml', 'service-route-receipt.yml', 'signin-page.yml', 'mp-sessions-slots.yml', 'agent-feedback.yml', 'chat-text-formatting.yml']);
+  const allowed = new Set(['test.yml', 'gitleaks.yml', 'no-comments.yml', 'pr-verifier.yml', 'emergency-lane.yml', 'chat-delivery-formal.yml', 'chat-switch-ai-formal.yml', 'chat-auto-switch.yml', 'ci-repair-receipt.yml', 'verify-cli.yml', 'service-route-receipt.yml', 'signin-page.yml', 'mp-sessions-slots.yml', 'agent-feedback.yml', 'chat-queued-messages.yml', 'chat-text-formatting.yml']);
   for (const file of fs.readdirSync(path.join(root, '.github/workflows')).filter(file => file.endsWith('.yml'))) {
     const source = fs.readFileSync(path.join(root, '.github/workflows', file), 'utf8');
     if (/^  pull_request:/m.test(source)) assert.ok(allowed.has(file), file);
@@ -107,6 +107,19 @@ test('formal delivery PR checks stay bounded, source-filtered and Linux-only', (
   assert.match(review, /python3 token-ladder\/ci\/model_families\.py/, 'the excluded family is read from the pull request body');
   assert.match(review, /exclude-families: \$\{\{ steps\.author\.outputs\.families \}\}/, 'the comment review excludes the author model family');
   assert.doesNotMatch(workflow, /claude-code-action|CLAUDE_CODE_OAUTH_TOKEN/, 'the comment review keeps no direct AI tool');
+});
+
+test('the queued messages tray check is path-filtered, bounded and Linux-only', () => {
+  const workflow = fs.readFileSync(path.join(root, '.github/workflows/chat-queued-messages.yml'), 'utf8');
+  const paths = workflow.split('\n  pull_request:\n')[1].split('\n  workflow_dispatch:')[0];
+  for (const file of ['src/chat_queue.zig', 'src/chat_queue_view.zig', 'src/chat_composer.zig', 'tools/chat-history-reader-test.py']) assert.ok(paths.includes(`'${file}'`), file);
+  assert.match(paths, /paths:\n/);
+  const job = workflow.split('\n  queue-tray:\n')[1];
+  assert.match(job, /runs-on: ubuntu-latest/);
+  assert.match(job, /timeout-minutes: 10/);
+  assert.match(workflow, /zig test src\/chat_queue\.zig/);
+  assert.match(workflow, /python3 tools\/chat-history-reader-test\.py MUBO_594_QueuedMessageActionsTest/);
+  assert.doesNotMatch(workflow, /windows-latest|uses: .*verify\.yml/);
 });
 
 test('PR performance probes are nightly and do not block the cheap aggregate', () => {

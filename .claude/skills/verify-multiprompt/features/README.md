@@ -176,6 +176,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 The five baseline UI areas are sessions, workspace organization, Inbox, command palette and globally persisted appearance. Session open additionally covers local agent-bridge requests and saved background tabs, with observed failed SSH recorded as a boundary. Real remote/provider and authenticated browser paths still need the exact prerequisites in their owning operation recipe; the browser recovery journey deliberately has no extension attached.
 
 - [Live chat pane](live-chat-pane.md): run the pane selftest with a live chat identity and keep both chats' pages separate.
+- [Queued messages tray](chat-queued-messages.md): a Linux-proof map for the card above the message box, with Send now, Edit, Delete and the collapse chevron; it names the Windows journeys that must stay green.
 
 ### SSH reconnect maps
 
