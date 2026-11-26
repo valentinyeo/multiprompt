@@ -41,7 +41,8 @@ function chipSource() {
   assert.doesNotMatch(source, /win32|HANDLE/, 'the chip metrics no longer need the Windows drawing surface');
   assert.match(source, /^test "MUBO-593 inline code pills add horizontal padding that scales with the display"/m, 'the shipped chip padding test travels with the metrics');
   assert.match(source, /^test "MUBO-593 inline code sits on a tinted surface with its own calm monospace colour"/m, 'the shipped chip colour test travels with the metrics');
-  assert.match(source, /^pub fn chipColor\(light: bool\) u32$/m, 'the chip colour stays under test');
+  assert.match(source, /^pub fn chipColor\(light: bool\) u32 \{/m, 'the chip colour stays under test');
+  assert.match(source, /^pub fn textColor\(light: bool\) u32 \{/m, 'the chip text colour stays under test');
   return source;
 }
 
