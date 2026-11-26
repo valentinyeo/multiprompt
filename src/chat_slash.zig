@@ -36,6 +36,11 @@ pub fn decide(live: bool, text: []const u16, selected_skill: bool, interactive_h
     return if (live and result == .send and interactive_hint) .unavailable else result;
 }
 
+pub fn decideForAgent(live: bool, ai_agent: u8, text: []const u16, selected_skill: bool, interactive_hint: bool) Route {
+    if (ai_agent == 8) return .send;
+    return decide(live, text, selected_skill, interactive_hint);
+}
+
 fn equals(wide: []const u16, ascii: []const u8) bool {
     if (wide.len != ascii.len) return false;
     for (wide, ascii) |a, b| if (a != b) return false;
@@ -79,6 +84,11 @@ test "live slash commands route without changing terminal or custom messages" {
     try std.testing.expectEqual(Route.send, decide(true, w("/resume custom"), true, true));
     try std.testing.expectEqual(Route.unavailable, decide(true, w("/new-builtin"), false, true));
     try std.testing.expectEqual(Route.send, decide(false, w("/new-builtin"), false, true));
+    try std.testing.expectEqual(Route.send, decideForAgent(true, 8, w("/valentin-mode"), false, false));
+    try std.testing.expectEqual(Route.send, decideForAgent(true, 8, w("/poteto-mode"), false, false));
+    try std.testing.expectEqual(Route.send, decideForAgent(true, 8, w("/plan"), false, false));
+    try std.testing.expectEqual(Route.send, decideForAgent(true, 8, w("/plan outline the steps"), false, false));
+    try std.testing.expectEqual(Route.plan, decideForAgent(true, 1, w("/plan"), false, false));
 }
 
 test "mode requests serialize identity and supported mode" {

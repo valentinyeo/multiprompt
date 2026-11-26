@@ -1,6 +1,6 @@
 const std = @import("std");
 
-pub const Agent = enum { claude, codex, other };
+pub const Agent = enum { claude, codex, antigravity, other };
 pub const Mode = enum { slash, dollar, file };
 pub const Token = struct { mode: Mode, start: usize, end: usize };
 pub const Entry = struct { kind: u8, name: []const u8, hint: []const u8, desc: []const u8 };
@@ -265,12 +265,41 @@ test "SOFT-3086 mid-message slash completion inserts text without changing send 
     const token = tokenAtCaret(text, 8, .claude).?;
     const applied = applyAccept(text, token, wide[0..n], &output);
     try std.testing.expectEqualSlices(u16, w("why /review  ?"), output[0..applied.len]);
-    for ([_]Agent{ .claude, .codex, .other }) |agent| {
+    for ([_]Agent{ .claude, .codex, .antigravity, .other }) |agent| {
         for ([_][]const u16{ w("why /review ?"), w("why /review"), w(" /review"), w("why\n/review") }) |message| {
             try std.testing.expect(!endsInTriggerToken(message, agent));
         }
         try std.testing.expect(endsInTriggerToken(w("/review"), agent));
     }
+}
+
+test "antigravity slash triggers at start, mid-sentence, and inserts slash commands" {
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    const start_tok = tokenAtCaret(w("/val"), 4, .antigravity).?;
+    try std.testing.expectEqual(Mode.slash, start_tok.mode);
+    try std.testing.expectEqual(@as(usize, 0), start_tok.start);
+    try std.testing.expectEqual(@as(usize, 4), start_tok.end);
+    const mid_tok = tokenAtCaret(w("run /pot"), 8, .antigravity).?;
+    try std.testing.expectEqual(Mode.slash, mid_tok.mode);
+    try std.testing.expectEqual(@as(usize, 4), mid_tok.start);
+    try std.testing.expectEqual(@as(usize, 8), mid_tok.end);
+    const file_tok = tokenAtCaret(w("ask @bot"), 8, .antigravity).?;
+    try std.testing.expectEqual(Mode.file, file_tok.mode);
+    try std.testing.expectEqual(@as(usize, 4), file_tok.start);
+    try std.testing.expect(tokenAtCaret(w("$skill"), 6, .antigravity) == null);
+    try std.testing.expect(endsInTriggerToken(w("/valentin-mode"), .antigravity));
+    try std.testing.expect(!endsInTriggerToken(w("please /valentin-mode"), .antigravity));
+    var buf: [128]u8 = undefined;
+    try std.testing.expectEqualStrings("/valentin-mode ", insertionFor(.antigravity, .slash, .{ .kind = 'S', .name = "valentin-mode", .hint = "", .desc = "" }, &buf));
+    try std.testing.expectEqualStrings("/poteto-mode ", insertionFor(.antigravity, .slash, .{ .kind = 'S', .name = "poteto-mode", .hint = "", .desc = "" }, &buf));
+    try std.testing.expectEqualStrings("/plan ", insertionFor(.antigravity, .slash, .{ .kind = 'B', .name = "plan", .hint = "", .desc = "" }, &buf));
+    try std.testing.expectEqualStrings("@dir/", insertionFor(.antigravity, .file, .{ .kind = 'D', .name = "dir", .hint = "", .desc = "" }, &buf));
+    var wide: [64]u16 = undefined;
+    const ins = insertionFor(.antigravity, .slash, .{ .kind = 'S', .name = "valentin-mode", .hint = "", .desc = "" }, &buf);
+    const n = try std.unicode.utf8ToUtf16Le(&wide, ins);
+    var out: [128]u16 = undefined;
+    const applied = applyAccept(w("use /val now"), tokenAtCaret(w("use /val now"), 8, .antigravity).?, wide[0..n], &out);
+    try std.testing.expectEqualSlices(u16, w("use /valentin-mode  now"), out[0..applied.len]);
 }
 
 test "oversized response fields are rejected" {
