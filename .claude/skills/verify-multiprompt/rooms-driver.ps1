@@ -470,19 +470,20 @@ function Open-Member([string]$Name) {
     })
     Trace-Step "open member done: $Name"
 }
+function Clear-Composer([IntPtr]$Control, [string]$ConditionName) {
+    [void](Wait-For $ConditionName {
+        if ([ChatDeliveryDesktop]::Text($Control) -ceq '') { return $true }
+        Press @(0x11, 0x41) 'Ctrl+A: select the draft a restored room put back'
+        Press @(0x08) 'Backspace: clear the draft a restored room put back'
+        return ([ChatDeliveryDesktop]::Text($Control) -ceq '')
+    } 20)
+}
 function Send-Text([string]$Text, [switch]$Room, [switch]$AllowKeptDraft) {
     Trace-Step "send start: $Text"
     $parent = if ($Room) { Room-Window } else { $main }
     $edit = Wait-For 'one visible composer' { $windows = @(Visible-Children 'Edit' $parent); if ($windows.Count -eq 1) { $windows[0] } }
     Focus-Control $edit
-    Press @(0x11, 0x41) 'Ctrl+A: replace any earlier unsent draft'
-    Press @(0x08) 'Backspace: clear earlier draft before this independent send'
-    for ($attempt = 0; $attempt -lt 3; $attempt++) {
-        $kept = [ChatDeliveryDesktop]::Text($edit)
-        if ($kept.Length -eq 0) { break }
-        for ($i = 0; $i -lt $kept.Length; $i++) { Press @(0x08) 'Backspace: delete the kept draft one character at a time' }
-    }
-    [void](Wait-For 'empty composer before typing' { [ChatDeliveryDesktop]::Text($edit) -ceq '' } 10)
+    Clear-Composer $edit 'empty composer before typing'
     Type-Text $Text
     [void](Wait-For 'exact typed composer text' { [ChatDeliveryDesktop]::Text($edit) -ceq $Text })
     Press @(0x1B) 'Escape: dismiss mention suggestions'
@@ -716,14 +717,28 @@ Host remote-1
         foreach ($member in @($state.rooms | ForEach-Object { $_.tables.members } | Where-Object { $_.active -eq 1 })) {
             $name = [string]$member.display_name
             $own = @($replies | Where-Object { $_.member_id -ceq $member.id -and $_.text -notlike 'No answer.*' })
+            $deliveries = @($events | Where-Object { $_.type -eq 'human' -and @($_.recipients) -contains $member.id } | Sort-Object { [int]$_.seq })
+            if ($replies.member_id -cnotcontains $member.id) { $problems += "$name has no saved reply in the room"; continue }
+            if ($own.Count -eq 0) { $problems += "$name has no saved reply of its own in the room"; continue }
             $context = @()
+            $expected = @()
+            $answered = @()
             $previous = 0
-            foreach ($delivery in @($events | Where-Object { $_.type -eq 'human' -and @($_.recipients) -contains $member.id } | Sort-Object { [int]$_.seq })) {
-                $context += @($replies | Where-Object { $_.member_id -cne $member.id -and [int]$_.seq -gt $previous -and [int]$_.seq -lt [int]$delivery.seq })
+            for ($turn = 0; $turn -lt $deliveries.Count; $turn++) {
+                $delivery = $deliveries[$turn]
+                $nextSeq = if ($turn + 1 -lt $deliveries.Count) { [int]$deliveries[$turn + 1].seq } else { [int]::MaxValue }
+                $delivered = @($replies | Where-Object { $_.member_id -cne $member.id -and [int]$_.seq -gt $previous -and [int]$_.seq -lt [int]$delivery.seq } | Sort-Object { [int]$_.seq })
+                $answers = @($own | Where-Object {
+                    $parentId = if ($_.PSObject.Properties['parent_event_id']) { [string]$_.parent_event_id } else { '' }
+                    if ($parentId) { $parentId -ceq [string]$delivery.id } else { [int]$_.seq -gt [int]$delivery.seq -and [int]$_.seq -lt $nextSeq }
+                } | Sort-Object { [int]$_.seq })
+                foreach ($answer in $answers) { $answered += [string]$answer.id }
+                $context += $delivered
+                $expected += @($delivered)
+                $expected += @($answers)
                 $previous = [int]$delivery.seq
             }
-            if ($replies.member_id -cnotcontains $member.id) { $problems += "$name has no saved reply in the room"; continue }
-            $expected = @((@($own) + @($context)) | Sort-Object { [int]$_.seq })
+            $expected += @($own | Where-Object { $answered -cnotcontains [string]$_.id } | Sort-Object { [int]$_.seq })
             Open-Member $name
             $text = Copy-Chat-Until $name "$name chat shows its own room replies and the room context delivered to it, in room order" {
                 param($text)
@@ -926,14 +941,7 @@ Host remote-1
         $draftEdit = Wait-For 'one visible room composer' { $windows = @(Visible-Children 'Edit' $room); if ($windows.Count -eq 1) { $windows[0] } }
         if ([ChatDeliveryDesktop]::Text($draftEdit) -cne 'LOSTACK534') { throw "The withheld send did not keep its own draft in the room composer: '$([ChatDeliveryDesktop]::Text($draftEdit))'" }
         Focus-Control $draftEdit
-        Press @(0x11, 0x41) 'Ctrl+A: select the kept uncertain draft'
-        Press @(0x08) 'Backspace: clear the kept uncertain draft before the edited one'
-        for ($attempt = 0; $attempt -lt 3; $attempt++) {
-            $kept = [ChatDeliveryDesktop]::Text($draftEdit)
-            if ($kept.Length -eq 0) { break }
-            for ($i = 0; $i -lt $kept.Length; $i++) { Press @(0x08) 'Backspace: delete the kept draft one character at a time' }
-        }
-        [void](Wait-For 'empty room composer before the edited draft' { [ChatDeliveryDesktop]::Text($draftEdit) -ceq '' } 10)
+        Clear-Composer $draftEdit 'empty room composer before the edited draft'
         Type-Text 'EDITED534'
         [void](Wait-For 'the edited draft is in the room composer' { [ChatDeliveryDesktop]::Text($draftEdit) -ceq 'EDITED534' } 10)
         [void](Wait-For 'the edited room draft is saved on this computer' {
@@ -957,6 +965,17 @@ Host remote-1
         foreach ($attempt in $retryAttempts) {
             if ([string]$attempt.command_id -cne [string]$original.command_id -or [string]$attempt.room_id -cne [string]$original.room_id -or [string]$attempt.text -cne 'LOSTACK534') { throw 'The retry did not use the exact original room, command id and body' }
         }
+        Open-Room 'Rooms534'
+        $room = Room-Window
+        $draftEdit = Wait-For 'one visible room composer after the restart' { $windows = @(Visible-Children 'Edit' $room); if ($windows.Count -eq 1) { $windows[0] } }
+        [void](Wait-For 'the edited draft survived the restart and retry' { [ChatDeliveryDesktop]::Text($draftEdit) -ceq 'EDITED534' } 15)
+        if ([ChatDeliveryDesktop]::Text($draftEdit) -cne 'EDITED534') { throw "The edited draft did not survive the restart and retry: '$([ChatDeliveryDesktop]::Text($draftEdit))'" }
+        Focus-Control $draftEdit
+        Clear-Composer $draftEdit 'empty room composer after the edited draft proof'
+        [void](Wait-For 'the cleared room draft is gone from this computer' {
+            $stores = @(Get-ChildItem $settings -Filter 'room-ui-*.json')
+            @($stores | Where-Object { (Read-Shared $_.FullName) -match 'EDITED534' }).Count -eq 0
+        } 20)
         [void](Wait-For 'each member answered the replayed message exactly once' {
             $state = Snapshot 'lost-ack-replies'
             $human = @(Room-Events $state | Where-Object { $_.type -eq 'human' -and $_.text -ceq 'LOSTACK534' })
@@ -964,19 +983,8 @@ Host remote-1
             $replies = @(Room-Events $state | Where-Object { $_.type -eq 'agent_reply' -and $_.parent_event_id -ceq [string]$human[0].id -and $_.text -like '* says LOSTACK534' })
             $human.Count -eq 1 -and $replies.Count -eq 2 -and @($replies.member_id | Select-Object -Unique).Count -eq 2
         } 120)
-        Open-Room 'Rooms534'
         $visible = Shot-Room 'lost-ack-recovered'
         if ($visible -notmatch 'LOSTACK534') { throw 'The replayed message is missing from the room view after restart recovery' }
-        $room = Room-Window
-        $draftEdit = Wait-For 'one visible room composer after the restart' { $windows = @(Visible-Children 'Edit' $room); if ($windows.Count -eq 1) { $windows[0] } }
-        [void](Wait-For 'the edited draft survived the restart and retry' { [ChatDeliveryDesktop]::Text($draftEdit) -ceq 'EDITED534' } 15)
-        if ([ChatDeliveryDesktop]::Text($draftEdit) -cne 'EDITED534') { throw "The edited draft did not survive the restart and retry: '$([ChatDeliveryDesktop]::Text($draftEdit))'" }
-        Focus-Control $draftEdit
-        for ($attempt = 0; $attempt -lt 3; $attempt++) {
-            $kept = [ChatDeliveryDesktop]::Text($draftEdit)
-            if ($kept.Length -eq 0) { break }
-            for ($i = 0; $i -lt $kept.Length; $i++) { Press @(0x08) 'Backspace: clear the edited draft after the proof' }
-        }
         $result.observations += @{ fact = 'a withheld acknowledgement was recovered by the real restart retry with the original room, command id and body'; withheld = $withheld.Count; retries = $retryAttempts.Count; human_rows = 1; answers = 2; edited_draft = 'EDITED534' }
         [void](Server-Drop 'remove')
         if ((Server-Python) -cne '/usr/bin/python3') { throw "The disposable receipt boundary was not removed: $(Server-Python)" }

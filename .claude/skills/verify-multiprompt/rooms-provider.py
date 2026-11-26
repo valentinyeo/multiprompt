@@ -27,7 +27,8 @@ for line in sys.stdin:
     text = content if isinstance(content, str) else '\n'.join(block.get('text', '') for block in content)
     name = 'Alpha' if sid.endswith('0001') else 'Bravo'
     current = text.rsplit('New message from the user:\n\n', 1)[-1]
-    marker = next((word for word in ('INTERRUPT534', 'TARGET534', 'AWAY534', 'RESTART534', 'FAIL534', 'CLOSED534', 'BROADCAST534', 'PRIVATE534', 'READY534') if word in current), 'UNKNOWN534')
+    found = re.search(r'\b([A-Z]{2,}534)\b', current)
+    marker = found.group(1) if found else 'UNKNOWN534'
     with (root / 'provider-input.jsonl').open('a') as out:
         out.write(json.dumps(dict(sid=sid, text=text, marker=marker, pid=os.getpid())) + '\n')
     if marker in ('AWAY534', 'RESTART534'):

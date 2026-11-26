@@ -35,8 +35,8 @@ function Read-Clipboard {
         $script:clipboardIndex++
         return $value
     }
-    if ($script:member -ceq 'Alpha') { return 'Bravo says ONE Alpha says TWO' }
-    if ($script:member -ceq 'Bravo') { return 'Bravo says ONE No answer. Alpha did not complete a reply. No answer. Alpha could not accept this question. Bravo says TWO' }
+    if ($script:member -ceq 'Alpha') { return 'Alpha says ONE Bravo says ONE Alpha says TWO' }
+    if ($script:member -ceq 'Bravo') { return 'Bravo says ONE Alpha says ONE No answer. Alpha did not complete a reply. No answer. Alpha could not accept this question. Bravo says TWO' }
     return ''
 }
 function Require([bool]$Condition, [string]$Message) { if (-not $Condition) { throw $Message } }
@@ -177,25 +177,29 @@ function Order-Fixture {
     $script:events = @(
         @{ type = 'human'; id = 'one'; seq = 1; recipients = @('alpha', 'bravo') },
         @{ type = 'agent_reply'; id = 'bravo-one'; seq = 2; member_id = 'bravo'; text = 'Bravo says ONE' },
-        @{ type = 'agent_reply'; id = 'failure'; seq = 3; member_id = 'alpha'; text = 'No answer. Alpha did not complete a reply.' },
-        @{ type = 'human'; id = 'private'; seq = 4; recipients = @('alpha') },
-        @{ type = 'agent_reply'; id = 'admission-failure'; seq = 5; member_id = 'alpha'; text = 'No answer. Alpha could not accept this question.' },
-        @{ type = 'human'; id = 'two'; seq = 6; recipients = @('alpha', 'bravo') },
-        @{ type = 'agent_reply'; id = 'alpha-two'; seq = 7; member_id = 'alpha'; text = 'Alpha says TWO' },
-        @{ type = 'agent_reply'; id = 'bravo-two'; seq = 8; member_id = 'bravo'; text = 'Bravo says TWO' }
+        @{ type = 'agent_reply'; id = 'alpha-one'; seq = 3; member_id = 'alpha'; text = 'Alpha says ONE' },
+        @{ type = 'agent_reply'; id = 'failure'; seq = 4; member_id = 'alpha'; text = 'No answer. Alpha did not complete a reply.' },
+        @{ type = 'human'; id = 'private'; seq = 5; recipients = @('alpha') },
+        @{ type = 'agent_reply'; id = 'admission-failure'; seq = 6; member_id = 'alpha'; text = 'No answer. Alpha could not accept this question.' },
+        @{ type = 'human'; id = 'two'; seq = 7; recipients = @('alpha', 'bravo') },
+        @{ type = 'agent_reply'; id = 'alpha-two'; seq = 8; member_id = 'alpha'; text = 'Alpha says TWO' },
+        @{ type = 'agent_reply'; id = 'bravo-two'; seq = 9; member_id = 'bravo'; text = 'Bravo says TWO' }
     )
     $script:transcripts = [pscustomobject]@{
-        '/sid-alpha.jsonl' = @((Transcript-Row 'user' 'bravo: Bravo says ONE'), (Transcript-Row 'assistant' 'Alpha says TWO'))
-        '/sid-bravo.jsonl' = @((Transcript-Row 'assistant' 'Bravo says ONE'), (Transcript-Row 'user' 'alpha: No answer. Alpha did not complete a reply. alpha: No answer. Alpha could not accept this question.'), (Transcript-Row 'assistant' 'Bravo says TWO'))
+        '/sid-alpha.jsonl' = @((Transcript-Row 'user' 'bravo: Bravo says ONE'), (Transcript-Row 'assistant' 'Alpha says ONE'), (Transcript-Row 'assistant' 'Alpha says TWO'))
+        '/sid-bravo.jsonl' = @((Transcript-Row 'assistant' 'Bravo says ONE'), (Transcript-Row 'user' 'alpha: Alpha says ONE alpha: No answer. Alpha did not complete a reply. alpha: No answer. Alpha could not accept this question.'), (Transcript-Row 'assistant' 'Bravo says TWO'))
     }
 }
 Order-Fixture
 & $orderCase
 Order-Fixture
+$script:clipboards = @{ Alpha = @('Bravo says ONE Alpha says ONE Alpha says TWO') }
+Reject { & $orderCase } 'Order check accepted the room sequence that delivers a peer reply before the answer it never preceded'
+Order-Fixture
 $script:transcripts.'/sid-bravo.jsonl' = @((Transcript-Row 'assistant' 'Bravo says ONE'), (Transcript-Row 'assistant' 'Bravo says TWO'))
 Reject { & $orderCase } 'Order check dropped the legitimate failure from delivered peer context'
 Order-Fixture
-$script:transcripts.'/sid-bravo.jsonl'[1] = Transcript-Row 'user' 'alpha: No answer. Alpha could not accept this question. alpha: No answer. Alpha did not complete a reply.'
+$script:transcripts.'/sid-bravo.jsonl'[1] = Transcript-Row 'user' 'alpha: Alpha says ONE alpha: No answer. Alpha could not accept this question. alpha: No answer. Alpha did not complete a reply.'
 Reject { & $orderCase } 'Order check accepted reordered failure context'
 Order-Fixture
 $script:transcripts.'/sid-bravo.jsonl' += (Transcript-Row 'assistant' 'No answer. Alpha did not complete a reply.')
