@@ -38,6 +38,14 @@ pub fn decide(live: bool, text: []const u16, selected_skill: bool, interactive_h
 
 pub fn decideForAgent(live: bool, ai_agent: u8, text: []const u16, selected_skill: bool, interactive_hint: bool) Route {
     if (ai_agent == 8) return .send;
+    if (ai_agent == 3) {
+        if (!live or selected_skill) return .send;
+        return switch (route(true, text)) {
+            .model => .model,
+            .login => .login,
+            else => .send,
+        };
+    }
     return decide(live, text, selected_skill, interactive_hint);
 }
 
@@ -89,6 +97,18 @@ test "live slash commands route without changing terminal or custom messages" {
     try std.testing.expectEqual(Route.send, decideForAgent(true, 8, w("/plan"), false, false));
     try std.testing.expectEqual(Route.send, decideForAgent(true, 8, w("/plan outline the steps"), false, false));
     try std.testing.expectEqual(Route.plan, decideForAgent(true, 1, w("/plan"), false, false));
+    try std.testing.expectEqual(Route.model, decideForAgent(true, 3, w("/model"), false, false));
+    try std.testing.expectEqual(Route.model, decideForAgent(true, 3, w("/model openai-codex/gpt-5.6-sol"), false, false));
+    try std.testing.expectEqual(Route.login, decideForAgent(true, 3, w("/login"), false, false));
+    try std.testing.expectEqual(Route.login, decideForAgent(true, 3, w("/login anthropic"), false, false));
+    try std.testing.expectEqual(Route.send, decideForAgent(false, 3, w("/model"), false, false));
+    try std.testing.expectEqual(Route.send, decideForAgent(false, 3, w("/login"), false, false));
+    try std.testing.expectEqual(Route.send, decideForAgent(true, 3, w("/valentin-mode"), false, false));
+    try std.testing.expectEqual(Route.send, decideForAgent(true, 3, w("/board-drain"), true, false));
+    try std.testing.expectEqual(Route.send, decideForAgent(true, 3, w("/plan"), false, false));
+    try std.testing.expectEqual(Route.send, decideForAgent(true, 3, w("/plan outline the steps"), false, false));
+    try std.testing.expectEqual(Route.send, decideForAgent(true, 3, w("/compact"), false, false));
+    try std.testing.expectEqual(Route.send, decideForAgent(true, 3, w("/reload"), false, false));
 }
 
 test "mode requests serialize identity and supported mode" {
