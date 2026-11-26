@@ -253,12 +253,13 @@ if ([bool]($freshKept.PSObject.Properties['display_history']) -ne $true) { throw
 Save @{state=(Split-Path $freshState -Leaf); display_history=$freshKept.display_history; history=(Split-Path $freshHistory -Leaf); historyExists=(Test-Path $freshHistory); claimBoundary='production host loop start; the fixture never writes this flag'} "$caseDir/fresh-history-claim.json"
 function Fresh-Blocks([string]$Stage) {
     $offset = (Read-Shared $paletteLog).Length
-    Press @(0x11, 0x30) "Ctrl+0: measure the $Stage Antigravity history"
+    $minimum = $freshTexts.Count + $freshReplies.Count
     Wait-For "the $Stage Antigravity history paints from the reader" {
+        Press @(0x11, 0x30) "Ctrl+0: measure the $Stage Antigravity history"
         $frames = [regex]::Matches((Read-Shared $paletteLog).Substring($offset), '\[chatfont\] pt=\d+ blocks=(\d+) content_h=\d+')
         if ($frames.Count -gt 0) {
             $painted = [int]$frames[$frames.Count - 1].Groups[1].Value
-            if ($painted -gt 0) { $painted }
+            if ($painted -ge $minimum) { $painted }
         }
     } 20
 }
@@ -274,13 +275,21 @@ function Fresh-Text([string]$Stage) {
     Read-Shared "$caseDir/fresh-copied-$Stage.txt"
 }
 function Fresh-Transcript([string]$Stage, [string]$Text) {
+    if ($freshTexts.Count -ne $freshReplies.Count) { throw 'Expected matching fresh Antigravity prompt and reply counts' }
+    $ordered = [Collections.Generic.List[string]]::new()
+    for ($turn = 0; $turn -lt $freshTexts.Count; $turn++) {
+        $ordered.Add($freshTexts[$turn])
+        $ordered.Add($freshReplies[$turn])
+    }
+    $normalized = ($Text -replace "`r`n", "`n").Trim()
     $cursor = 0
-    foreach ($kept in $freshTexts + $freshReplies) {
-        if (([regex]::Matches($Text, [regex]::Escape($kept))).Count -ne 1) { throw ('The ' + $Stage + ' Antigravity transcript does not hold exactly one ' + $kept) }
-        $found = $Text.IndexOf($kept, $cursor, [StringComparison]::Ordinal)
+    foreach ($kept in $ordered) {
+        if (([regex]::Matches($normalized, [regex]::Escape($kept))).Count -ne 1) { throw ('The ' + $Stage + ' Antigravity transcript does not hold exactly one ' + $kept) }
+        $found = $normalized.IndexOf($kept, $cursor, [StringComparison]::Ordinal)
         if ($found -lt 0) { throw ('The ' + $Stage + ' Antigravity transcript is out of order at ' + $kept) }
         $cursor = $found + $kept.Length
     }
+    if ($normalized -cne ($ordered.ToArray() -join "`n`n")) { throw ('The ' + $Stage + ' Antigravity transcript did not match the exact alternating turns') }
 }
 function Fresh-Resync([string]$Stage) {
     $reloadOffset = (Read-Shared $paletteLog).Length
@@ -309,6 +318,7 @@ Send-Composer $freshSecondText
 [void](Wait-For 'the fresh Antigravity chat showed its second reply' { (Read-Shared $freshHistory).Contains($freshSecondReply) } 60)
 Send-Composer $freshThirdText
 [void](Wait-For 'the fresh Antigravity chat showed its third reply' { (Read-Shared $freshHistory).Contains($freshThirdReply) } 60)
+Copy-Item $freshHistory "$caseDir/fresh-antigravity-history.jsonl" -Force
 $freshBlocksBefore = Fresh-Blocks 'sent'
 Fresh-Copied 'before'
 Fresh-Transcript 'sent' (Fresh-Text 'before')
@@ -321,16 +331,20 @@ if ($freshBlocksAfter -ne $freshBlocksBefore) { throw ('The full reload changed 
 if ((Fresh-Text 'after').Trim() -cne (Fresh-Text 'before').Trim()) { throw 'The full reload changed the visible Antigravity transcript' }
 Shot 'antigravity-fresh-after-reload'
 Fresh-Resync 'second'
+$freshBlocksTwice = Fresh-Blocks 'reloaded twice'
 Fresh-Copied 'reload-twice'
 Fresh-Transcript 'reloaded twice' (Fresh-Text 'reload-twice')
+if ($freshBlocksTwice -ne $freshBlocksBefore) { throw ('The repeated full reload changed the painted Antigravity row count: ' + $freshBlocksBefore + ' -> ' + $freshBlocksTwice) }
 if ((Fresh-Text 'reload-twice').Trim() -cne (Fresh-Text 'before').Trim()) { throw 'The repeated full reload changed the visible Antigravity transcript' }
 Shot 'antigravity-fresh-reload-twice'
 Press @(0x11, 0x09) 'Ctrl+Tab: leave the fresh Antigravity chat'
 Start-Sleep -Milliseconds 500
 Shot 'antigravity-fresh-tab-away'
 Press @(0x11, 0x09) 'Ctrl+Tab: return to the fresh Antigravity chat'
+$freshBlocksReturned = Fresh-Blocks 'tab away and back'
 Fresh-Copied 'tab-away-back'
 Fresh-Transcript 'tab away and back' (Fresh-Text 'tab-away-back')
+if ($freshBlocksReturned -ne $freshBlocksBefore) { throw ('The tab away and back view changed the painted Antigravity row count: ' + $freshBlocksBefore + ' -> ' + $freshBlocksReturned) }
 if ((Fresh-Text 'tab-away-back').Trim() -cne (Fresh-Text 'before').Trim()) { throw 'The tab away and back view changed the visible Antigravity transcript' }
 Shot 'antigravity-fresh-tab-returned'
 $freshSessionRow = @((Get-Content "$settings/session.json" -Raw | ConvertFrom-Json).tabs | Where-Object { $_.name -ceq 'Antigravity' })[0]

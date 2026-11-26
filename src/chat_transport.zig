@@ -202,7 +202,7 @@ fn bootHost(host: *Host, index: u8) bool {
     if (host.wake == null) return false;
     if (host.ready == null) host.ready = w.CreateEventW(null, 0, 0, null);
     if (host.ready == null) return false;
-    if (host.progress == null) host.progress = w.CreateEventW(null, 1, 0, null);
+    if (host.progress == null) host.progress = w.CreateEventW(null, 0, 0, null);
     if (host.progress == null) return false;
     var cmd: [2048]u16 = undefined;
     var pos: usize = 0;
@@ -410,7 +410,6 @@ pub fn readWithin(channel: *Channel, bytes: []u8, timeout_ms: u32) ?usize {
         host.mutex.unlock();
         if (progress == null) return null;
         _ = w.WaitForSingleObject(progress, @intCast(@min(deadline - now, 50)));
-        _ = w.ResetEvent(progress);
     }
 }
 

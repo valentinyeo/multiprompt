@@ -1678,3 +1678,15 @@ test('MUBO-221 the fresh Antigravity launch is read through a wait for that laun
   assert.match(journey, /kind -ceq 'reader' -and \(\(\$_\.argv -join ' '\) -match 'host enable antigravity'\)/, 'the wait must name the launch it needs');
   assert.doesNotMatch(journey, /\$launchRows = @\(/, 'a snapshot of the invocation file races the launch that has not run yet');
 });
+
+test('MUBO-221 the fresh Antigravity transcript check enforces alternating prompt and reply turns and retains the six-row history', () => {
+  const journey = read('tools/verify-chat-delivery/antigravity-chats.ps1');
+  const start = journey.indexOf('function Fresh-Transcript');
+  const end = journey.indexOf('function Fresh-Resync');
+  const body = journey.slice(start, end);
+  assert.doesNotMatch(body, /\$freshTexts\s*\+\s*\$freshReplies/, 'concatenating prompts before replies rejects real alternating turns');
+  assert.match(body, /\$ordered\.Add\(\$freshTexts\[\$turn\]\)/);
+  assert.match(body, /\$ordered\.Add\(\$freshReplies\[\$turn\]\)/);
+  assert.match(body, /did not match the exact alternating turns/);
+  assert.match(journey, /\$freshThirdReply[\s\S]*Copy-Item \$freshHistory "\$caseDir\/fresh-antigravity-history\.jsonl" -Force/);
+});

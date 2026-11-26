@@ -33,6 +33,29 @@ test('rendered switch-back proof keeps every message and divider in order', () =
   assert.throws(() => verifyCopiedHistory('original multi-line reply', ['original\nmulti-line reply']), /lost or reordered/);
 });
 
+test('fresh Antigravity transcript proof requires exact alternating turns and rejects grouped, swapped, duplicate, missing or stray rows', () => {
+  const { verifyFreshTranscript } = require('./chat-antigravity-proof.cjs');
+  const texts = [
+    'first message in a fresh antigravity chat',
+    'second message in a fresh antigravity chat',
+    'third message in a fresh antigravity chat',
+  ];
+  const replies = [
+    'Antigravity stand-in reply 1.',
+    'Antigravity stand-in reply 3.',
+    'Antigravity stand-in reply 5.',
+  ];
+  const interleaved = [texts[0], replies[0], texts[1], replies[1], texts[2], replies[2]];
+  assert.doesNotThrow(() => verifyFreshTranscript(interleaved.join('\r\n\r\n'), texts, replies, 'before'));
+  assert.doesNotThrow(() => verifyFreshTranscript(interleaved.join('\n\n'), texts, replies, 'after'));
+  assert.throws(() => verifyFreshTranscript([...texts, ...replies].join('\n\n'), texts, replies, 'grouped'), /out of order/);
+  const swapped = [texts[0], replies[1], texts[1], replies[0], texts[2], replies[2]];
+  assert.throws(() => verifyFreshTranscript(swapped.join('\n\n'), texts, replies, 'swapped'), /out of order/);
+  assert.throws(() => verifyFreshTranscript([...interleaved, replies[0]].join('\n\n'), texts, replies, 'duplicate'), /exactly one/);
+  assert.throws(() => verifyFreshTranscript(interleaved.slice(0, -1).join('\n\n'), texts, replies, 'missing'), /exactly one/);
+  assert.throws(() => verifyFreshTranscript([...interleaved, 'unexpected row'].join('\n\n'), texts, replies, 'stray'), /exact alternating turns/);
+});
+
 test('antigravity host adapter registers agy and stream-json argv', () => {
   assert.match(source, /HOST_PROVIDERS = \(.*'antigravity'/);
   assert.match(source, /'antigravity': 'agy'/);

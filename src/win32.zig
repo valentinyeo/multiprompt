@@ -1128,7 +1128,6 @@ pub extern "kernel32" fn WaitForMultipleObjects(DWORD, [*]const HANDLE, BOOL, DW
 
 pub extern "kernel32" fn OpenEventW(dwDesiredAccess: DWORD, bInheritHandle: BOOL, lpName: LPCWSTR) callconv(WINAPI) HANDLE;
 pub extern "kernel32" fn SetEvent(hEvent: HANDLE) callconv(WINAPI) BOOL;
-pub extern "kernel32" fn ResetEvent(hEvent: HANDLE) callconv(WINAPI) BOOL;
 pub extern "kernel32" fn SetProcessInformation(hProcess: HANDLE, ProcessInformationClass: i32, ProcessInformation: *anyopaque, ProcessInformationSize: DWORD) callconv(WINAPI) BOOL;
 
 pub extern "kernel32" fn CreateMutexW(?*anyopaque, BOOL, [*:0]const u16) callconv(WINAPI) HANDLE;

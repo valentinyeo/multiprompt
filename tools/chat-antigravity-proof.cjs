@@ -16,6 +16,20 @@ function verifyCopiedHistory(copiedBack, backTexts) {
   }
 }
 
+function verifyFreshTranscript(transcript, texts, replies, label) {
+  assert.equal(texts.length, replies.length, `the ${label} Antigravity prompt and reply counts differ`);
+  const normalized = transcript.replace(/\r\n/g, '\n').trim();
+  const expected = texts.flatMap((text, index) => [text, replies[index]]);
+  let cursor = 0;
+  for (const kept of expected) {
+    assert.equal(normalized.split(kept).length, 2, `the ${label} Antigravity copy did not hold exactly one ${kept}`);
+    const found = normalized.indexOf(kept, cursor);
+    assert.ok(found >= 0, `the ${label} Antigravity copy is out of order at ${kept}`);
+    cursor = found + kept.length;
+  }
+  assert.equal(normalized, expected.join('\n\n'), `the ${label} Antigravity copy did not match the exact alternating turns`);
+}
+
 function verify(root) {
   const dir = path.join(root, 'antigravity-chats');
   const read = name => fs.readFileSync(path.join(dir, name), 'utf8');
@@ -63,7 +77,7 @@ function verify(root) {
   assert.equal(freshReload.reloads, 2, 'the journey must reload the whole history more than once');
   assert.equal(freshReload.messages, 3, 'the journey must send three distinct synthetic messages');
   assert.equal(new Set(freshReload.texts).size, 3);
-  assert.equal(new Set(freshReload.replies).size, 3);
+  assert.deepEqual(freshReload.replies, ['Antigravity stand-in reply 1.', 'Antigravity stand-in reply 3.', 'Antigravity stand-in reply 5.']);
   assert.equal(freshReload.tabAwayBack, true);
   assert.equal(freshReload.sidAfter, fresh.csid, 'the full reloads changed the fresh Antigravity chat identity');
   assert.equal(freshReload.displayHistoryAfter, true, 'the full reloads dropped the claimed Antigravity history flag');
@@ -71,19 +85,26 @@ function verify(root) {
   assert.equal(claim.display_history, true, 'the fresh Antigravity host start never claimed its canonical history');
   assert.equal(claim.historyExists, true, 'the fresh Antigravity history file does not exist after the host claimed it');
   assert.match(claim.claimBoundary, /production host loop start/);
+  const freshHistoryRows = lines('fresh-antigravity-history.jsonl').map(entry => entry.row || {});
+  const expected = freshReload.texts.flatMap((text, index) => [text, freshReload.replies[index]]);
+  assert.equal(freshHistoryRows.length, expected.length, 'the fresh Antigravity history did not retain all six rows');
+  assert.deepEqual(freshHistoryRows.map(row => row.role), ['user', 'assistant', 'user', 'assistant', 'user', 'assistant']);
+  assert.deepEqual(freshHistoryRows.map(row => row.text), expected);
+  assert.deepEqual(freshHistoryRows.filter(row => row.role === 'assistant').map(row => row.id), ['agy-1:text:0', 'agy-3:text:0', 'agy-5:text:0']);
+  const receivedPrompts = lines('stand-in/agy-received.jsonl').map(entry => (entry.message ? entry.message.content : '') || '');
+  let receivedCursor = 0;
+  for (const prompt of freshReload.texts) {
+    assert.equal(receivedPrompts.filter(content => content === prompt).length, 1, `the Antigravity stand-in did not receive exactly one ${prompt}`);
+    const at = receivedPrompts.indexOf(prompt, receivedCursor);
+    assert.ok(at >= 0, `the Antigravity stand-in received ${prompt} out of order`);
+    receivedCursor = at + 1;
+  }
   assert.ok(Number.isSafeInteger(freshReload.blocksBefore) && freshReload.blocksBefore >= 6, 'the fresh Antigravity history painted too few blocks before the reload');
   assert.equal(freshReload.blocksAfter, freshReload.blocksBefore, 'the full reload changed the painted Antigravity row count');
   const stages = [['before', 'before the reload'], ['after', 'after the reload'], ['reload-twice', 'after the repeated reload'], ['tab-away-back', 'after a tab away and back']];
   const transcripts = stages.map(([stage]) => read(`fresh-copied-${stage}.txt`));
-  const expected = freshReload.texts.flatMap((text, index) => [text, freshReload.replies[index]]);
   for (const [index, transcript] of transcripts.entries()) {
-    let cursor = 0;
-    for (const kept of expected) {
-      assert.equal(transcript.split(kept).length, 2, `the ${stages[index][1]} Antigravity copy did not hold exactly one ${kept}`);
-      const found = transcript.indexOf(kept, cursor);
-      assert.ok(found >= 0, `the ${stages[index][1]} Antigravity copy is out of order at ${kept}`);
-      cursor = found + kept.length;
-    }
+    verifyFreshTranscript(transcript, freshReload.texts, freshReload.replies, stages[index][1]);
     assert.equal(transcript.trim(), transcripts[0].trim(), `the ${stages[index][1]} view changed the visible Antigravity transcript`);
   }
   assert.equal(freshReload.sameTranscript, true);
@@ -182,7 +203,7 @@ function verify(root) {
   };
 }
 
-module.exports = { verify, verifyCopiedHistory };
+module.exports = { verify, verifyCopiedHistory, verifyFreshTranscript };
 if (require.main === module) {
   const root = process.argv[2];
   try {
