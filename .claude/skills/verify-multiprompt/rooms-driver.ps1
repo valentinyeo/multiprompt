@@ -91,12 +91,12 @@ function Wait-Or([scriptblock]$Check, [int]$Seconds = 5) {
 function Doctor {
     $app.Refresh()
     if ($app.HasExited -or $app.Path -ne $Exe -or [ChatDeliveryDesktop]::Owner($main) -ne $app.Id -or [ChatDeliveryDesktop]::Class($main) -ne 'ZigShell') { throw 'Doctor: owned app identity changed' }
-    $element = [Windows.Automation.AutomationElement]::FromHandle($main)
-    if ($element.Current.IsOffscreen -or $element.Current.ProcessId -ne $app.Id) { throw 'Doctor: desktop not visible' }
+    if (-not [RoomsDesktop]::OnScreen($main)) { throw 'Doctor: desktop not visible' }
     Save @{ pid = $app.Id; hwnd = $main.ToInt64(); exe = $app.Path; sha256 = $ExpectedHash; visible = $true } "$Evidence/doctor.json"
 }
 function Press([int[]]$Keys, [string]$Label) {
     Doctor
+    [void](Wait-For "the owned desktop answers window messages before $Label" { [RoomsDesktop]::Responding($main, 500) } 10)
     if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $main) }
     if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { throw 'Refusing input outside the owned app' }
     $actions.Add(@{ input = $Label; keys = $Keys; seconds = $clock.Elapsed.TotalSeconds })
@@ -104,6 +104,7 @@ function Press([int[]]$Keys, [string]$Label) {
 }
 function Type-Text([string]$Text) {
     Doctor
+    [void](Wait-For 'the owned desktop answers window messages before typing' { [RoomsDesktop]::Responding($main, 500) } 10)
     if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { throw 'Refusing typing outside the owned app' }
     $actions.Add(@{ input = 'type'; text = $Text; seconds = $clock.Elapsed.TotalSeconds })
     foreach ($letter in $Text.ToCharArray()) { [ChatDeliveryDesktop]::Character($letter) }
@@ -154,11 +155,7 @@ function Invoke-JourneyCommand {
     }
     throw "Timed out: palette confirms $query"
 }
-function Visible-Children([string]$Class, $Parent = $main) {
-    $element = [Windows.Automation.AutomationElement]::FromHandle([IntPtr]$Parent)
-    $condition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ClassNameProperty, $Class)
-    @($element.FindAll([Windows.Automation.TreeScope]::Descendants, $condition) | Where-Object { -not $_.Current.IsOffscreen } | ForEach-Object { [IntPtr]$_.Current.NativeWindowHandle })
-}
+function Visible-Children([string]$Class, $Parent = $main) { [RoomsDesktop]::Children([IntPtr]$Parent, $Class) }
 function Room-Window { $windows = @(Visible-Children 'MultiPromptRoomView'); if ($windows.Count -eq 1) { $windows[0] } }
 function Open-Room([string]$Name) {
     $offset = (Read-Shared "$settings/debug.log").Length
@@ -178,7 +175,7 @@ function Focus-Control([IntPtr]$Control) {
     if (-not [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $Control)) { throw 'Cannot focus owned control' }
 }
 function Snapshot([string]$Name) {
-    $raw = Invoke-ServerNative -FilePath $ssh -Arguments @('-F', "$settings/ssh-key/config", 'remote-1', "python3 $repo/.claude/skills/verify-multiprompt/rooms-snapshot.py") -Evidence $Evidence -Name ($Name + '-snapshot')
+    $raw = Invoke-ServerNative -FilePath $ssh -Arguments @('-F', "$settings/ssh-key/config", 'remote-1', "python3 $repo/.claude/skills/verify-multiprompt/rooms-snapshot.py") -Evidence $Evidence -Name ($Name + '-snapshot') -TimeoutSeconds 120
     $state = ($raw -join "`n") | ConvertFrom-Json
     Save $state "$Evidence/$Name-state.json"
     return $state
@@ -190,7 +187,7 @@ function Shot([string]$Name) {
     $bitmap = [Drawing.Bitmap]::new([ChatDeliveryDesktop]::GetSystemMetrics(0), [ChatDeliveryDesktop]::GetSystemMetrics(1))
     $graphics = [Drawing.Graphics]::FromImage($bitmap)
     try { $graphics.CopyFromScreen(0, 0, 0, 0, $bitmap.Size); $bitmap.Save("$Evidence/$Name.png", [Drawing.Imaging.ImageFormat]::Png) } finally { $graphics.Dispose(); $bitmap.Dispose() }
-    $text = Invoke-ServerNative -FilePath $ocr -Arguments @("$Evidence/$Name.png", 'stdout', '--psm', '11') -Evidence $Evidence -Name ("$Name-ocr")
+    $text = Invoke-ServerNative -FilePath $ocr -Arguments @("$Evidence/$Name.png", 'stdout', '--psm', '11') -Evidence $Evidence -Name ("$Name-ocr") -TimeoutSeconds 120
     $text = ($text -join ' ') -replace '\s+', ' '
     [IO.File]::WriteAllText("$Evidence/$Name-visible.txt", $text)
     return $text
@@ -254,7 +251,7 @@ function Read-Crop([string]$Path, [string]$Name, [int]$Skip = 0, [switch]$Light)
                 $bitmap = Save-Variant $source $variant.skip $variant.scale $variant.threshold $variant.light
                 $bitmap.Save("$Evidence/$($variant.file)", [Drawing.Imaging.ImageFormat]::Png)
             } finally { if ($null -ne $bitmap) { $bitmap.Dispose() } }
-            $lines = Invoke-ServerNative -FilePath $ocr -Arguments @("$Evidence/$($variant.file)", 'stdout', '--psm', [string]$variant.psm) -Evidence $Evidence -Name ("$([IO.Path]::GetFileNameWithoutExtension($variant.file))-ocr")
+            $lines = Invoke-ServerNative -FilePath $ocr -Arguments @("$Evidence/$($variant.file)", 'stdout', '--psm', [string]$variant.psm) -Evidence $Evidence -Name ("$([IO.Path]::GetFileNameWithoutExtension($variant.file))-ocr") -TimeoutSeconds 120
             $readings += @{ variant = "skip=$($variant.skip) scale=$($variant.scale) threshold=$($variant.threshold) psm=$($variant.psm)"; text = (($lines -join ' ') -replace '\s+', ' ').Trim() }
         }
     } finally { $source.Dispose() }
@@ -265,8 +262,8 @@ function Picker-Shot([string]$Name) {
     [void](Shot $Name)
     $focus = [IntPtr]([ChatDeliveryDesktop]::Focus($main)[1])
     if ([ChatDeliveryDesktop]::Class($focus) -ne 'Edit') { throw 'Member search is not focused' }
-    $bounds = [Windows.Automation.AutomationElement]::FromHandle($focus).Current.BoundingRectangle
-    $roomBounds = [Windows.Automation.AutomationElement]::FromHandle((Room-Window)).Current.BoundingRectangle
+    $bounds = [RoomsDesktop]::Bounds($focus)
+    $roomBounds = [RoomsDesktop]::Bounds((Room-Window))
     $scale = $bounds.Height / 32
     $top = [int]($bounds.Bottom + 12 * $scale)
     $height = [int][Math]::Min(250 * $scale, $roomBounds.Bottom - $top - 84 * $scale)
@@ -286,15 +283,15 @@ function Clear-Member-Search {
     $fields = @(Visible-Children 'Edit' $room)
     $edit = [IntPtr]([ChatDeliveryDesktop]::Focus($main)[1])
     if ($fields.Count -lt 2 -or [ChatDeliveryDesktop]::Class($edit) -ne 'Edit') { throw 'Member search is not focused' }
-    $tops = @($fields | ForEach-Object { [Windows.Automation.AutomationElement]::FromHandle($_).Current.BoundingRectangle.Top })
-    if ([Windows.Automation.AutomationElement]::FromHandle($edit).Current.BoundingRectangle.Top -le ($tops | Measure-Object -Minimum).Minimum) { throw 'Member search is not the field below the room name' }
+    $tops = @($fields | ForEach-Object { [RoomsDesktop]::Bounds($_).Top })
+    if ([RoomsDesktop]::Bounds($edit).Top -le ($tops | Measure-Object -Minimum).Minimum) { throw 'Member search is not the field below the room name' }
     $text = [ChatDeliveryDesktop]::Text($edit)
     for ($i = 0; $i -lt $text.Length; $i++) { Press @(0x08) 'Backspace: clear the earlier member query' }
     [void](Wait-For 'member search cleared before the next name' { [ChatDeliveryDesktop]::Text($edit) -ceq '' } 10)
 }
 function Dialog-Shot([string]$Name) {
     [void](Shot $Name)
-    $roomBounds = [Windows.Automation.AutomationElement]::FromHandle((Room-Window)).Current.BoundingRectangle
+    $roomBounds = [RoomsDesktop]::Bounds((Room-Window))
     $top = [int]($roomBounds.Bottom - 0.22 * $roomBounds.Height)
     $height = [int](0.12 * $roomBounds.Height)
     $left = [int]($roomBounds.Left + 0.5 * $roomBounds.Width)
@@ -312,7 +309,7 @@ function Read-Room([string]$Name, [switch]$Existing) {
     if (-not $Existing.IsPresent) { [void](Shot $Name) }
     $room = Room-Window
     if (-not $room) { throw 'No visible room to read' }
-    $bounds = [Windows.Automation.AutomationElement]::FromHandle($room).Current.BoundingRectangle
+    $bounds = [RoomsDesktop]::Bounds($room)
     $source = [Drawing.Bitmap]::new("$Evidence/$Name.png")
     try {
         $crop = $source.Clone([Drawing.Rectangle]::new([int]$bounds.Left, [int]$bounds.Top, [int]$bounds.Width, [int]$bounds.Height), $source.PixelFormat)
@@ -468,16 +465,16 @@ function Send-Text([string]$Text, [switch]$Room, [switch]$AllowKeptDraft) {
     [void](Wait-For 'composer clears after send' { [ChatDeliveryDesktop]::Text($edit) -ceq '' } 15)
 }
 function Release-Replies([string]$Marker) {
-    [void](Invoke-ServerNative -FilePath $ssh -Arguments @('-F', "$settings/ssh-key/config", 'remote-1', "python3 $repo/.claude/skills/verify-multiprompt/rooms-release.py $Marker") -Evidence $Evidence -Name ("release-$Marker"))
+    [void](Invoke-ServerNative -FilePath $ssh -Arguments @('-F', "$settings/ssh-key/config", 'remote-1', "python3 $repo/.claude/skills/verify-multiprompt/rooms-release.py $Marker") -Evidence $Evidence -Name ("release-$Marker") -TimeoutSeconds 120)
 }
 function Server-Python {
-    $lines = Invoke-ServerNative -FilePath $ssh -Arguments @('-F', "$settings/ssh-key/config", 'remote-1', 'command -v python3') -Evidence $Evidence -Name 'server-python'
+    $lines = Invoke-ServerNative -FilePath $ssh -Arguments @('-F', "$settings/ssh-key/config", 'remote-1', 'command -v python3') -Evidence $Evidence -Name 'server-python' -TimeoutSeconds 120
     return (($lines -join "`n").Trim())
 }
 function Server-Drop([string]$Action, [string]$Text) {
     $arguments = @('-d', 'Ubuntu-24.04', '-u', 'root', '--exec', 'bash', "$repo/.claude/skills/verify-multiprompt/rooms-drop-receipt.sh", $Action)
     if ($Text) { $arguments += $Text }
-    $lines = Invoke-ServerNative -FilePath wsl.exe -Arguments $arguments -Evidence $Evidence -Name ("drop-receipt-$Action")
+    $lines = Invoke-ServerNative -FilePath wsl.exe -Arguments $arguments -Evidence $Evidence -Name ("drop-receipt-$Action") -TimeoutSeconds 120
     if ($Action -ceq 'install') { $script:dropInstalled = $true }
     if ($Action -ceq 'remove') { $script:dropInstalled = $false }
     return (($lines -join "`n").Trim())
@@ -500,22 +497,22 @@ function Restart-Desktop {
 try {
     if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows') { throw 'Use GitHub Windows only' }
     if ((Get-FileHash $Exe -Algorithm SHA256).Hash -ine $ExpectedHash -or -not [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Exe)).Contains("MPVERSION=$ExpectedVersion;")) { throw 'Executable checksum/version mismatch' }
-    Add-Type -AssemblyName System.Drawing, System.Windows.Forms, System.Security, UIAutomationClient, UIAutomationTypes
+    Add-Type -AssemblyName System.Drawing, System.Windows.Forms, System.Security
     Add-Type -Path "$PSScriptRoot/../../../tools/verify-chat-delivery/desktop.cs"
     Add-Type -Path "$PSScriptRoot/../../../tools/verify-chat-delivery/job.cs"
     Add-Type -Path "$PSScriptRoot/rooms-desktop.cs"
     [void][ChatDeliveryDesktop]::SetThreadDpiAwarenessContext([IntPtr](-4))
     $ocr = 'C:/Program Files/Tesseract-OCR/tesseract.exe'
     if (-not (Test-Path $ocr)) { throw 'Tesseract not installed' }
-    $repo = (Invoke-ServerNative -FilePath wsl.exe -Arguments @('-d', 'Ubuntu-24.04', '-u', 'root', '--exec', 'wslpath', '-a', $env:GITHUB_WORKSPACE) -Evidence $Evidence -Name 'repo-path').Trim()
+    $repo = (Invoke-ServerNative -FilePath wsl.exe -Arguments @('-d', 'Ubuntu-24.04', '-u', 'root', '--exec', 'wslpath', '-a', $env:GITHUB_WORKSPACE) -Evidence $Evidence -Name 'repo-path' -TimeoutSeconds 120).Trim()
     & "$PSScriptRoot/../../../tools/verify-server-chat/start.ps1" -Profile $profile -Evidence $Evidence
     $ssh = "$env:SystemRoot/System32/OpenSSH/ssh.exe"
     $keygen = "$env:SystemRoot/System32/OpenSSH/ssh-keygen.exe"
     $identity = "$profile/home/.ssh/id_ed25519"
-    [void](Invoke-ServerNative -FilePath $keygen -Arguments @('-q', '-t', 'ed25519', '-N', '', '-C', 'rooms-journey', '-f', $identity) -Evidence $Evidence -Name 'rooms-identity')
+    [void](Invoke-ServerNative -FilePath $keygen -Arguments @('-q', '-t', 'ed25519', '-N', '', '-C', 'rooms-journey', '-f', $identity) -Evidence $Evidence -Name 'rooms-identity' -TimeoutSeconds 120)
     $identityPublic = ((Get-Content "$identity.pub" -Raw).Trim() -split ' ' | Select-Object -First 2) -join ' '
     $identityCommand = "umask 077 && mkdir -p ~/.ssh && touch ~/.ssh/authorized_keys && if grep -qF '$identityPublic' ~/.ssh/authorized_keys; then :; else printf '%s\n' '$identityPublic' >> ~/.ssh/authorized_keys; fi"
-    [void](Invoke-ServerNative -FilePath $ssh -Arguments @('-F', "$settings/ssh-key/config", 'remote-1', $identityCommand) -Evidence $Evidence -Name 'rooms-identity-authorize')
+    [void](Invoke-ServerNative -FilePath $ssh -Arguments @('-F', "$settings/ssh-key/config", 'remote-1', $identityCommand) -Evidence $Evidence -Name 'rooms-identity-authorize' -TimeoutSeconds 120)
     $plainConfig = @"
 Host remote-1
   HostName 127.0.0.1
@@ -529,9 +526,9 @@ Host remote-1
   UserKnownHostsFile "$((Join-Path $profile 'home/.ssh/known_hosts').Replace('\', '/'))"
 "@
     [IO.File]::WriteAllText("$profile/home/.ssh/config", $plainConfig)
-    $plain = (Invoke-ServerNative -FilePath $ssh -Arguments @('-F', "$profile/home/.ssh/config", 'remote-1', 'uname -s') -Evidence $Evidence -Name 'rooms-plain-ssh').Trim()
+    $plain = (Invoke-ServerNative -FilePath $ssh -Arguments @('-F', "$profile/home/.ssh/config", 'remote-1', 'uname -s') -Evidence $Evidence -Name 'rooms-plain-ssh' -TimeoutSeconds 120).Trim()
     if ($plain -ne 'Linux') { throw "Plain ssh remote-1 is not usable by the room transport: $plain" }
-    [void](Invoke-ServerNative -FilePath $ssh -Arguments @('-F', "$settings/ssh-key/config", 'remote-1', "python3 $repo/.claude/skills/verify-multiprompt/rooms-seed.py $repo") -Evidence $Evidence -Name 'members-seed')
+    [void](Invoke-ServerNative -FilePath $ssh -Arguments @('-F', "$settings/ssh-key/config", 'remote-1', "python3 $repo/.claude/skills/verify-multiprompt/rooms-seed.py $repo") -Evidence $Evidence -Name 'members-seed' -TimeoutSeconds 120)
     $watcher = [IO.FileSystemWatcher]::new($profile)
     $watcher.IncludeSubdirectories = $true
     $accountHost = 'account.multiprompt.dev'
@@ -544,7 +541,7 @@ Host remote-1
     [IO.File]::AppendAllText($hostsFile, "`r`n127.0.0.1 $accountHost`r`n")
     $serviceJob = [VerifyJob]::new()
     $service = $serviceJob.Start((Get-Command node.exe).Source, $env:GITHUB_WORKSPACE, "$profile/service.log", "$profile/service.err.log", "service/journey/server.mjs --port=443 --pfx=$profile/account.pfx --pfxpass=$password --state=$profile/account-state.json")
-    [void](Wait-For 'runner account Worker ready' { try { Invoke-RestMethod "https://$accountHost/health" | Out-Null; Test-Path "$profile/account-state.json" } catch { $false } } 90)
+    [void](Wait-For 'runner account Worker ready' { try { Invoke-RestMethod "https://$accountHost/health" -TimeoutSec 10 | Out-Null; Test-Path "$profile/account-state.json" } catch { $false } } 90)
     $secrets = Get-Content "$profile/account-state.json" -Raw | ConvertFrom-Json
     $credential = [Text.Encoding]::UTF8.GetBytes((@{ refresh_token = $secrets.refresh_token } | ConvertTo-Json -Compress))
     [IO.File]::WriteAllBytes("$settings/account-device.dat", [Security.Cryptography.ProtectedData]::Protect($credential, $null, [Security.Cryptography.DataProtectionScope]::CurrentUser))
@@ -552,8 +549,8 @@ Host remote-1
     $tabs = @(@{ kind = 'tmux'; name = 'Alpha'; tmux_session = 'rooms-alpha'; csid = 'a1b2c3d4-0534-4000-8000-000000000001'; tmux_host = 0; workspace = 'Rooms check'; manual = $true }, @{ kind = 'tmux'; name = 'Bravo'; tmux_session = 'rooms-bravo'; csid = 'a1b2c3d4-0534-4000-8000-000000000002'; tmux_host = 0; workspace = 'Rooms check'; manual = $true })
     $layout = @{ schema = 1; revision = 1; workspaces = @(@{ name = 'Rooms check' }); tabs = $tabs; hosts = @(@{ slot = 0; name = 'Runner Linux'; hostname = '127.0.0.1'; port = 2222; user = 'mpverify'; host_keys = @($keyLine[1] + ' ' + $keyLine[2]) }) }
     $headers = @{ Authorization = 'Bearer ' + $secrets.admin_key; 'X-Layout-Features' = 'hosts,csid' }
-    $current = Invoke-RestMethod "https://$accountHost/v1/layout" -Headers $headers
-    Invoke-RestMethod "https://$accountHost/v1/layout" -Method Put -Headers $headers -ContentType 'application/json' -Body (@{ base_revision = $current.revision; layout = $layout } | ConvertTo-Json -Depth 15) | Out-Null
+    $current = Invoke-RestMethod "https://$accountHost/v1/layout" -Headers $headers -TimeoutSec 30
+    Invoke-RestMethod "https://$accountHost/v1/layout" -Method Put -Headers $headers -TimeoutSec 30 -ContentType 'application/json' -Body (@{ base_revision = $current.revision; layout = $layout } | ConvertTo-Json -Depth 15) | Out-Null
     Save $layout "$Evidence/fixture-layout.json"
     $env:APPDATA = "$profile/roaming"
     $env:LOCALAPPDATA = "$profile/local"
@@ -1036,7 +1033,7 @@ Host remote-1
         if ($script:dropInstalled) { [void](Server-Drop 'remove') }
     } catch { $result.driverErrors += $_.ToString(); $result.status = 'failed' }
     try {
-        [void](Invoke-ServerNative -FilePath wsl.exe -Arguments @('--terminate', 'Ubuntu-24.04') -Evidence $Evidence -Name 'wsl-terminate')
+        [void](Invoke-ServerNative -FilePath wsl.exe -Arguments @('--terminate', 'Ubuntu-24.04') -Evidence $Evidence -Name 'wsl-terminate' -TimeoutSeconds 60)
         Remove-Item $profile -Recurse -Force
         $result.scratchRemoved = -not (Test-Path $profile)
     } catch { $result.driverErrors += $_.ToString(); $result.status = 'failed' }
