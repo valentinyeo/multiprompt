@@ -1180,7 +1180,15 @@ pub fn chatReaderBundle(allocator: std.mem.Allocator) ?[]u8 {
     _ = std.base64.standard.Encoder.encode(layout64, layout);
     _ = std.base64.standard.Encoder.encode(mp_fresh64, mp_fresh);
     _ = std.base64.standard.Encoder.encode(zsb64, zsb);
-    return std.fmt.allocPrint(allocator, "CONNECTOR_SOURCES = {{'claude':'{s}','codex':'{s}'}}\nMP_SEND_SOURCE = '{s}'\nFEEDBACK_SOURCE = '{s}'\nMP_HELPER_SOURCE = '{s}'\nMP_SHELL_SOURCE = '{s}'\nMP_SESSIONS_SOURCE = '{s}'\nMP_LAYOUT_SOURCE = '{s}'\nMP_FRESH_SOURCE = '{s}'\nZSB_SOURCE = '{s}'\nMULTIBOT_APP_VERSION = '{s}'\n{s}", .{ claude64, codex64, mp_send64, feedback64, helper64, shell64, sessions64, layout64, mp_fresh64, zsb64, @import("main.zig").APP_VERSION, @embedFile("chat_history_reader.py") }) catch null;
+    const room_service = @embedFile("room_service.py");
+    const room_bridge = @embedFile("room_bridge.py");
+    const service64 = allocator.alloc(u8, std.base64.standard.Encoder.calcSize(room_service.len)) catch return null;
+    defer allocator.free(service64);
+    const bridge64 = allocator.alloc(u8, std.base64.standard.Encoder.calcSize(room_bridge.len)) catch return null;
+    defer allocator.free(bridge64);
+    _ = std.base64.standard.Encoder.encode(service64, room_service);
+    _ = std.base64.standard.Encoder.encode(bridge64, room_bridge);
+    return std.fmt.allocPrint(allocator, "ROOM_SERVICE_SOURCE = '{s}'\nROOM_BRIDGE_SOURCE = '{s}'\nCONNECTOR_SOURCES = {{'claude':'{s}','codex':'{s}'}}\nMP_SEND_SOURCE = '{s}'\nFEEDBACK_SOURCE = '{s}'\nMP_HELPER_SOURCE = '{s}'\nMP_SHELL_SOURCE = '{s}'\nMP_SESSIONS_SOURCE = '{s}'\nMP_LAYOUT_SOURCE = '{s}'\nMP_FRESH_SOURCE = '{s}'\nZSB_SOURCE = '{s}'\nMULTIBOT_APP_VERSION = '{s}'\n{s}", .{ service64, bridge64, claude64, codex64, mp_send64, feedback64, helper64, shell64, sessions64, layout64, mp_fresh64, zsb64, @import("main.zig").APP_VERSION, @embedFile("chat_history_reader.py") }) catch null;
 }
 
 fn uiThreadBusy() bool {

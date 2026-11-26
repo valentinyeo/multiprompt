@@ -206,3 +206,30 @@ test('file ownership in Covers selects only the owning feature', t => {
   }
   assert.deepEqual(touchedJourneys(['tools/chat-history.cjs'], directory).features, ['chat-history']);
 });
+
+function verifierJudgeGates(source) {
+  const step = name => (source.split(`\n      - name: ${name}\n`)[1] || '').split(/\n      - name: /)[0];
+  return {
+    ladder: /exclude-families: \$\{\{ needs\.resolve\.outputs\.exclude_families \}\}/.test(step('Judge the evidence with ladder-call')),
+    openai: /needs\.resolve\.outputs\.exclude_openai != 'true'/.test(step('Judge the evidence with OpenAI Codex')),
+    claude: /needs\.resolve\.outputs\.exclude_anthropic != 'true'/.test(step('Judge the evidence against the Done-when lines')),
+  };
+}
+
+test('every judge is author-disjoint and an explicit no-Anthropic control is obeyed', () => {
+  const source = fs.readFileSync(path.join(root, '.github/workflows/pr-verifier.yml'), 'utf8');
+  assert.deepEqual(verifierJudgeGates(source), { ladder: true, openai: true, claude: true });
+  assert.match(source, /exclude_families: \$\{\{ steps\.pr\.outputs\.exclude_families \}\}/, 'resolve publishes the excluded families');
+  assert.match(source, /exclude_anthropic: \$\{\{ steps\.pr\.outputs\.exclude_anthropic \}\}/, 'resolve publishes the Anthropic control');
+  assert.match(source, /exclude_openai: \$\{\{ steps\.pr\.outputs\.exclude_openai \}\}/, 'resolve publishes the OpenAI exclusion');
+  assert.match(source, /run: test "\$RESULT" = PASS \|\| test "\$RESULT" = PASS\+NOTES/, 'a permitted lane that fails stays failing');
+  const ungatedLadder = source.replace("          exclude-families: ${{ needs.resolve.outputs.exclude_families }}\n", '');
+  assert.notEqual(ungatedLadder, source);
+  assert.equal(verifierJudgeGates(ungatedLadder).ladder, false, 'the ladder judge must exclude the author families');
+  const ungatedOpenai = source.replace(/ && needs\.resolve\.outputs\.exclude_openai != 'true'/g, '');
+  assert.notEqual(ungatedOpenai, source);
+  assert.equal(verifierJudgeGates(ungatedOpenai).openai, false, 'the Codex judge must not judge an OpenAI-authored change');
+  const ungatedClaude = source.replace(" && needs.resolve.outputs.exclude_anthropic != 'true'", '');
+  assert.notEqual(ungatedClaude, source);
+  assert.equal(verifierJudgeGates(ungatedClaude).claude, false, 'the Claude judge must obey the no-Anthropic control');
+});

@@ -1,11 +1,15 @@
 name: Install FFmpeg
-description: Install the pinned FFmpeg build, reuse a cached install, and retry a failed download with backoff.
+description: Install the pinned FFmpeg build from its pinned release archive, verify its checksum, reuse a cached install, and retry a failed download with backoff.
 
 inputs:
   version:
     description: FFmpeg version the runner must provide
     required: false
     default: '7.1.1'
+  sha256:
+    description: SHA-256 of the pinned release archive for this version
+    required: false
+    default: '04861d3339c5ebe38b56c19a15cf2c0cc97f5de4fa8910e4d47e5e6404e4a2d4'
 
 runs:
   using: composite
@@ -22,89 +26,10 @@ runs:
       shell: pwsh
       env:
         FFMPEG_VERSION: ${{ inputs.version }}
+        FFMPEG_SHA256: ${{ inputs.sha256 }}
         FFMPEG_TARGET: ${{ runner.temp }}/ffmpeg-${{ inputs.version }}
         FFMPEG_CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
-      run: |
-        $ErrorActionPreference = 'Stop'
-        $pinned = $env:FFMPEG_VERSION
-        $limit = 5
-        if (-not $env:ChocolateyInstall) { $env:ChocolateyInstall = 'C:\ProgramData\chocolatey' }
-        $target = $env:FFMPEG_TARGET
-        function Use-Ffmpeg([string]$directory) {
-          Add-Content -Path $env:GITHUB_PATH -Value $directory
-          Get-ChildItem -Path $directory -Filter *.exe -ErrorAction SilentlyContinue | Unblock-File -ErrorAction SilentlyContinue
-          $first = (& (Join-Path $directory 'ffmpeg.exe') -version | Select-Object -First 1)
-          if ($LASTEXITCODE -ne 0 -or -not $first) { throw "FFmpeg $pinned does not run from $directory" }
-          Write-Host "FFmpeg ready: $first"
-        }
-        if ($env:FFMPEG_CACHE_HIT -eq 'true' -and (Test-Path (Join-Path $target 'ffmpeg.exe'))) {
-          Get-ChildItem -Path $target -Filter *.exe -ErrorAction SilentlyContinue | Unblock-File -ErrorAction SilentlyContinue
-          $cached = (& (Join-Path $target 'ffmpeg.exe') -version 2>$null | Select-Object -First 1)
-          if ($LASTEXITCODE -eq 0 -and $cached) {
-            Write-Host "FFmpeg $pinned restored from cache"
-            Use-Ffmpeg $target
-            exit 0
-          }
-          Write-Host "FFmpeg $pinned restored from cache but does not run; installing a fresh copy"
-          Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $target
-        }
-        $existing = Get-Command ffmpeg -ErrorAction SilentlyContinue
-        if ($existing) {
-          $first = (& $existing.Source -version 2>$null | Select-Object -First 1)
-          if ($LASTEXITCODE -eq 0 -and $first -match "version n?$([regex]::Escape($pinned))\b") {
-            Write-Host "FFmpeg $pinned already available at $($existing.Source)"
-            exit 0
-          }
-        }
-        $mirror = @{ '7.1.1' = @{ url = 'https://github.com/GyanD/codexffmpeg/releases/download/7.1.1/ffmpeg-7.1.1-essentials_build.zip'; sha256 = '04861d3339c5ebe38b56c19a15cf2c0cc97f5de4fa8910e4d47e5e6404e4a2d4' } }
-        $release = $mirror[$pinned]
-        if ($release) {
-          try {
-            Write-Host "FFmpeg $pinned download from the pinned mirror"
-            $zip = Join-Path $env:TEMP "ffmpeg-$pinned.zip"
-            $unpacked = Join-Path $env:TEMP "ffmpeg-$pinned-unpacked"
-            Invoke-WebRequest -Uri $release.url -OutFile $zip -UseBasicParsing
-            $digest = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
-            if ($digest -ne $release.sha256) { throw "checksum $digest does not match the pinned $($release.sha256)" }
-            if (Test-Path $unpacked) { Remove-Item -Recurse -Force $unpacked }
-            Expand-Archive -Path $zip -DestinationPath $unpacked -Force
-            $bin = Get-ChildItem -Path $unpacked -Recurse -Filter ffmpeg.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-            if (-not $bin) { throw 'the archive holds no ffmpeg.exe' }
-            New-Item -ItemType Directory -Force -Path $target | Out-Null
-            Copy-Item -Path (Join-Path $bin.Directory.FullName '*') -Destination $target -Recurse -Force
-            Use-Ffmpeg $target
-            Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $unpacked
-            Remove-Item -Force -ErrorAction SilentlyContinue $zip
-            exit 0
-          } catch {
-            Write-Host "FFmpeg $pinned mirror failed: $($_.Exception.Message); falling back to Chocolatey"
-          }
-        }
-        for ($attempt = 1; $attempt -le $limit; $attempt++) {
-          Write-Host "FFmpeg $pinned install attempt $attempt of $limit"
-          Remove-Item -Recurse -Force -ErrorAction SilentlyContinue (Join-Path $env:TEMP 'chocolatey')
-          & choco install ffmpeg --version=$pinned --yes --no-progress --limit-output
-          $code = $LASTEXITCODE
-          if ($code -eq 0) {
-            $bin = Get-ChildItem -Path (Join-Path $env:ChocolateyInstall 'lib\ffmpeg') -Recurse -Filter ffmpeg.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($bin) {
-              New-Item -ItemType Directory -Force -Path $target | Out-Null
-              Copy-Item -Path (Join-Path $bin.Directory.FullName '*') -Destination $target -Recurse -Force
-              Use-Ffmpeg $target
-            } else {
-              $found = Get-Command ffmpeg -ErrorAction SilentlyContinue
-              if (-not $found) { throw "FFmpeg $pinned installed without an executable" }
-              Write-Host "FFmpeg $pinned available at $($found.Source)"
-            }
-            exit 0
-          }
-          if ($attempt -lt $limit) {
-            $delay = [int][Math]::Min(60, 5 * [Math]::Pow(2, $attempt - 1))
-            Write-Host "FFmpeg $pinned install attempt $attempt failed with exit $code; retrying in $($delay)s"
-            Start-Sleep -Seconds $delay
-          }
-        }
-        throw "FFmpeg $pinned install failed after $limit attempts"
+      run: ./.github/actions/install-ffmpeg/install.ps1
     - name: Install FFmpeg
       if: runner.os != 'Windows'
       shell: bash

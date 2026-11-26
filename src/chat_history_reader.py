@@ -6177,7 +6177,8 @@ def host_handle_request(provider, sid, tmux, session, request):
         inflight = session.get("inflight")
         return dict(status="ok", pid=os.getpid(), sid=sid, tmux=tmux,
                     inflight=inflight.get("id") if isinstance(inflight, dict) else None,
-                    parked=len(session["parked"]), room_message_protocol=ROOM_MESSAGE_PROTOCOL)
+                    parked=len(session["parked"]), room_message_protocol=ROOM_MESSAGE_PROTOCOL,
+                    room_features=[1] if host_room_sources()['bridge'] else [])
     if operation == "stop":
         session["stop"] = True
         session["exit_cause"] = "stop_requested"
@@ -7536,6 +7537,76 @@ def host_startup_failure(provider, sid, tmux, state, reason, retry_generation=0)
     host_log(provider, sid, "host_error", dict(error=reason))
 
 
+HOST_ROOM_SOURCES = dict(checked=0.0, service='', bridge='')
+
+
+def host_room_sources():
+    if HOST_ROOM_SOURCES['bridge']:
+        return HOST_ROOM_SOURCES
+    if time.time() - HOST_ROOM_SOURCES['checked'] < 1:
+        return HOST_ROOM_SOURCES
+    HOST_ROOM_SOURCES['checked'] = time.time()
+    service = globals().get('ROOM_SERVICE_SOURCE')
+    bridge = globals().get('ROOM_BRIDGE_SOURCE')
+    if not (service and bridge):
+        try:
+            active = json.loads((HOME / HOST_RUNTIME_TOOLS / 'active.json').read_text(encoding='utf-8'))
+            digest = active.get('sha256') if isinstance(active, dict) else None
+            if not isinstance(digest, str) or re.fullmatch(r'[0-9a-f]{64}', digest) is None:
+                return HOST_ROOM_SOURCES
+            namespace = dict(__name__='<room-runtime>')
+            exec(compile((HOME / HOST_RUNTIME_TOOLS / (digest + '.py')).read_text(encoding='utf-8'), '<room-runtime>', 'exec'), namespace)
+        except (OSError, ValueError, UnicodeError, SyntaxError):
+            return HOST_ROOM_SOURCES
+        service = namespace.get('ROOM_SERVICE_SOURCE')
+        bridge = namespace.get('ROOM_BRIDGE_SOURCE')
+    if isinstance(service, str) and service and isinstance(bridge, str) and bridge:
+        HOST_ROOM_SOURCES.update(service=service, bridge=bridge)
+    return HOST_ROOM_SOURCES
+
+
+def host_room_sweep(sid):
+    import base64
+    import types
+    sources = host_room_sources()
+    service_source = sources['service']
+    bridge_source = sources['bridge']
+    if not service_source or not bridge_source:
+        return
+    service = types.ModuleType('room_service')
+    exec(compile(base64.b64decode(service_source), '<room-service>', 'exec'), service.__dict__)
+    sys.modules['room_service'] = service
+    bridge_module = types.ModuleType('room_bridge')
+    exec(compile(base64.b64decode(bridge_source), '<room-bridge>', 'exec'), bridge_module.__dict__)
+    for path in (HOME / '.local/state/multiprompt').glob('rooms-account-*'):
+        if not re.fullmatch(r'rooms-account-[0-9a-f]{64}', path.name) or not (path / 'rooms.sqlite3').is_file():
+            continue
+        bridge = None
+        try:
+            bridge = bridge_module.RoomBridge(path)
+            bridge.sweep_pending(sid)
+        except (OSError, RuntimeError, ValueError, sqlite3.Error):
+            continue
+        finally:
+            if bridge is not None:
+                bridge.close()
+
+
+def host_room_tick(provider, sid, session):
+    if provider != 'claude' or not host_room_sources()['bridge']:
+        return
+    worker = session.get('room_worker')
+    if worker is not None and worker.is_alive():
+        return
+    now = time.monotonic()
+    if now < session.get('room_sweep_after', 0):
+        return
+    import threading
+    session['room_sweep_after'] = now + 1
+    session['room_worker'] = threading.Thread(target=host_room_sweep, args=(sid,), daemon=True)
+    session['room_worker'].start()
+
+
 def host_loop(provider, sid, tmux, session, server, agent):
     import selectors
     host_session_reset(session, agent)
@@ -7552,6 +7623,7 @@ def host_loop(provider, sid, tmux, session, server, agent):
         selector.register(server, selectors.EVENT_READ, "client")
         selector.register(agent.stdout, selectors.EVENT_READ, "agent")
         while not session["stop"]:
+            host_room_tick(provider, sid, session)
             fresh = session["state"].get("fresh_start")
             fresh_limit = HOST_FRESH_TIMEOUTS.get(fresh.get("phase") if isinstance(fresh, dict) else None)
             if fresh_limit is not None and time.time() - fresh.get("started", time.time()) > fresh_limit:
@@ -7997,7 +8069,12 @@ def host_cli(argv):
         return host_stop(provider, sid)
     if command == "handover":
         return host_handover(provider, sid)
-    return host_status(provider, sid)
+    status = host_status(provider, sid)
+    if '--rooms' in rest and status.get('alive') and status.get('owner') == 'host':
+        ping = host_request(provider, sid, dict(op='ping'), timeout=1)
+        status['room_message_protocol'] = ping.get('room_message_protocol') if ping.get('status') == 'ok' else None
+        status['room_features'] = ping.get('room_features', []) if ping.get('status') == 'ok' else []
+    return status
 
 
 HOST_ADOPT_PANE_TIMEOUT = 20

@@ -118,6 +118,12 @@ fn validMember(member: std.json.Value, store: []const u8) bool {
     return identity.len == provider.len + 1 + sid.len and std.mem.startsWith(u8, identity, provider) and identity[provider.len] == ':' and std.mem.eql(u8, identity[provider.len + 1 ..], sid);
 }
 
+fn validErrorCode(code: []const u8) bool {
+    if (code.len == 0 or code.len > 64) return false;
+    for (code) |ch| if (!((ch >= 'a' and ch <= 'z') or (ch >= '0' and ch <= '9') or ch == '_')) return false;
+    return true;
+}
+
 fn validAlias(alias: []const u8) bool {
     if (alias.len == 0 or alias.len > 32) return false;
     for (alias) |ch| if (!(ch >= 'a' and ch <= 'z') and !(ch >= 'A' and ch <= 'Z') and !(ch >= '0' and ch <= '9') and ch != '_' and ch != '-') return false;
@@ -125,7 +131,9 @@ fn validAlias(alias: []const u8) bool {
 }
 
 fn validPostRequest(r: Record, obj: std.json.Value) bool {
-    if (obj.object.count() != 7 or r.bindings.len != 0 or r.revision == 0 or !uuidValid(r.room_id)) return false;
+    const features = field(obj, "room_features");
+    if (obj.object.count() != (if (features != null) @as(usize, 8) else 7) or r.bindings.len != 0 or r.revision == 0 or !uuidValid(r.room_id)) return false;
+    if (features != null and (number(obj, "room_features") orelse 0) != 1) return false;
     const op = text(obj, "op") orelse return false;
     const command = text(obj, "command_id") orelse return false;
     const host = text(obj, "host_uuid") orelse return false;
@@ -219,8 +227,7 @@ fn validateEvidence(r: Record) bool {
     if (r.state == .rejected) {
         if (obj.object.count() != 1) return false;
         const code = text(obj, "error") orelse return false;
-        for ([_][]const u8{ "invalid_fields", "invalid_id", "invalid_text", "invalid_number", "invalid_members", "invalid_alias", "invalid_provider", "duplicate_member", "binding_immutable", "room_not_found", "revision_conflict", "unsupported_provider", "unsupported_remote_capability", "invalid_session", "host_disabled", "runtime_unavailable", "request_too_large", "invalid_json", "unknown_op", "invalid_recipients", "invalid_mentions" }) |known| if (std.mem.eql(u8, code, known)) return true;
-        return false;
+        return validErrorCode(code);
     }
     const event = field(obj, "event") orelse return false;
     const deliveries = field(obj, "deliveries") orelse return false;
@@ -354,6 +361,22 @@ pub fn prepare(scope: Scope, kind: Kind, command_id: []const u8, room_id: []cons
     try persist(scope, .{ .account_digest = &scope.account_digest, .store_uuid = &scope.store_uuid, .kind = kind, .command_id = command_id, .room_id = room_id, .revision = revision, .request = request, .bindings = bindings, .state = .prepared, .evidence = "" });
 }
 
+pub fn abandon(scope: Scope, command_id: []const u8) !void {
+    var guard = try lock(scope);
+    defer guard.deinit();
+    var entry = (try load(scope)) orelse return error.NotFound;
+    defer entry.deinit();
+    const record = entry.record();
+    if (record.state == .uncertain) return error.UnresolvedCommand;
+    if (record.state != .prepared) return error.TerminalCommand;
+    if (!std.mem.eql(u8, record.command_id, command_id)) return error.WrongCommand;
+    var path_buf: [700]u8 = undefined;
+    const path = try pathFor(scope, &path_buf);
+    var path_wide: [800]u16 = undefined;
+    const path_w = file_io.win32WidePath(&path_wide, path) orelse return error.InvalidPath;
+    if (w.DeleteFileW(path_w.ptr) == 0) return error.WriteFailed;
+}
+
 pub fn update(scope: Scope, command_id: []const u8, state: State, evidence: []const u8) !void {
     var guard = try lock(scope);
     defer guard.deinit();
@@ -373,6 +396,22 @@ pub fn updateLocked(guard: *const Lock, command_id: []const u8, state: State, ev
     if (state == .prepared) return error.InvalidTransition;
     record.state = state;
     record.evidence = evidence;
+    try persist(scope, record);
+}
+
+pub fn mayRollBackLaunch(previous: State) bool {
+    return previous == .prepared;
+}
+
+pub fn restorePrepared(guard: *const Lock, command_id: []const u8, previous: State) !void {
+    if (!mayRollBackLaunch(previous)) return error.InvalidTransition;
+    const scope = guard.scope;
+    var entry = (try load(scope)) orelse return error.NotFound;
+    defer entry.deinit();
+    var record = entry.record().*;
+    if (!std.mem.eql(u8, record.command_id, command_id)) return error.WrongCommand;
+    if (record.state != .uncertain or record.evidence.len != 0) return error.InvalidTransition;
+    record.state = .prepared;
     try persist(scope, record);
 }
 
@@ -405,12 +444,58 @@ fn roundTrips(scope: Scope, record: Record) !bool {
     return validate(scope, parsed.value);
 }
 
+test "a launch refusal rolls a first attempt back to prepared and leaves an earlier uncertain retry alone" {
+    try std.testing.expect(mayRollBackLaunch(.prepared));
+    try std.testing.expect(!mayRollBackLaunch(.uncertain));
+    try std.testing.expect(!mayRollBackLaunch(.accepted));
+    try std.testing.expect(!mayRollBackLaunch(.rejected));
+}
+
+test "a refused first launch rewinds to prepared across a journal restart while an uncertain retry keeps its exact body" {
+    var scope = testScope();
+    scope.account_digest = @splat('b');
+    var dir_buf: [512]u8 = undefined;
+    const dir = @import("session.zig").getSessionDir(&dir_buf) orelse return error.InvalidPath;
+    file_io.win32MakeDir(dir);
+    var path_buf: [700]u8 = undefined;
+    const path = try pathFor(scope, &path_buf);
+    var wide_buf: [800]u16 = undefined;
+    const wide_path = file_io.win32WidePath(&wide_buf, path) orelse return error.InvalidPath;
+    _ = w.DeleteFileW(wide_path.ptr);
+    try prepare(scope, .post, test_command, test_room, 3, test_request, &[_]Binding{});
+    var guard = try lock(scope);
+    defer guard.deinit();
+    try updateLocked(&guard, test_command, .uncertain, "");
+    try restorePrepared(&guard, test_command, .prepared);
+    var first = (try load(scope)).?;
+    defer first.deinit();
+    try std.testing.expectEqual(State.prepared, first.record().state);
+    try std.testing.expectEqualStrings(test_request, first.record().request);
+    try updateLocked(&guard, test_command, .uncertain, "");
+    try std.testing.expectError(error.InvalidTransition, restorePrepared(&guard, test_command, .uncertain));
+    var retry = (try load(scope)).?;
+    defer retry.deinit();
+    try std.testing.expectEqual(State.uncertain, retry.record().state);
+    try std.testing.expectEqualStrings("", retry.record().evidence);
+    try std.testing.expectEqualStrings(test_request, retry.record().request);
+    _ = w.DeleteFileW(wide_path.ptr);
+    try std.testing.expect(null == try load(scope));
+}
+
 test "post journal record keeps the exact request through the envelope" {
     const scope = testScope();
     try std.testing.expect(try roundTrips(scope, testRecord(&scope, test_request, .prepared, "")));
     try std.testing.expect(try roundTrips(scope, testRecord(&scope, test_request, .uncertain, "")));
     try std.testing.expect(try roundTrips(scope, testRecord(&scope, test_request, .accepted, test_receipt)));
     try std.testing.expect(try roundTrips(scope, testRecord(&scope, test_request, .rejected, "{\"error\":\"invalid_mentions\"}")));
+}
+
+test "capability-gated room posts keep their exact request and receipt through the journal" {
+    const scope = testScope();
+    const request = "{\"room_features\":1," ++ test_request[1..];
+    try std.testing.expect(try roundTrips(scope, testRecord(&scope, request, .prepared, "")));
+    try std.testing.expect(try roundTrips(scope, testRecord(&scope, request, .uncertain, "")));
+    try std.testing.expect(try roundTrips(scope, testRecord(&scope, request, .accepted, test_receipt)));
 }
 
 test "post journal request refuses a body that does not match the record" {
@@ -427,6 +512,18 @@ test "post journal request refuses a body that does not match the record" {
         "{\"op\":\"post_human\",\"command_id\":\"" ++ test_command ++ "\",\"room_id\":\"" ++ test_room ++ "\",\"expected_revision\":3,\"text\":\"hello\",\"recipients\":[]}",
     };
     for (bad) |request| try std.testing.expect(!(try roundTrips(scope, testRecord(&scope, request, .prepared, ""))));
+}
+
+test "a definite refusal is kept for any code the room host reports" {
+    const scope = testScope();
+    for ([_][]const u8{ "room_host_upgrade_required", "ambiguous_mentions", "runtime_unavailable", "command_conflict", "request_too_large" }) |code| {
+        var buf: [128]u8 = undefined;
+        const evidence = std.fmt.bufPrint(&buf, "{{\"error\":\"{s}\"}}", .{code}) catch unreachable;
+        try std.testing.expect(try roundTrips(scope, testRecord(&scope, test_request, .rejected, evidence)));
+    }
+    try std.testing.expect(!(try roundTrips(scope, testRecord(&scope, test_request, .rejected, "{\"error\":\"Not A Code\"}"))));
+    try std.testing.expect(!(try roundTrips(scope, testRecord(&scope, test_request, .rejected, "{\"error\":\"\"}"))));
+    try std.testing.expect(!(try roundTrips(scope, testRecord(&scope, test_request, .rejected, "{\"error\":\"invalid_json\",\"extra\":1}"))));
 }
 
 test "post journal evidence must match the request" {

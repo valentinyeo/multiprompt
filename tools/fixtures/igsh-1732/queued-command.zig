@@ -1,5 +1,5 @@
 const std = @import("std");
-const Kind = enum { create, edit, post, catalog, catalog_metadata, snapshot, events, status };
+const Kind = enum { create, edit, post, catalog, catalog_metadata, snapshot, events, status, members };
 const Pending = struct {
     awaiting_launch: bool = true,
     kind: Kind = .post,
@@ -8,7 +8,9 @@ const Pending = struct {
     revision: u64 = 7,
     location: u8 = 1,
     token: u8 = 3,
+    evidence: ?[]const u8 = null,
 };
+const PendingCommand = Pending;
 const rooms = struct {
     const Completion = union(enum) {
         pending,
@@ -20,6 +22,7 @@ const rooms = struct {
     };
     const Controller = struct {
         fail_launch: bool = false,
+        job: ?u8 = null,
         launches: usize = 0,
         room: [36]u8 = undefined,
         room_len: usize = 0,
@@ -41,9 +44,17 @@ var controller: ?rooms.Controller = .{};
 var pending_command: ?*Pending = null;
 var disposed: usize = 0;
 var discarded: usize = 0;
+var timer_kills: usize = 0;
 var refresh_failed: usize = 0;
 var refresh_queued: usize = 0;
 var action_failed: usize = 0;
+var action_accepted: usize = 0;
+var created = true;
+var error_shown: usize = 0;
+var rejection_logged: usize = 0;
+const diagnostics = struct {
+    fn syncLog(_: []const u8) void { rejection_logged += 1; }
+};
 var scope_valid = true;
 var visible = true;
 var journal_checked_generation: ?u64 = 1;
@@ -61,7 +72,17 @@ var metadata_read: ?struct { room_id: [36]u8 = @splat('r'), catalog_generation: 
 fn commandScope(_: u8) ?u8 { return if (scope_valid) 1 else null; }
 fn commandVisible(_: *Pending) bool { return visible; }
 const view = struct {
-    fn completeAction(_: u8, _: enum { failed }) void { action_failed += 1; }
+    fn showError(_: []const u8) void { error_shown += 1; }
+    fn completeAction(_: u8, outcome: enum { accepted, failed }) void {
+        switch (outcome) {
+            .accepted => {
+                action_accepted += 1;
+            },
+            .failed => {
+                action_failed += 1;
+            },
+        }
+    }
 };
 fn freePending(_: *Pending) void { pending_command = null; }
 fn discardBuilding() void { discarded += 1; }
@@ -71,7 +92,10 @@ fn scheduleDiscovery(_: *rooms.Controller) void { discovery += 1; }
 const app_state = struct { const g_main_hwnd = 0; };
 const TIMER_ROOM = 1;
 const w = struct {
-    fn KillTimer(_: usize, _: usize) bool { return true; }
+    fn KillTimer(_: usize, _: usize) bool {
+        timer_kills += 1;
+        return true;
+    }
     fn SetTimer(_: usize, _: usize, _: usize, _: ?*anyopaque) usize { return 1; }
 };
 fn reset(item: *Pending) void {
@@ -79,9 +103,14 @@ fn reset(item: *Pending) void {
     pending_command = item;
     disposed = 0;
     discarded = 0;
+    timer_kills = 0;
     refresh_failed = 0;
     refresh_queued = 0;
     action_failed = 0;
+    action_accepted = 0;
+    created = true;
+    error_shown = 0;
+    rejection_logged = 0;
     scope_valid = true;
     visible = true;
     discovery = 0;
@@ -130,6 +159,8 @@ test "stale route or account never launches queued command" {
         try std.testing.expectEqual(@as(usize, 0), controller.?.launches);
         try std.testing.expectEqual(@as(usize, 0), disposed);
         try std.testing.expect(pending_command == null);
+        try std.testing.expectEqual(@as(usize, 1), rejection_logged);
+        try std.testing.expectEqual(@as(usize, 1), error_shown);
     }
 }
 test "queued creation keeps empty room identity" {
@@ -150,9 +181,46 @@ test "launch failure frees pending action and schedules durable recovery" {
     try std.testing.expect(journal_checked_generation == null);
     try std.testing.expectEqual(@as(usize, 1), discovery);
     try std.testing.expectEqual(@as(usize, 1), action_failed);
+    try std.testing.expectEqual(@as(usize, 1), rejection_logged);
+    try std.testing.expectEqual(@as(usize, 1), error_shown);
     try std.testing.expectEqual(@as(usize, 1), disposed);
+    try std.testing.expectEqual(@as(usize, 1), timer_kills);
 }
-test "interrupted metadata and status reads remain eligible for refresh" {
+test "polling keeps running for a live read or a saved send and stops otherwise" {
+    var item = Pending{};
+    reset(&item);
+    const c = &controller.?;
+    stopPoll(c);
+    try std.testing.expectEqual(@as(usize, 0), timer_kills);
+    pending_command = null;
+    stopPoll(c);
+    try std.testing.expectEqual(@as(usize, 1), timer_kills);
+    c.job = 1;
+    stopPoll(c);
+    try std.testing.expectEqual(@as(usize, 1), timer_kills);
+    c.job = null;
+    item.evidence = "{}";
+    pending_command = &item;
+    stopPoll(c);
+    try std.testing.expectEqual(@as(usize, 2), timer_kills);
+}
+test "the real release helper tells the view its token failed and respects an uncreated view" {
+    var item = Pending{};
+    reset(&item);
+    created = false;
+    scope_valid = false;
+    try std.testing.expect(!launchQueuedCommand(&controller.?, .{ .finished = .{ .kind = .catalog } }, true));
+    try std.testing.expectEqual(@as(usize, 0), action_failed);
+    try std.testing.expectEqual(@as(usize, 0), action_accepted);
+    created = true;
+    item.awaiting_launch = true;
+    pending_command = &item;
+    try std.testing.expect(!launchQueuedCommand(&controller.?, .{ .finished = .{ .kind = .catalog } }, true));
+    try std.testing.expectEqual(@as(usize, 1), action_failed);
+    try std.testing.expectEqual(@as(usize, 0), action_accepted);
+    try std.testing.expect(pending_command == null);
+}
+test "interrupted metadata and member reads remain eligible for refresh" {
     var item = Pending{};
     reset(&item);
     metadata_read = .{};
@@ -160,10 +228,10 @@ test "interrupted metadata and status reads remain eligible for refresh" {
     try std.testing.expect(rows[0].metadata_state == .queued);
     try std.testing.expect(metadata_read == null);
     item.awaiting_launch = true;
-    try std.testing.expect(launchQueuedCommand(&controller.?, .{ .failed = .{ .kind = .status } }, true));
+    try std.testing.expect(launchQueuedCommand(&controller.?, .{ .failed = .{ .kind = .members } }, true));
     try std.testing.expectEqual(@as(usize, 1), candidate_scan);
     item.awaiting_launch = true;
     status_generation = 0;
-    try std.testing.expect(launchQueuedCommand(&controller.?, .{ .failed = .{ .kind = .status } }, true));
+    try std.testing.expect(launchQueuedCommand(&controller.?, .{ .failed = .{ .kind = .members } }, true));
     try std.testing.expectEqual(@as(usize, 1), candidate_scan);
 }

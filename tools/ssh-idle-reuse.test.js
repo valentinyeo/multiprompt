@@ -31,5 +31,5 @@ test('the shared channel waits for a handshake that is already starting', () => 
 test('a reader retry keeps a pending handshake instead of cancelling it', () => {
   const respawn = between(read('src/chat_transport.zig'), 'pub fn respawn(', '\nfn ');
   assert.doesNotMatch(respawn, /host\.starting = false/, 'a retry must not abandon a handshake that is still starting');
-  assert.match(respawn, /if \(host\.running and host\.process != null\)/, 'only a running process is terminated');
+  assert.match(respawn, /if \(host\.running\) abandon\(host\)/, 'only a running host is abandoned and its process terminated');
 });
