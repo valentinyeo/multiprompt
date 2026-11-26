@@ -1577,6 +1577,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         @import("native_session.zig").ready(@intCast(wp), lp != 0);
         return 0;
     }
+    if (msg == @import("win32.zig").WM_APP_NATIVE_SIZE) {
+        @import("native_session.zig").reportSize(@intCast(wp));
+        return 0;
+    }
     if (msg == @import("win32.zig").WM_APP_BROWSER_SIGNIN_DONE) {
         @import("browser_pane.zig").handleBrowserSigninDone(@bitCast(lp), wp);
         return 0;

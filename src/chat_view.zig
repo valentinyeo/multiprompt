@@ -1,5 +1,16 @@
 const std = @import("std");
 
+pub fn activityStrip(activity_visible: bool, dots_visible: bool) bool {
+    return activity_visible or dots_visible;
+}
+
+test "MUBO-591 the activity strip stays for live workers or a working session" {
+    try std.testing.expect(activityStrip(true, false));
+    try std.testing.expect(activityStrip(false, true));
+    try std.testing.expect(activityStrip(true, true));
+    try std.testing.expect(!activityStrip(false, false));
+}
+
 pub fn shouldShow(on: bool) bool {
     return on;
 }

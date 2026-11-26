@@ -901,6 +901,284 @@ def tool_summary(name, value):
     return tool_cap(" ".join(tool_text(summary).split()), 120)
 
 
+STEP_LABELS = {
+    'thinking': 'Thinking',
+    'reading': 'Reading',
+    'searching': 'Searching',
+    'editing': 'Editing',
+    'command': 'Running command',
+    'browsing': 'Browsing',
+    'planning': 'Planning',
+    'delegating': 'Delegating',
+    'working': 'Working',
+}
+
+STEP_TOOLS = {
+    'read': 'reading', 'readfile': 'reading', 'read_file': 'reading', 'view': 'reading',
+    'open_file': 'reading', 'cat': 'reading', 'notebookread': 'reading', 'readfiletool': 'reading',
+    'grep': 'searching', 'glob': 'searching', 'search': 'searching', 'rg': 'searching',
+    'codebase_search': 'searching', 'find_files': 'searching', 'list_files': 'searching',
+    'file_search': 'searching', 'grep_search': 'searching', 'semantic_search': 'searching',
+    'filesearch': 'searching', 'findfiles': 'searching',
+    'edit': 'editing', 'multiedit': 'editing', 'write': 'editing', 'apply_patch': 'editing',
+    'str_replace': 'editing', 'str_replace_editor': 'editing', 'create_file': 'editing',
+    'edit_file': 'editing', 'write_file': 'editing', 'notebookedit': 'editing', 'patch': 'editing',
+    'bash': 'command', 'shell': 'command', 'exec_command': 'command', 'local_shell': 'command',
+    'run_command': 'command', 'execute_command': 'command', 'terminal': 'command', 'exec': 'command',
+    'webfetch': 'browsing', 'websearch': 'browsing', 'fetch': 'browsing', 'browser': 'browsing',
+    'open_url': 'browsing', 'http_request': 'browsing',
+    'todowrite': 'planning', 'todo_write': 'planning', 'update_plan': 'planning', 'plan': 'planning',
+    'exitplanmode': 'planning',
+    'task': 'delegating', 'agent': 'delegating', 'invoke_subagent': 'delegating',
+    'spawn_agent': 'delegating', 'dispatch_agent': 'delegating', 'subagent': 'delegating',
+}
+
+SUBAGENT_TOOLS = {'task', 'agent', 'invoke_subagent', 'spawn_agent', 'dispatch_agent', 'subagent'}
+
+PLAN_PICK_MAX_AGE = 2 * 60 * 60
+PLAN_PICK_RECORDS = 2000
+PLAN_PICK_FINISH = {'finish', 'finished', 'done', 'end', 'ended', 'exit', 'exited', 'stop', 'stopped',
+                    'complete', 'completed', 'close', 'closed'}
+PLAN_PICK_START = {'start', 'started', 'launch', 'launched', 'begin', 'began', 'spawn', 'spawned',
+                   'pick', 'picked', 'claim', 'claimed'}
+PLAN_PICK_CACHE = {}
+
+
+def tool_key(tool):
+    name = tool if isinstance(tool, str) else ''
+    for candidate in (name.strip().lower(), name.rsplit('.', 1)[-1].strip().lower(),
+                      name.rsplit('/', 1)[-1].strip().lower(), name.split('__')[-1].strip().lower()):
+        if candidate in STEP_TOOLS:
+            return STEP_TOOLS[candidate]
+    return 'working'
+
+
+def step_label(tool, provider=None):
+    return STEP_LABELS[tool_key(tool)]
+
+
+def subagent_tool(tool):
+    name = tool if isinstance(tool, str) else ''
+    return name.rsplit('.', 1)[-1].strip().lower() in SUBAGENT_TOOLS
+
+
+def plan_pick_path():
+    override = os.environ.get('PLAN_PICK_LAUNCHES')
+    if isinstance(override, str) and override.strip():
+        return Path(override)
+    return HOME / '.local/state/token-ladder/launches.jsonl'
+
+
+def plan_pick_read(target):
+    try:
+        with target.open('r', encoding='utf-8', errors='replace') as handle:
+            lines = handle.readlines()[-PLAN_PICK_RECORDS:]
+    except OSError:
+        return []
+    records = []
+    for line in lines:
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(record, dict):
+            records.append(record)
+    return records
+
+
+def plan_pick_records(path=None):
+    target = plan_pick_path() if path is None else Path(path)
+    try:
+        info = target.stat()
+    except OSError:
+        return []
+    stamp = (str(target), info.st_mtime_ns, info.st_size)
+    cached = PLAN_PICK_CACHE.get('value')
+    if cached is not None and cached[0] == stamp:
+        return cached[1]
+    records = plan_pick_read(target)
+    PLAN_PICK_CACHE['value'] = (stamp, records)
+    return records
+
+
+def plan_pick_seconds(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value) / 1000.0 if abs(value) > 10 ** 11 else float(value)
+
+
+def plan_pick_alive(pid):
+    if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
+        return None
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except (OSError, ValueError):
+        return True
+    return True
+
+
+def plan_pick_phase(record):
+    for key in ('event', 'kind', 'type', 'phase', 'action'):
+        value = record.get(key)
+        if not isinstance(value, str):
+            continue
+        name = value.strip().lower()
+        if name in PLAN_PICK_FINISH:
+            return 'finish'
+        if name in PLAN_PICK_START:
+            return 'start'
+    return 'start'
+
+
+def plan_pick_key(record, index):
+    for key in ('id', 'launch_id', 'session', 'sid', 'task', 'cwd'):
+        value = record.get(key)
+        if isinstance(value, bool) or not isinstance(value, (str, int)) or value == '':
+            continue
+        return str(value)
+    return 'line-' + str(index)
+
+
+def plan_pick_name(record):
+    for key in ('task', 'name', 'label', 'title'):
+        value = record.get(key)
+        if isinstance(value, str) and value.strip():
+            return tool_cap(' '.join(value.split()), 40)
+    for key in ('cwd', 'folder', 'worktree', 'path'):
+        value = record.get(key)
+        if isinstance(value, str) and value.strip():
+            return tool_cap(process_basename(value.strip().rstrip('/\\')), 40)
+    return ''
+
+
+def plan_pick_workers(tmux, now=None, path=None):
+    if not isinstance(tmux, str) or not tmux:
+        return []
+    clock = time.time() if now is None else float(now)
+    active = {}
+    for index, record in enumerate(plan_pick_records(path)):
+        caller = record.get('caller')
+        if not isinstance(caller, str) or caller != tmux:
+            continue
+        key = plan_pick_key(record, index)
+        if plan_pick_phase(record) == 'finish':
+            active.pop(key, None)
+            continue
+        started = plan_pick_seconds(record.get('started_at'))
+        if started is None:
+            started = plan_pick_seconds(record.get('at'))
+        if started is None:
+            started = plan_pick_seconds(record.get('started'))
+        if started is None:
+            started = clock
+        if clock - started > PLAN_PICK_MAX_AGE or started - clock > 60:
+            continue
+        if plan_pick_alive(record.get('pid')) is False:
+            continue
+        lane = record.get('lane') if isinstance(record.get('lane'), str) else ''
+        model = record.get('model') if isinstance(record.get('model'), str) else ''
+        harness = record.get('harness') if isinstance(record.get('harness'), str) else ''
+        active[key] = dict(id='plan-pick:' + key, source='plan-pick', harness=harness or lane,
+                           lane=tool_cap(lane, 24), model=tool_cap(model, 32),
+                           label=plan_pick_name(record), step=STEP_LABELS['working'],
+                           started_at=int(started * 1000))
+    return list(active.values())
+
+
+def host_tmux_for(provider, sid):
+    if not host_identity(provider, sid):
+        return None
+    path = HOME / '.local/state/multiprompt/agent-host' / (host_key(provider, sid) + '.config.json')
+    config = host_read(path)
+    tmux = config.get('tmux') if isinstance(config, dict) else None
+    return tmux if isinstance(tmux, str) and tmux else None
+
+
+def subagent_workers(session):
+    workers = session.get('workers') if isinstance(session.get('workers'), dict) else {}
+    return [workers[key] for key in sorted(workers)]
+
+
+def stored_workers(provider, sid):
+    from contextlib import closing
+    path = message_store_path()
+    if not path.is_file():
+        return []
+    try:
+        with closing(message_store_ro(path)) as db:
+            if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='live_state'").fetchone():
+                return []
+            row = db.execute("SELECT body FROM live_state WHERE provider=? AND sid=? AND slot='workers.snapshot'", (provider, sid)).fetchone()
+    except sqlite3.Error:
+        return []
+    if not row:
+        return []
+    try:
+        event = json.loads(row[0])
+    except ValueError:
+        return []
+    workers = event.get('payload', {}).get('workers') if isinstance(event, dict) else None
+    return [worker for worker in workers if isinstance(worker, dict)] if isinstance(workers, list) else []
+
+
+def worker_snapshot(provider, sid, session=None, now=None):
+    local = subagent_workers(session) if isinstance(session, dict) else stored_workers(provider, sid)
+    picked = plan_pick_workers(host_tmux_for(provider, sid), now)
+    seen = {worker.get('id') for worker in local}
+    return dict(workers=local + [worker for worker in picked if worker.get('id') not in seen])
+
+
+def worker_event(provider, sid, tmux, session, workers):
+    host_event(provider, sid, tmux, session, 'workers.snapshot', dict(workers=workers))
+
+
+def host_workers_page(page, provider, sid, now=None):
+    workers = worker_snapshot(provider, sid, now=now)['workers']
+    page['workers'] = workers
+    snapshot = page.get('live_snapshot')
+    if isinstance(snapshot, dict):
+        snapshot['workers'] = workers
+        events = [event for event in snapshot.get('events') or [] if event.get('kind') != 'workers.snapshot']
+        if workers:
+            events.append(dict(kind='workers.snapshot', payload=dict(workers=workers)))
+        snapshot['events'] = events
+    return page
+
+
+def track_subagent(provider, sid, tmux, session, kind, payload, item):
+    if not isinstance(payload, dict) or not isinstance(item, str) or not item:
+        return
+    replace = payload.get('tool_input') if isinstance(payload.get('tool_input'), dict) else payload.get('input')
+    tool = payload.get('tool') if isinstance(payload.get('tool'), str) else ''
+    if kind == 'item.started':
+        if payload.get('type') != 'tool_call' or not subagent_tool(tool):
+            return
+        workers = session.setdefault('workers', {})
+        model = session.get('settings', {}).get('model') if isinstance(session.get('settings'), dict) else None
+        description = ''
+        if isinstance(replace, dict):
+            for key in ('description', 'prompt', 'task', 'name'):
+                value = replace.get(key)
+                if isinstance(value, str) and value.strip():
+                    description = tool_cap(' '.join(value.split()), 40)
+                    break
+        workers[item] = dict(id=item, source='subagent', harness=provider,
+                             model=tool_cap(model, 32) if isinstance(model, str) else '',
+                             label=description or (tool_cap(tool, 24) if tool else ''),
+                             step=STEP_LABELS['delegating'], started_at=int(time.time() * 1000))
+        worker_event(provider, sid, tmux, session, subagent_workers(session))
+        return
+    if kind != 'item.done':
+        return
+    workers = session.get('workers')
+    if not isinstance(workers, dict) or item not in workers:
+        return
+    workers.pop(item, None)
+    worker_event(provider, sid, tmux, session, subagent_workers(session))
+
+
 def tool_failure_metadata(value):
     flags = []
     if isinstance(value, dict):
@@ -2534,7 +2812,7 @@ def live_state_apply(db, provider, sid, seq, event):
         db.execute('DELETE FROM live_state WHERE provider=? AND sid=? AND slot=?', (*scope, slot))
 
     if kind == 'turn.started':
-        db.execute("DELETE FROM live_state WHERE provider=? AND sid=? AND (slot LIKE 'item:%' OR slot IN ('turn.started','turn.ended'))", scope)
+        db.execute("DELETE FROM live_state WHERE provider=? AND sid=? AND (slot LIKE 'item:%' OR slot LIKE 'worker:%' OR slot IN ('turn.started','turn.ended','workers.snapshot'))", scope)
         save(kind, event)
     elif kind in ('text.delta', 'text.done', 'thinking.delta', 'thinking.done', 'item.started', 'item.done', 'plan.proposed'):
         item = event.get('item') or ('plan:' + payload.get('request_id', '') if kind == 'plan.proposed' else '')
@@ -2546,21 +2824,21 @@ def live_state_apply(db, provider, sid, seq, event):
             elif kind == 'plan.proposed':
                 initial = dict(event, kind='plan.snapshot')
             else:
-                initial = dict(event, kind='item.started', payload={key: payload[key] for key in ('title', 'display_name', 'tool') if key in payload})
+                initial = dict(event, kind='item.started', payload={key: payload[key] for key in ('title', 'display_name', 'tool', 'step') if key in payload})
             save(slot + ':start', initial)
         if kind.startswith(('text.', 'thinking.')):
             save(slot + ':body', event)
         elif kind == 'item.done':
             save(slot + ':body', dict(event, payload=dict(status=payload.get('status', ''))))
         elif kind == 'item.started':
-            save(slot + ':start', dict(event, payload={key: payload[key] for key in ('title', 'display_name', 'tool') if key in payload}))
+            save(slot + ':start', dict(event, payload={key: payload[key] for key in ('title', 'display_name', 'tool', 'step') if key in payload}))
             remove(slot + ':body')
         elif kind == 'plan.proposed':
             save(slot + ':start', dict(event, kind='plan.snapshot'))
         if not exists:
             db.execute("DELETE FROM live_state WHERE provider=? AND sid=? AND slot IN (SELECT substr(slot,1,length(slot)-6) || ':body' FROM live_state WHERE provider=? AND sid=? AND slot LIKE 'item:%:start' ORDER BY seq DESC LIMIT -1 OFFSET 96)", (*scope, *scope))
             db.execute("DELETE FROM live_state WHERE provider=? AND sid=? AND slot IN (SELECT slot FROM live_state WHERE provider=? AND sid=? AND slot LIKE 'item:%:start' ORDER BY seq DESC LIMIT -1 OFFSET 96)", (*scope, *scope))
-    elif kind in ('turn.ended', 'host.settings', 'host.status'):
+    elif kind in ('turn.ended', 'host.settings', 'host.status', 'workers.snapshot'):
         save(kind, event)
     if kind in ('approval.request', 'question.request', 'plan.proposed'):
         save('request:' + payload.get('request_id', ''), event)
@@ -2615,6 +2893,10 @@ def live_snapshot_read(db, provider, sid):
 
 
 def live_snapshot(provider, sid):
+    return host_workers_page(stored_live_snapshot(provider, sid), provider, sid)
+
+
+def stored_live_snapshot(provider, sid):
     from contextlib import closing
     path = message_store_path()
     if not path.is_file():
@@ -2692,7 +2974,8 @@ def message_events_page(provider, sid, after, snapshot=False):
         return live_snapshot(provider, sid)
     path = message_store_path()
     if not path.is_file():
-        return dict(events=[], next_after=after)
+        return host_workers_page(dict(events=[], next_after=after), provider, sid)
+    page = dict(events=[], next_after=after)
     try:
         with closing(message_store_ro(path)) as db:
             if snapshot:
@@ -2700,9 +2983,10 @@ def message_events_page(provider, sid, after, snapshot=False):
                 if after < message_events_floor(db, provider, sid):
                     db.rollback()
                     return live_snapshot(provider, sid)
-            return message_events_rows(db, provider, sid, after)
+            page = message_events_rows(db, provider, sid, after)
     except sqlite3.Error:
-        return dict(events=[], next_after=after)
+        page = dict(events=[], next_after=after)
+    return host_workers_page(page, provider, sid)
 
 
 def message_row(row):
@@ -3467,7 +3751,7 @@ def host_reply(query):
         return host_switch_ai(provider, sid, query.get("to"))
     if query.get("op") == "set_auto_switch":
         return host_auto_switch_set(provider, sid, query)
-    if query.get("op") == "set_effort" and provider not in ("claude", "antigravity"):
+    if query.get("op") == "set_effort" and provider not in HOST_EFFORT_PROVIDERS:
         return dict(status="refused", reason="unsupported_provider")
     if query.get("op") == "set_model" and provider not in HOST_MODEL_CHOICES and provider != "pi":
         return dict(status="refused", reason="unsupported_provider")
@@ -3475,18 +3759,22 @@ def host_reply(query):
         return dict(status="refused", reason="unsupported_provider")
     if query.get("op") == "set_permission_mode" and provider not in ("claude", "codex"):
         return dict(status="refused", reason="unsupported_provider")
-    if not host_owned(provider, sid) and query.get("op") == "set_model" and provider == "pi":
-        return dict(status="unavailable", reason="host_not_running")
     if not host_owned(provider, sid):
         operation = query.get("op")
         if operation not in ("set_model", "set_effort", "set_permission_mode"):
             return dict(status="unavailable", reason="host_not_running")
         mode = query.get("mode") if operation == "set_permission_mode" else None
+        pi_choice = None
         if operation == "set_permission_mode":
             if mode not in HOST_PERMISSION_MODES:
                 return dict(status="refused", reason="invalid_permission_mode")
             key = "permission_mode"
             value = mode
+        elif operation == "set_model" and provider == "pi":
+            pi_provider, pi_model = host_pi_request_model(query)
+            if not pi_provider or not pi_model:
+                return dict(status="refused", reason="invalid_model")
+            pi_choice = (pi_provider, pi_model)
         else:
             key = "model" if operation == "set_model" else "effort"
             allowed = tuple(HOST_MODEL_CHOICES[provider]) if key == "model" else host_effort_choices(provider)
@@ -3502,6 +3790,11 @@ def host_reply(query):
             config = host_config(provider, sid)
             if config is None:
                 return dict(status="refused", reason="host_disabled")
+            if pi_choice is not None:
+                host_pi_save_model(config, pi_choice[0], pi_choice[1])
+                host_write(host_paths(provider, sid)["config"], config)
+                host_log(provider, sid, "pi_set_model", dict(provider=pi_choice[0], model=pi_choice[1]))
+                return dict(status="ok")
             config[key] = value
             if provider == "antigravity" and key in ("model", "effort"):
                 config = host_antigravity_normalize(config)
@@ -3517,7 +3810,9 @@ def host_reply(query):
         finally:
             host_release(lock)
     request = {key: query[key] for key in ("op", "request_id", "decision", "answers", "dismissed",
-                                           "action", "feedback", "input", "mode", "model", "effort", "provider_id", "data", "handover_file") if key in query}
+                                           "action", "feedback", "input", "mode", "model", "effort",
+                                           "provider_name", "model_provider", "pi_provider",
+                                           "provider_id", "data", "handover_file") if key in query}
     reply = host_request(provider, sid, request)
     return reply if isinstance(reply, dict) else dict(status="error", reason="invalid_reply")
 
@@ -3943,18 +4238,70 @@ def host_codex_argv(provider, sid, base):
 PI_MODEL_PART = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,159}")
 
 
+def host_pi_model_parts(model_provider, model):
+    if not isinstance(model, str) or not model:
+        return None, None
+    if model_provider in (None, ""):
+        if "/" not in model:
+            return None, None
+        model_provider, model = model.split("/", 1)
+    elif isinstance(model_provider, str) and model.startswith(model_provider + "/"):
+        model = model[len(model_provider) + 1:]
+    if not isinstance(model_provider, str) or PI_MODEL_PART.fullmatch(model_provider) is None:
+        return None, None
+    if PI_MODEL_PART.fullmatch(model) is None:
+        return None, None
+    return model_provider, model
+
+
+def host_pi_request_model(request):
+    raw_provider = request.get("provider_name")
+    if raw_provider in (None, ""):
+        raw_provider = request.get("model_provider")
+    if raw_provider in (None, ""):
+        raw_provider = request.get("pi_provider")
+    return host_pi_model_parts(raw_provider, request.get("model"))
+
+
+def host_pi_saved_model(config):
+    if not isinstance(config, dict):
+        return None, None
+    raw_provider = config.get("model_provider")
+    if raw_provider in (None, ""):
+        raw_provider = config.get("pi_provider")
+    chosen_provider, chosen_model = host_pi_model_parts(raw_provider, config.get("model"))
+    if chosen_provider and chosen_model:
+        return chosen_provider, chosen_model
+    saved = config.get("pi_model")
+    if isinstance(saved, dict):
+        return host_pi_model_parts(saved.get("provider"), saved.get("model"))
+    return None, None
+
+
+def host_pi_save_model(config, model_provider, model):
+    config["model_provider"] = model_provider
+    config["model"] = model
+    config["pi_model"] = dict(provider=model_provider, model=model)
+    config.pop("pi_provider", None)
+    return config
+
+
+def host_pi_model_choice(provider, sid):
+    chosen_provider, chosen_model = host_pi_saved_model(host_config(provider, sid))
+    if chosen_provider and chosen_model:
+        return chosen_provider, chosen_model
+    return HOST_PI_MODEL[1], HOST_PI_MODEL[3]
+
+
 def host_pi_choice(provider, sid):
-    config = host_config(provider, sid) or {}
-    chosen_provider = config.get("model_provider")
-    chosen_model = config.get("model")
-    if isinstance(chosen_provider, str) and isinstance(chosen_model, str) and PI_MODEL_PART.fullmatch(chosen_provider) and PI_MODEL_PART.fullmatch(chosen_model):
-        return ["--provider", chosen_provider, "--model", chosen_model]
-    return list(HOST_PI_MODEL)
+    chosen_provider, chosen_model = host_pi_model_choice(provider, sid)
+    return ["--provider", chosen_provider, "--model", chosen_model]
 
 
 def host_pi_argv(provider, sid, base):
     native = host_session_state(provider, sid).get("context_session") or sid
-    return base + ["--mode", "rpc", *host_pi_choice(provider, sid), "--session-id", native, "--append-system-prompt", HOST_APPEND_PROMPT]
+    return base + ["--mode", "rpc", *host_pi_choice(provider, sid), *host_pi_thinking_arg(provider, sid),
+                   "--session-id", native, "--append-system-prompt", HOST_APPEND_PROMPT]
 
 
 def host_hax_argv(provider, sid, base):
@@ -4014,13 +4361,34 @@ HOST_MODEL_CHOICES = dict(
 )
 
 HOST_EFFORT_CHOICES = ("low", "medium", "high")
+HOST_PI_EFFORTS = ("low", "medium", "high", "xhigh")
+HOST_EFFORT_PROVIDERS = ("claude", "antigravity", "codex", "pi")
 HOST_ANTIGRAVITY_EFFORTS = ("low", "medium", "high", "xhigh")
 HOST_ANTIGRAVITY_XHIGH_MODELS = ("neon", "hydrogen")
 HOST_ANTIGRAVITY_DEFAULT = ("neon", "medium")
 
 
 def host_effort_choices(provider):
-    return HOST_ANTIGRAVITY_EFFORTS if provider == "antigravity" else HOST_EFFORT_CHOICES
+    if provider == "antigravity":
+        return HOST_ANTIGRAVITY_EFFORTS
+    if provider == "pi":
+        return HOST_PI_EFFORTS
+    return HOST_EFFORT_CHOICES
+
+
+def host_codex_effort(provider, sid):
+    effort = (host_config(provider, sid) or {}).get("effort")
+    return effort if effort in HOST_EFFORT_CHOICES else ""
+
+
+def host_pi_effort(provider, sid):
+    effort = (host_config(provider, sid) or {}).get("effort")
+    return effort if effort in HOST_PI_EFFORTS else ""
+
+
+def host_pi_thinking_arg(provider, sid):
+    effort = host_pi_effort(provider, sid)
+    return ["--thinking", effort] if effort else []
 
 
 def host_antigravity_effort(model, effort):
@@ -4085,10 +4453,14 @@ def host_settings(provider, sid):
     config = host_config(provider, sid) or {}
     if provider == "codex":
         choice = config.get("model")
-        return dict(model=choice if choice in HOST_MODEL_CHOICES["codex"] else "", effort="")
+        return dict(model=choice if choice in HOST_MODEL_CHOICES["codex"] else "",
+                    effort=host_codex_effort(provider, sid))
     if provider == "antigravity":
         model, effort = host_antigravity_choice(provider, sid)
         return dict(model=model, effort=effort)
+    if provider == "pi":
+        chosen_provider, chosen_model = host_pi_model_choice(provider, sid)
+        return dict(provider=chosen_provider, model=chosen_model, effort=host_pi_effort(provider, sid))
     args = config.get("args") if isinstance(config.get("args"), list) else []
     command = config.get("command") if isinstance(config.get("command"), list) else []
     parts = command + args
@@ -4862,7 +5234,7 @@ def host_fresh_resume(provider, sid, tmux, session):
 
 HOST_AI_NAMES = dict(claude="Claude", codex="Codex", pi="Pi", antigravity="Antigravity")
 HOST_SWITCH_TARGETS = ("claude", "codex", "pi", "antigravity")
-HOST_SWITCH_CONFIG_KEYS = ("tmux", "cwd", "permission_mode", "spawn_mode", "face", "login", "nightly", "auto_switch")
+HOST_SWITCH_CONFIG_KEYS = ("tmux", "cwd", "permission_mode", "spawn_mode", "face", "login", "nightly", "auto_switch", "pi_model")
 HOST_SWITCH_HANDOVER_LIMIT = 6000
 HOST_SWITCH_MESSAGE_LIMIT = 1200
 HOST_AUTO_SWITCH_ORDER = ("claude", "codex", "pi", "antigravity")
@@ -5189,6 +5561,14 @@ def host_switch_ai_locked(provider, sid, target, reason=None):
                                                fresh_start=dict(phase="resume", file=handover.name, started=time.time(),
                                                                 switch_from=provider)))
         moved = {key: config[key] for key in HOST_SWITCH_CONFIG_KEYS if key in config}
+        if provider == "pi":
+            chosen_provider, chosen_model = host_pi_saved_model(config)
+            if chosen_provider and chosen_model:
+                moved["pi_model"] = dict(provider=chosen_provider, model=chosen_model)
+        if target == "pi":
+            chosen_provider, chosen_model = host_pi_saved_model(moved)
+            if chosen_provider and chosen_model:
+                host_pi_save_model(moved, chosen_provider, chosen_model)
         host_write(paths["config"], dict(moved, enabled=True, provider=target, sid=new_sid, switched_from=dict(provider=provider, sid=sid)))
     except (OSError, ValueError, sqlite3.Error):
         return dict(status="error", reason="switch_failed")
@@ -5281,6 +5661,12 @@ def host_event(provider, sid, tmux, session, kind, payload=None, item=None, turn
             message_event(db, provider, sid, message)
     except (OSError, ValueError, sqlite3.Error):
         host_log(provider, sid, "event_failed", dict(kind=kind))
+        return
+    if kind in ('item.started', 'item.done'):
+        track_subagent(provider, sid, tmux, session, kind, payload, item)
+    elif kind in ('turn.started', 'turn.ended') and session.get('workers'):
+        session['workers'] = {}
+        worker_event(provider, sid, tmux, session, [])
 
 
 def host_stream_message(session, message_id):
@@ -5397,7 +5783,8 @@ def host_assistant_event(provider, sid, tmux, session, event):
         if block.get("type") == "tool_use" and isinstance(block.get("id"), str):
             host_event(provider, sid, tmux, session, "item.started",
                        dict(type="tool_call", tool=block.get("name"), input=block.get("input") or {},
-                            title=block.get("name"), display_name=block.get("name")), block["id"])
+                            title=block.get("name"), display_name=block.get("name"),
+                            step=step_label(block.get("name"), provider)), block["id"])
         elif block.get("type") in ("text", "thinking") and parent is None:
             kind = block["type"]
             opened = host_stream_open_block(entry, kind) or host_stream_block(session, message_id, kind)
@@ -5803,6 +6190,10 @@ def host_handle_request(provider, sid, tmux, session, request):
         return adapter["interrupt"](provider, sid, session)
     if operation == "set_model" and provider == "pi":
         return host_pi_set_model(provider, sid, tmux, session, request)
+    if operation == "set_effort" and provider == "pi":
+        if request.get("effort") not in HOST_PI_EFFORTS:
+            return host_refuse("invalid_effort")
+        return host_pi_set_effort(provider, sid, tmux, session, request["effort"])
     if operation == "login":
         if provider != "pi":
             return host_refuse("unsupported_provider")
@@ -5812,7 +6203,9 @@ def host_handle_request(provider, sid, tmux, session, request):
             return host_refuse("unsupported_provider")
         return host_pi_login_answer_op(provider, sid, tmux, session, request)
     if operation in ("set_model", "set_effort"):
-        if operation == "set_effort" and provider not in ("claude", "antigravity") or provider not in HOST_MODEL_CHOICES:
+        if provider not in HOST_MODEL_CHOICES:
+            return host_refuse("unsupported_provider")
+        if operation == "set_effort" and provider not in HOST_EFFORT_PROVIDERS:
             return host_refuse("unsupported_provider")
         key = "model" if operation == "set_model" else "effort"
         allowed = tuple(HOST_MODEL_CHOICES[provider]) if key == "model" else host_effort_choices(provider)
@@ -6177,7 +6570,8 @@ def host_antigravity_event(provider, sid, tmux, session, event):
             if tool_id not in started:
                 started.add(tool_id)
                 host_event(provider, sid, tmux, session, "item.started",
-                           dict(type="tool_call", tool=tool, input=params, title=tool, display_name=tool), tool_id)
+                           dict(type="tool_call", tool=tool, input=params, title=tool, display_name=tool,
+                                step=step_label(tool, provider)), tool_id)
             if state in ("DONE", "ERROR", "CANCELED"):
                 failed = state != "DONE" or bool(info.get("is_error"))
                 output = info.get("output") if "output" in info else info.get("error")
@@ -6357,6 +6751,9 @@ def host_codex_write(provider, sid, session, token, text):
         chosen = host_codex_model(provider, sid)
         if chosen:
             params["model"] = chosen
+        effort = host_codex_effort(provider, sid)
+        if effort:
+            params["effort"] = effort
         sent = host_codex_call(session, "turn/start", params, "turn")
     if sent:
         session["codex_tokens"][session["seq"]] = token
@@ -6473,7 +6870,8 @@ def host_codex_item(provider, sid, tmux, session, item, done):
         return
     if not done:
         host_event(provider, sid, tmux, session, "item.started",
-                   dict(type="tool_call", tool=tool, input=arguments, title=tool, display_name=tool), ident)
+                   dict(type="tool_call", tool=tool, input=arguments, title=tool, display_name=tool,
+                        step=step_label(tool, provider)), ident)
         return
     output, failed = host_codex_output(item)
     host_event(provider, sid, tmux, session, "item.done",
@@ -6585,8 +6983,10 @@ def host_pi_open(provider, sid, tmux, session):
     session["ready"] = True
     native = session["state"].get("context_session") or sid
     session["state"]["native_session"] = native
+    chosen_provider, chosen_model = host_pi_model_choice(provider, sid)
+    session["pi_model"] = dict(provider=chosen_provider, model=chosen_model)
     host_state_write(provider, sid, session["state"])
-    host_log(provider, sid, "init", dict(session=native))
+    host_log(provider, sid, "init", dict(session=native, provider=chosen_provider, model=chosen_model))
     host_event(provider, sid, tmux, session, "host.status", dict(state="ready"))
 
 
@@ -6756,6 +7156,9 @@ def host_pi_event(provider, sid, tmux, session, event):
         if event.get("command") == "set_model":
             host_log(provider, sid, "pi_set_model_reply", dict(success=event.get("success") is not False))
             return
+        if event.get("command") == "set_thinking_level":
+            host_log(provider, sid, "pi_set_thinking_level_reply", dict(success=event.get("success") is not False))
+            return
         if event.get("command") == "get_login_providers":
             host_pi_login_providers(provider, sid, tmux, session, data)
             return
@@ -6796,7 +7199,8 @@ def host_pi_event(provider, sid, tmux, session, event):
     elif kind == "tool_execution_start" and isinstance(event.get("toolCallId"), str):
         tool = event.get("toolName")
         host_event(provider, sid, tmux, session, "item.started",
-                   dict(type="tool_call", tool=tool, input=event.get("args") or {}, title=tool, display_name=tool),
+                   dict(type="tool_call", tool=tool, input=event.get("args") or {}, title=tool, display_name=tool,
+                        step=step_label(tool, provider)),
                    event["toolCallId"])
     elif kind == "tool_execution_end" and isinstance(event.get("toolCallId"), str):
         result = event.get("result") if isinstance(event.get("result"), dict) else {}
@@ -6831,21 +7235,34 @@ def host_pi_set_mode(provider, sid, session, mode):
 
 
 def host_pi_set_model(provider, sid, tmux, session, request):
-    model_provider = request.get("provider_name")
-    model = request.get("model")
-    if not isinstance(model_provider, str) or PI_MODEL_PART.fullmatch(model_provider) is None:
-        return host_refuse("invalid_model")
-    if not isinstance(model, str) or PI_MODEL_PART.fullmatch(model) is None:
+    model_provider, model = host_pi_request_model(request)
+    if not model_provider or not model:
         return host_refuse("invalid_model")
     if not host_control_send(session, dict(type="set_model", provider=model_provider, modelId=model)):
         return dict(status="error", reason="stdin_write_failed")
     config = host_config(provider, sid)
     if config is not None:
-        config["model_provider"] = model_provider
-        config["model"] = model
+        host_pi_save_model(config, model_provider, model)
         host_write(host_paths(provider, sid)["config"], config)
     session["pi_model"] = dict(provider=model_provider, model=model)
     host_log(provider, sid, "pi_set_model", dict(provider=model_provider, model=model))
+    return dict(status="ok")
+
+
+def host_pi_set_effort(provider, sid, tmux, session, level):
+    sent = host_control_send(session, dict(type="set_thinking_level", level=level))
+    if not sent and session.get("ready"):
+        return dict(status="error", reason="stdin_write_failed")
+    config = host_config(provider, sid)
+    if config is not None:
+        config["effort"] = level
+        host_write(host_paths(provider, sid)["config"], config)
+    session["pi_effort"] = level
+    host_log(provider, sid, "pi_set_thinking_level", dict(level=level, live=sent))
+    if "settings" in session:
+        session["settings"] = host_settings(provider, sid)
+        session["applied_settings"] = dict(session["settings"]) if sent else None
+        host_settings_event(provider, sid, tmux, session)
     return dict(status="ok")
 
 
@@ -6896,7 +7313,7 @@ def host_hax_record(provider, sid, tmux, session, record):
             arguments = {"arguments": record.get("arguments")}
         host_event(provider, sid, tmux, session, "item.started",
                    dict(type="tool_call", tool=tool, input=arguments if isinstance(arguments, dict) else {},
-                        title=tool, display_name=tool), record["call_id"])
+                        title=tool, display_name=tool, step=step_label(tool, provider)), record["call_id"])
     elif kind == "tool_result" and isinstance(record.get("call_id"), str):
         failed = bool(record.get("is_error"))
         host_event(provider, sid, tmux, session, "item.done",
@@ -7173,7 +7590,7 @@ def host_loop(provider, sid, tmux, session, server, agent):
     host_session_reset(session, agent)
     host_history_claim(provider, sid, session)
     host_nightly_mark(provider, sid, session)
-    if provider in ("claude", "codex", "antigravity"):
+    if provider in ("claude", "codex", "antigravity", "pi"):
         session["settings"] = host_settings(provider, sid)
         session["starting_settings"] = dict(session["settings"])
         session["applied_settings"] = None
