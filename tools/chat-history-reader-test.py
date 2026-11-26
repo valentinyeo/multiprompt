@@ -7434,7 +7434,7 @@ class HostEventStreamTest(HostEventStreamFixture, unittest.TestCase):
         started = self.events('item.started')
         self.assertEqual([row['item'] for row in started], ['toolu_inner'])
         self.assertEqual(started[0]['payload'], dict(type='tool_call', tool='Read', input=dict(file_path='a'),
-                                                    title='Read', display_name='Read'))
+                                                    title='Read', display_name='Read', step='Reading'))
 
     def test_tool_steps_and_the_turn_end_reach_the_event_log(self):
         self.feed(dict(type='assistant', message=dict(id='msg-1', content=[dict(type='tool_use', id='toolu_one', name='Bash',
@@ -8445,6 +8445,56 @@ class IGSH_1828_HostRecallTest(HostControlFixture, unittest.TestCase):
 
 class HostAntigravityTurnTest(HostEventStreamFixture, unittest.TestCase):
     provider = 'antigravity'
+
+    def writes(self):
+        return [json.loads(line) for line in self.agent_input.getvalue().decode().splitlines() if line.strip()]
+
+    def answer(self, **request):
+        return reader.host_handle_request('antigravity', self.sid, self.tmux, self.session, request)
+
+    def test_antigravity_answers_with_its_own_handler(self):
+        self.assertIs(reader.HOST_ADAPTERS['antigravity']['answer'], reader.host_antigravity_answer)
+        self.assertIsNot(reader.HOST_ADAPTERS['antigravity']['answer'], reader.host_pi_answer)
+
+    def test_antigravity_refuses_every_dialog_without_speaking_the_pi_protocol(self):
+        for request in (dict(op='approval_reply', request_id='agy-approval-1', decision='accept'),
+                        dict(op='question_reply', request_id='agy-question-1', answers={'Colour': 'Lime'}),
+                        dict(op='plan_reply', request_id='agy-plan-1', action='implement')):
+            with self.subTest(op=request['op']):
+                self.assertEqual(self.answer(**request), dict(status='refused', reason='antigravity_dialog_unsupported'))
+        self.assertEqual(self.writes(), [], 'Antigravity must not be sent a Pi extension_ui_response line')
+        self.assertEqual(self.session['parked'], {})
+
+    def test_antigravity_refuses_an_answer_op_it_does_not_claim(self):
+        reply = reader.host_antigravity_answer('antigravity', self.sid, self.tmux, self.session,
+                                              dict(op='login_answer', request_id='agy-1'))
+        self.assertEqual(reply, dict(status='refused', reason='unsupported_request'))
+        self.assertEqual(self.writes(), [])
+
+    def test_antigravity_mode_is_fixed_through_both_entry_points(self):
+        self.write_config()
+        through_host = self.answer(op='set_permission_mode', mode='plan')
+        through_settings = reader.host_reply(dict(provider='antigravity', sid=self.sid, op='set_permission_mode',
+                                                  mode='plan'))
+        self.assertEqual(through_host, dict(status='refused', reason='antigravity_mode_fixed'))
+        self.assertEqual(through_settings, dict(status='refused', reason='antigravity_mode_fixed'))
+        self.assertEqual(reader.host_reply(dict(provider='antigravity', sid=self.sid, op='set_permission_mode',
+                                                mode='yolo'))['reason'], 'invalid_permission_mode')
+        self.assertNotIn('permission_mode', reader.host_config('antigravity', self.sid))
+
+    def test_an_antigravity_dialog_step_keeps_the_send_and_the_reply(self):
+        self.session['sends'] = [dict(id='mp-antigravity-3', attempt='a', epoch=0, accepted=False, turn='t-1',
+                                      sha256='x', uuid=None, text='hello')]
+        self.feed(dict(event='step_update',
+                       step_update=dict(conversation_id='conversation-1', step_index=0, state='ACTIVE',
+                                        step_type='question')))
+        self.assertTrue(self.session['sends'][0]['accepted'],
+                        'a dialog step Antigravity sends must leave the message sent')
+        self.feed(dict(event='result', result=dict(conversation_id='conversation-1', status='SUCCESS',
+                                                  response='Lime it is')))
+        self.assertEqual([row['payload']['text'] for row in self.antigravity_events('text.done')], ['Lime it is'])
+        ended = self.antigravity_events('turn.ended')
+        self.assertEqual(ended[-1]['payload']['status'], 'completed')
 
     def antigravity_events(self, kind=None):
         db = reader.message_store_db(self.tmux)
@@ -9867,6 +9917,113 @@ class MUBO_221_LaunchCommandTest(unittest.TestCase):
             'print(\'{"status":"enabled","sid":"x"}\' if step == "enable" else \'{"status":"started","pid":7}\')\n')
         self.assertEqual(ran.returncode, 0)
         self.assertEqual(ran.stdout.strip().splitlines()[-1], '{"status":"started","pid":7}')
+
+
+class MUBO_591_LiveActivityTest(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name)
+        patch.object(reader, 'HOME', self.home).start()
+        patch.dict(os.environ, {'PLAN_PICK_LAUNCHES': ''}).start()
+        self.addCleanup(patch.stopall)
+        reader.PLAN_PICK_CACHE.clear()
+
+    def launches(self, *records):
+        path = reader.plan_pick_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(''.join(json.dumps(record) + '\n' for record in records))
+        return path
+
+    def test_every_hosted_provider_names_the_same_short_steps(self):
+        cases = {
+            'claude': [('Read', 'Reading'), ('Grep', 'Searching'), ('Edit', 'Editing'), ('Bash', 'Running command'), ('Agent', 'Delegating')],
+            'codex': [('read_file', 'Reading'), ('grep_search', 'Searching'), ('apply_patch', 'Editing'), ('shell', 'Running command'), ('invoke_subagent', 'Delegating')],
+            'pi': [('read', 'Reading'), ('find_files', 'Searching'), ('edit', 'Editing'), ('run_command', 'Running command'), ('task', 'Delegating')],
+            'hax': [('read_file', 'Reading'), ('search', 'Searching'), ('write_file', 'Editing'), ('terminal', 'Running command'), ('spawn_agent', 'Delegating')],
+            'cursor': [('Read', 'Reading'), ('codebase_search', 'Searching'), ('str_replace', 'Editing'), ('bash', 'Running command'), ('Task', 'Delegating')],
+        }
+        for provider, tools in cases.items():
+            for tool, label in tools:
+                self.assertEqual(reader.step_label(tool, provider), label, (provider, tool))
+        self.assertEqual(reader.step_label('SomeUnknownTool', 'pi'), 'Working')
+        self.assertEqual(reader.step_label(None, 'claude'), 'Working')
+        self.assertEqual(reader.step_label('mcp__fs__read_file', 'codex'), 'Reading')
+
+    def test_a_plan_pick_launch_without_a_finish_is_a_worker_for_this_chat(self):
+        now = 5000000
+        self.launches(
+            dict(at=now - 600, lane='vercel', caller='live-aaa', model='deepseek', cwd='/tmp/orch/lt/w-2839c'),
+            dict(at=now - 900, lane='codex', caller='live-other', model='gpt', cwd='/tmp/orch/lt/w-1000a'),
+            dict(at=now - 800, lane='pi', caller='live-aaa', model='pi-deepseek', task='review the queue'))
+        workers = reader.plan_pick_workers('live-aaa', now)
+        self.assertEqual([worker['source'] for worker in workers], ['plan-pick', 'plan-pick'])
+        self.assertEqual([worker['label'] for worker in workers], ['w-2839c', 'review the queue'])
+        self.assertEqual([worker['lane'] for worker in workers], ['vercel', 'pi'])
+        self.assertEqual([worker['model'] for worker in workers], ['deepseek', 'pi-deepseek'])
+        self.assertEqual([worker['started_at'] for worker in workers], [(now - 600) * 1000, (now - 800) * 1000])
+        self.assertEqual(workers[0]['step'], 'Working')
+
+    def test_finished_stale_and_dead_launches_are_not_workers(self):
+        now = 9000000
+        self.launches(
+            dict(id='done', at=now - 60, caller='live-aaa'),
+            dict(id='done', at=now - 30, event='finish', caller='live-aaa'),
+            dict(id='stale', at=now - 3 * 60 * 60, caller='live-aaa'),
+            dict(id='dead', at=now - 60, caller='live-aaa', pid=4242),
+            dict(id='alive', at=now - 120, caller='live-aaa', pid=os.getpid()))
+        with patch.object(reader, 'plan_pick_alive', side_effect=lambda pid: None if pid is None else pid == os.getpid()):
+            workers = reader.plan_pick_workers('live-aaa', now)
+        self.assertEqual([worker['id'] for worker in workers], ['plan-pick:alive'])
+
+    def test_a_broken_launch_line_is_skipped(self):
+        now = 9000000
+        path = self.launches()
+        path.write_text('not json\n' + json.dumps(dict(at=now - 60, caller='live-aaa')) + '\n')
+        self.assertEqual(len(reader.plan_pick_workers('live-aaa', now)), 1)
+        self.assertEqual(reader.plan_pick_workers('', now), [])
+        self.assertEqual(reader.plan_pick_workers(None, now), [])
+
+    def test_the_snapshot_carries_one_merged_workers_event(self):
+        now = 1700000000
+        session = dict(workers={'tool-1': dict(id='tool-1', source='subagent', harness='pi', model='deepseek-v4',
+                                               label='audit the board', step='Delegating', started_at=1)})
+        self.launches(dict(id='pick', at=now - 60, caller='live-aaa', lane='hax', model='codex'))
+        page = dict(live_snapshot=dict(seq=4, events=[dict(kind='turn.started'), dict(kind='workers.snapshot', payload=dict(workers=[]))], requests=[]),
+                    events=[], next_after=4)
+        with patch.object(reader, 'host_tmux_for', return_value='live-aaa'), \
+                patch.object(reader, 'stored_workers', return_value=list(session['workers'].values())):
+            page = reader.host_workers_page(page, 'pi', 'sid', now=now)
+        self.assertEqual([worker['source'] for worker in page['workers']], ['subagent', 'plan-pick'])
+        self.assertEqual(page['live_snapshot']['workers'], page['workers'])
+        kinds = [event['kind'] for event in page['live_snapshot']['events']]
+        self.assertEqual(kinds, ['turn.started', 'workers.snapshot'])
+        self.assertEqual([worker['harness'] for worker in page['live_snapshot']['events'][1]['payload']['workers']], ['pi', 'hax'])
+
+    def test_an_empty_worker_set_adds_no_event(self):
+        page = dict(live_snapshot=dict(seq=2, events=[dict(kind='turn.started')], requests=[]), events=[], next_after=2)
+        with patch.object(reader, 'host_tmux_for', return_value=None), patch.object(reader, 'stored_workers', return_value=[]):
+            page = reader.host_workers_page(page, 'pi', 'sid', now=1000)
+        self.assertEqual(page['workers'], [])
+        self.assertEqual([event['kind'] for event in page['live_snapshot']['events']], ['turn.started'])
+
+    def test_a_subagent_tool_call_starts_and_finishes_a_worker(self):
+        session = dict(settings=dict(model='sonnet'), workers={})
+        with patch.object(reader, 'worker_event') as published:
+            reader.track_subagent('claude', 'sid', 'live-aaa', session, 'item.started',
+                                  dict(type='tool_call', tool='Task', input=dict(description='audit the board')), 'tool-1')
+            reader.track_subagent('claude', 'sid', 'live-aaa', session, 'item.started',
+                                  dict(type='tool_call', tool='Read', input=dict(file_path='a')), 'tool-2')
+            reader.track_subagent('claude', 'sid', 'live-aaa', session, 'item.done', dict(status='completed'), 'tool-2')
+            reader.track_subagent('claude', 'sid', 'live-aaa', session, 'item.done', dict(status='completed'), 'tool-1')
+        started, finished = [call.args[-1] for call in published.call_args_list]
+        self.assertEqual(len(started), 1)
+        worker = dict(started[0])
+        self.assertIsInstance(worker.pop('started_at'), int)
+        self.assertEqual(worker, dict(id='tool-1', source='subagent', harness='claude', model='sonnet',
+                                     label='audit the board', step='Delegating'))
+        self.assertEqual(finished, [])
+        self.assertEqual(session['workers'], {})
 
 
 class MUBO_590_PiModelContinuityTest(unittest.TestCase):

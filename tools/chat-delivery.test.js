@@ -460,8 +460,12 @@ assert.ok(pendingStart >= 0, 'production pending layout');
 const dotsBoundary = source.includes('    if (chatWorkingDotsVisible()) {', pendingStart)
   ? '    if (chatWorkingDotsVisible()) {'
   : '    if (@import("window_layout.zig").chatStopVisible()) {';
-const pendingEnd = source.indexOf(dotsBoundary, pendingStart);
-assert.ok(pendingEnd > pendingStart);
+const pendingEnds = [
+  '    chat_activity_view.refresh();',
+  dotsBoundary,
+].map((marker) => source.indexOf(marker, pendingStart)).filter((index) => index > pendingStart);
+assert.ok(pendingEnds.length > 0, 'production pending layout end');
+const pendingEnd = Math.min(...pendingEnds);
 const pendingLayout = `
 const RECT = struct { left: i32 = 0, right: i32 = 0, bottom: i32 = 0 };
 const chat_hit = struct { const pending_selection_base: usize = std.math.maxInt(usize) / 2 + 1; };

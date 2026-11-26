@@ -40,6 +40,19 @@ pub fn nearestBlock(rects: anytype, blocks: anytype, y: i32) ?usize {
     return best;
 }
 
+pub fn activityHit(y: i32, top: i32, line_bottom: i32, rows_bottom: i32) bool {
+    const bottom = @max(line_bottom, rows_bottom);
+    return y >= top and y < bottom;
+}
+
+test "MUBO-591 the activity strip hit box covers its line and open rows" {
+    try std.testing.expect(activityHit(12, 10, 28, 10));
+    try std.testing.expect(activityHit(40, 10, 10, 64));
+    try std.testing.expect(!activityHit(9, 10, 28, 64));
+    try std.testing.expect(!activityHit(64, 10, 28, 64));
+    try std.testing.expect(activityHit(63, 10, 28, 64));
+}
+
 pub const pending_selection_base: usize = std.math.maxInt(usize) / 2 + 1;
 
 pub fn keepSelection(same_shell: bool, before: []const u16, after: []const u16, end: usize) bool {
