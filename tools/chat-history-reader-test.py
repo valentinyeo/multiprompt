@@ -8474,6 +8474,72 @@ class HostAntigravityTurnTest(HostEventStreamFixture, unittest.TestCase):
         self.assertEqual(len(started), 1)
         self.assertEqual(started[0]['payload']['uuids'], ['mp-antigravity-2'])
 
+    def write_config(self):
+        reader.host_write(reader.host_paths('antigravity', self.sid)['config'],
+                          dict(enabled=True, tmux=self.tmux, cwd=str(self.home), command=['agy']))
+        return reader.host_config('antigravity', self.sid)
+
+    def test_settings_default_to_neon_medium_and_reach_the_launch_argv(self):
+        self.write_config()
+        self.assertEqual(reader.host_settings('antigravity', self.sid), dict(model='neon', effort='medium'))
+        argv = reader.host_antigravity_argv('antigravity', self.sid, ['agy'])
+        self.assertEqual(argv[:3], ['agy', '--model', 'gemini-4-neon-medium'])
+
+    def test_a_model_and_effort_choice_persists_and_reaches_the_launch_argv(self):
+        self.write_config()
+        self.assertEqual(reader.host_reply(dict(provider='antigravity', sid=self.sid, op='set_model', model='hydrogen'))['status'], 'ok')
+        self.assertEqual(reader.host_reply(dict(provider='antigravity', sid=self.sid, op='set_effort', effort='xhigh'))['status'], 'ok')
+        self.assertEqual(reader.host_config('antigravity', self.sid)['model'], 'hydrogen')
+        self.assertEqual(reader.host_settings('antigravity', self.sid), dict(model='hydrogen', effort='xhigh'))
+        argv = reader.host_antigravity_argv('antigravity', self.sid, ['agy'])
+        self.assertEqual(argv[:3], ['agy', '--model', 'gemini-4-hydrogen-xhigh'])
+
+    def test_xhigh_is_saved_as_high_on_a_model_that_does_not_offer_it(self):
+        self.write_config()
+        reader.host_reply(dict(provider='antigravity', sid=self.sid, op='set_model', model='neon'))
+        reader.host_reply(dict(provider='antigravity', sid=self.sid, op='set_effort', effort='xhigh'))
+        self.assertEqual(reader.host_settings('antigravity', self.sid), dict(model='neon', effort='xhigh'))
+        for model, expected in (('carbon', 'gemini-4-carbon-high'), ('argon', 'gemini-4-argon-high'),
+                                ('flash', 'gemini-3.8-flash-high'), ('opus', 'claude-opus-5-5-high'),
+                                ('sonnet', 'claude-sonnet-5-5-high')):
+            self.assertEqual(reader.host_reply(dict(provider='antigravity', sid=self.sid, op='set_model', model=model))['status'], 'ok')
+            self.assertEqual(reader.host_settings('antigravity', self.sid), dict(model=model, effort='high'))
+            argv = reader.host_antigravity_argv('antigravity', self.sid, ['agy'])
+            self.assertEqual(argv[:3], ['agy', '--model', expected])
+            self.assertEqual(reader.host_reply(dict(provider='antigravity', sid=self.sid, op='set_effort', effort='xhigh'))['status'], 'ok')
+            self.assertEqual(reader.host_settings('antigravity', self.sid), dict(model=model, effort='high'))
+
+    def test_an_invalid_model_or_effort_is_refused_and_leaves_the_config_alone(self):
+        self.write_config()
+        self.assertEqual(reader.host_reply(dict(provider='antigravity', sid=self.sid, op='set_model', model='gemini-4-neon-high'))['reason'], 'invalid_model')
+        self.assertEqual(reader.host_reply(dict(provider='antigravity', sid=self.sid, op='set_effort', effort='max'))['reason'], 'invalid_effort')
+        config = reader.host_config('antigravity', self.sid)
+        self.assertNotIn('model', config)
+        self.assertNotIn('effort', config)
+        self.assertEqual(reader.host_settings('antigravity', self.sid), dict(model='neon', effort='medium'))
+
+    def test_a_live_chat_reports_the_change_and_waits_for_its_restart(self):
+        self.write_config()
+        self.session['settings'] = dict(model='neon', effort='medium')
+        self.session['starting_settings'] = dict(self.session['settings'])
+        self.session['applied_settings'] = dict(self.session['settings'])
+        self.session['ready'] = True
+        result = reader.host_handle_request('antigravity', self.sid, self.tmux, self.session, dict(op='set_model', model='carbon'))
+        self.assertEqual(result['status'], 'ok')
+        self.assertEqual(self.session['settings'], dict(model='carbon', effort='medium'))
+        pending = self.antigravity_events('host.settings')
+        self.assertEqual(pending[-1]['payload']['model'], 'carbon')
+        self.assertFalse(pending[-1]['payload']['applied'])
+        self.assertEqual(reader.host_handle_request('antigravity', self.sid, self.tmux, self.session, dict(op='deliver'))['reason'], 'settings_pending')
+        self.session['starting_settings'] = dict(self.session['settings'])
+        self.session['applied_settings'] = dict(self.session['settings'])
+        self.assertEqual(reader.host_handle_request('antigravity', self.sid, self.tmux, self.session, dict(op='deliver'))['reason'], 'invalid_text')
+        self.feed(dict(event='init', conversation_id='conversation-1'))
+        applied = self.antigravity_events('host.settings')
+        self.assertTrue(applied[-1]['payload']['applied'])
+        self.assertEqual(applied[-1]['payload']['model'], 'carbon')
+        self.assertEqual(reader.host_antigravity_argv('antigravity', self.sid, ['agy'])[:3], ['agy', '--model', 'gemini-4-carbon-medium'])
+
 
 class HostInterruptTest(HostControlFixture, unittest.TestCase):
     def test_interrupt_writes_the_control_request_and_ends_the_turn_as_interrupted(self):
