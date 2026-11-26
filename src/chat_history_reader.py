@@ -4890,7 +4890,7 @@ HOST_SWITCH_TARGETS = ("claude", "codex", "pi", "antigravity")
 HOST_SWITCH_CONFIG_KEYS = ("tmux", "cwd", "permission_mode", "spawn_mode", "face", "login", "nightly", "auto_switch")
 HOST_SWITCH_HANDOVER_LIMIT = 6000
 HOST_SWITCH_MESSAGE_LIMIT = 1200
-HOST_AUTO_SWITCH_ORDER = ("claude", "codex", "pi")
+HOST_AUTO_SWITCH_ORDER = ("claude", "codex", "pi", "antigravity")
 HOST_AUTO_SWITCH_COOLDOWN = 60 * 60
 HOST_AUTO_SWITCH_WAIT = 120
 HOST_AUTO_SWITCH_TRIGGERS = dict(claude=("result",), codex=("error",), pi=("message_end", "agent_settled"),
