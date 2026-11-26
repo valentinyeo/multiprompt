@@ -10224,6 +10224,7 @@ test "MUBO-568 the focused proof carries every provider badge test" {
         "provider_badge.test.MUBO-568 each resolved provider draws its own corner and unknown agents draw none",
         "provider_badge.test.MUBO-568 a misleading chat name never chooses the badge",
         "provider_badge.test.MUBO-568 the solid triangle fills the avatar corner at 100, 150 and pinned sizes",
+        "provider_badge.test.MUBO-568 the collapsed avatar keeps the solid corner at 100 and 150 percent",
         "provider_badge.test.MUBO-568 the corner triangle fills and stays inside the avatar at every size",
         "provider_badge.test.MUBO-568 hover names the model and effort only when the chat reports them",
     };

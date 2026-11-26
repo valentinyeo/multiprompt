@@ -102,6 +102,19 @@ function Painted($Pixel, [int]$R, [int]$G, [int]$B) {
     (([Math]::Abs($Pixel.R - $R) + [Math]::Abs($Pixel.G - $G) + [Math]::Abs($Pixel.B - $B)) -le 90)
 }
 function Colour([string]$Hex) { @([Convert]::ToInt32($Hex.Substring(0, 2), 16), [Convert]::ToInt32($Hex.Substring(2, 2), 16), [Convert]::ToInt32($Hex.Substring(4, 2), 16)) }
+function Diagnose-Badge($Bitmap, $Box, [string]$Name, [string]$Reason, $Classes, $Colours, $Stats) {
+    try { $Bitmap.Save("$Evidence/badge-$Name.png") } catch { }
+    $lines = [Collections.Generic.List[string]]::new()
+    $lines.Add("badge=$Name")
+    $lines.Add("reason=$Reason")
+    $lines.Add("side=$($Box.side) radius=$($Box.radius) left=$($Box.left) top=$($Box.top)")
+    foreach ($entry in $Stats.GetEnumerator()) { $lines.Add("$($entry.Key)=$($entry.Value)") }
+    $lines.Add('classes: I=wholly inside the rounded corner, O=wholly outside it, E=its antialiased boundary')
+    foreach ($row in $Classes) { $lines.Add($row) }
+    $lines.Add('pixels: RRGGBB per pixel on the same grid')
+    foreach ($row in $Colours) { $lines.Add($row) }
+    [IO.File]::WriteAllLines("$Evidence/badge-$Name-pixels.txt", $lines)
+}
 function Check-Badge($Row, [string]$Hex, [string]$Name) {
     $b = Badge $Row
     $bitmap = Capture $b.left $b.top $b.side $b.side
@@ -114,29 +127,42 @@ function Check-Badge($Row, [string]$Hex, [string]$Name) {
                 if (Near $bitmap.GetPixel($x, $y) $rgb[0] $rgb[1] $rgb[2] 26) { $match++ }
             }
         }
-        if ($match -lt $area * .08) { throw "Provider colour absent: $Name match=$match area=$area" }
-        if ($match -gt $area * .85) { throw "The badge fills its box instead of a triangle: $Name match=$match area=$area" }
-        $inside = 0; $outside = 0; $missing = 0; $leaked = 0; $glyph = 0
+        $inside = 0; $outside = 0; $edge = 0; $missing = 0; $leaked = 0; $glyph = 0
+        $classes = [Collections.Generic.List[string]]::new()
+        $colours = [Collections.Generic.List[string]]::new()
         for ($y = 0; $y -lt $bitmap.Height; $y++) {
+            $classRow = [Text.StringBuilder]::new()
+            $colourRow = [Text.StringBuilder]::new()
             for ($x = 0; $x -lt $bitmap.Width; $x++) {
+                $pixel = $bitmap.GetPixel($x, $y)
                 $class = Badge-Coverage $x $y $b.side $b.radius
                 if ($class -eq 'inside') {
                     $inside++
-                    if (-not (Painted $bitmap.GetPixel($x, $y) $rgb[0] $rgb[1] $rgb[2])) { $missing++ }
+                    [void]$classRow.Append('I')
+                    if (-not (Painted $pixel $rgb[0] $rgb[1] $rgb[2])) { $missing++ }
                 } elseif ($class -eq 'outside') {
                     $outside++
-                    if (Near $bitmap.GetPixel($x, $y) $rgb[0] $rgb[1] $rgb[2] 26) { $leaked++ }
+                    [void]$classRow.Append('O')
+                    if (Near $pixel $rgb[0] $rgb[1] $rgb[2] 26) { $leaked++ }
+                } else {
+                    $edge++
+                    [void]$classRow.Append('E')
                 }
-                if ($class -ne 'outside') {
-                    $pixel = $bitmap.GetPixel($x, $y)
-                    if ($pixel.R -ge 225 -and $pixel.G -ge 225 -and $pixel.B -ge 225) { $glyph++ }
-                }
+                if ($class -ne 'outside' -and $pixel.R -ge 225 -and $pixel.G -ge 225 -and $pixel.B -ge 225) { $glyph++ }
+                [void]$colourRow.Append(('{0:X2}{1:X2}{2:X2}' -f $pixel.R, $pixel.G, $pixel.B))
             }
+            $classes.Add($classRow.ToString())
+            $colours.Add($colourRow.ToString())
         }
-        if ($inside -lt 6 -or $inside * 100 -lt $area * 8) { throw "The triangle is missing its solid body: $Name inside=$inside area=$area" }
-        if ($missing -ne 0) { throw "The solid triangle body is not the provider colour: $Name missing=$missing inside=$inside" }
-        if ($leaked -ne 0) { throw "The triangle paints outside its corner shape: $Name leaked=$leaked outside=$outside" }
-        if ($glyph -ne 0) { throw "A drawn glyph appeared in the badge: $Name glyph=$glyph" }
+        $stats = @{inside=$inside; outside=$outside; edge=$edge; missing=$missing; leaked=$leaked; glyph=$glyph; match=$match; area=$area}
+        $fail = $null
+        if ($match -lt $area * .08) { $fail = "Provider colour absent: $Name match=$match area=$area" }
+        elseif ($match -gt $area * .85) { $fail = "The badge fills its box instead of a triangle: $Name match=$match area=$area" }
+        elseif ($inside -lt 6 -or $inside * 100 -lt $area * 8) { $fail = "The triangle is missing its solid body: $Name inside=$inside area=$area" }
+        elseif ($missing -ne 0) { $fail = "The solid triangle body is not the provider colour: $Name missing=$missing inside=$inside" }
+        elseif ($leaked -ne 0) { $fail = "The triangle paints outside its corner shape: $Name leaked=$leaked outside=$outside" }
+        elseif ($glyph -ne 0) { $fail = "A drawn glyph appeared in the badge: $Name glyph=$glyph" }
+        if ($fail) { Diagnose-Badge $bitmap $b $Name $fail $classes $colours $stats; throw $fail }
         $spill = 0
         foreach ($band in @(
             @{x=($Row.right); y=$b.top; w=1; h=$b.side},
@@ -147,9 +173,14 @@ function Check-Badge($Row, [string]$Hex, [string]$Name) {
                 for ($y = 0; $y -lt $patch.Height; $y++) { for ($x = 0; $x -lt $patch.Width; $x++) { if (Near $patch.GetPixel($x, $y) $rgb[0] $rgb[1] $rgb[2] 26) { $spill++ } } }
             } finally { $patch.Dispose() }
         }
-        if ($spill -ne 0) { throw "The badge spills outside the avatar: $Name spill=$spill" }
+        if ($spill -ne 0) {
+            $stats.spill = $spill
+            $reason = "The badge spills outside the avatar: $Name spill=$spill"
+            Diagnose-Badge $bitmap $b $Name $reason $classes $colours $stats
+            throw $reason
+        }
         $bitmap.Save("$Evidence/badge-$Name.png")
-        $checks.Add(@{name="badge-$Name"; passed=$true; size=$Row.size; match=$match; area=$area; side=$b.side; radius=$b.radius; inside=$inside; outside=$outside})
+        $checks.Add(@{name="badge-$Name"; passed=$true; size=$Row.size; match=$match; area=$area; side=$b.side; radius=$b.radius; inside=$inside; outside=$outside; edge=$edge})
     } finally { $bitmap.Dispose() }
 }
 function Check-NoBadge($Row, [string]$Name) {

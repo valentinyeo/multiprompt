@@ -36,6 +36,7 @@ const proof_titles = [
   'each resolved provider draws its own corner and unknown agents draw none',
   'a misleading chat name never chooses the badge',
   'the solid triangle fills the avatar corner at 100, 150 and pinned sizes',
+  'the collapsed avatar keeps the solid corner at 100 and 150 percent',
   'the corner triangle fills and stays inside the avatar at every size',
   'hover names the model and effort only when the chat reports them',
 ];

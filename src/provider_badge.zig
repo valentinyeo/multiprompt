@@ -134,28 +134,7 @@ pub fn draw(hdc: w.HANDLE, avatar: Avatar, badge: Mark) void {
         return;
     }
     if (g.radius >= g.size) return;
-    var points: [12]w.POINT = undefined;
-    points[0] = .{ .x = g.left(), .y = g.top };
-    points[1] = .{ .x = g.right - g.radius, .y = g.top };
-    var count: usize = 2;
-    const steps: i32 = 3;
-    const cx: f32 = @floatFromInt(g.right - g.radius);
-    const cy: f32 = @floatFromInt(g.top + g.radius);
-    const r: f32 = @floatFromInt(g.radius);
-    var step: i32 = 1;
-    while (step <= steps) : (step += 1) {
-        const angle = -std.math.pi / 2.0 + std.math.pi / 2.0 * @as(f32, @floatFromInt(step)) / @as(f32, @floatFromInt(steps + 1));
-        points[count] = .{
-            .x = @intFromFloat(@round(cx + r * @cos(angle))),
-            .y = @intFromFloat(@round(cy + r * @sin(angle))),
-        };
-        count += 1;
-    }
-    points[count] = .{ .x = g.right, .y = g.top + g.radius };
-    count += 1;
-    points[count] = .{ .x = g.right, .y = g.bottom() };
-    count += 1;
-    smooth.fillPolygon(hdc, points[0..count], color);
+    smooth.fillRoundedTriangle(hdc, g.left(), g.top, g.right, g.bottom(), g.radius, color);
 }
 
 const Coverage = enum { outside, edge, inside };
@@ -310,6 +289,11 @@ test "MUBO-568 the solid triangle fills the avatar corner at 100, 150 and pinned
     try triangleProof(54, false);
     try triangleProof(56, false);
     try triangleProof(36, true);
+}
+
+test "MUBO-568 the collapsed avatar keeps the solid corner at 100 and 150 percent" {
+    try triangleProof(28, false);
+    try triangleProof(42, false);
 }
 
 test "MUBO-568 the corner triangle fills and stays inside the avatar at every size" {
