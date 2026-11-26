@@ -444,49 +444,6 @@ pub fn fillPolygon(hdc: HANDLE, points: []const POINT, color: u32) void {
     canvas.fillShape(.{ .polygon = points }, color);
 }
 
-pub fn fillRoundedTriangle(hdc: HANDLE, left: i32, top: i32, right: i32, bottom: i32, radius: i32, color: u32) void {
-    if (right <= left or bottom <= top) return;
-    const corner: f32 = @floatFromInt(@max(0, @min(radius, @min(right - left, bottom - top))));
-    var canvas = Canvas.init(hdc);
-    defer canvas.deinit();
-    if (canvas.syncClip()) {
-        const api = &app_state.g_gdip_api;
-        var path: HANDLE = null;
-        if (api.create_path(0, &path) == 0) {
-            defer _ = api.delete_path(path);
-            const l: f32 = @floatFromInt(left);
-            const t: f32 = @floatFromInt(top);
-            const r: f32 = @floatFromInt(right);
-            const b: f32 = @floatFromInt(bottom);
-            if (api.start_figure(path) == 0 and
-                api.add_path_line(path, l, t, r - corner, t) == 0 and
-                api.add_path_arc(path, r - 2 * corner, t, 2 * corner, 2 * corner, 270, 90) == 0 and
-                api.add_path_line(path, r, t + corner, r, b) == 0 and
-                api.close_figure(path) == 0 and canvas.fill(path, color)) return;
-        }
-    }
-    const arc_steps: usize = 8;
-    var points: [arc_steps + 3]POINT = undefined;
-    points[0] = .{ .x = left, .y = top };
-    const cx: f32 = @as(f32, @floatFromInt(right)) - corner;
-    const cy: f32 = @as(f32, @floatFromInt(top)) + corner;
-    for (0..arc_steps + 1) |step| {
-        const angle = -std.math.pi / 2.0 + std.math.pi / 2.0 * @as(f32, @floatFromInt(step)) / @as(f32, @floatFromInt(arc_steps));
-        points[step + 1] = .{
-            .x = @intFromFloat(@round(cx + corner * @cos(angle))),
-            .y = @intFromFloat(@round(cy + corner * @sin(angle))),
-        };
-    }
-    points[arc_steps + 2] = .{ .x = right, .y = bottom };
-    const brush = w.CreateSolidBrush(color);
-    defer _ = w.DeleteObject(brush);
-    const old_brush = w.SelectObject(hdc, brush);
-    defer _ = w.SelectObject(hdc, old_brush);
-    const old_pen = w.SelectObject(hdc, w.GetStockObject(w.NULL_PEN));
-    defer _ = w.SelectObject(hdc, old_pen);
-    _ = w.Polygon(hdc, &points, @intCast(points.len));
-}
-
 test "ISSUE-444 round rectangle footprint excludes right and bottom and clamps radii" {
     const g = roundGeometry(.{ .left = 10, .top = 20, .right = 30, .bottom = 32 }, 100, 100);
     try std.testing.expectEqual(@as(f32, 10), g.x);

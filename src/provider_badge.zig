@@ -15,10 +15,12 @@ const Entry = struct { agent: u8, mark: Mark };
 
 const entries = [_]Entry{
     .{ .agent = 1, .mark = .{ .kind = .claude, .color = 0xD97757 } },
-    .{ .agent = 2, .mark = .{ .kind = .codex, .color = 0x3C78DC } },
-    .{ .agent = 3, .mark = .{ .kind = .pi, .color = 0x8FCB6B } },
-    .{ .agent = 8, .mark = .{ .kind = .antigravity, .color = 0xA77FE0 } },
+    .{ .agent = 2, .mark = .{ .kind = .codex, .color = 0x10A37F } },
+    .{ .agent = 3, .mark = .{ .kind = .pi, .color = 0x8E95A2 } },
+    .{ .agent = 8, .mark = .{ .kind = .antigravity, .color = 0x3C78DC } },
 };
+
+const separator: u32 = 0x000000;
 
 pub fn mark(agent: u8) ?Mark {
     for (entries) |entry| {
@@ -84,8 +86,7 @@ pub const Geometry = struct {
     right: i32,
     top: i32,
     size: i32,
-    radius: i32,
-    clipped: bool,
+    border: i32,
 
     pub fn left(self: Geometry) i32 {
         return self.right - self.size;
@@ -96,23 +97,20 @@ pub const Geometry = struct {
     }
 };
 
-pub fn cornerRadius(avatar: Avatar) i32 {
-    return if (avatar.circle) @divTrunc(avatar.size, 2) else @divTrunc(avatar.size * 22 + 50, 100);
-}
-
 pub fn legs(avatar_side: i32) i32 {
     return @max(6, @divTrunc(avatar_side * 10 + 18, 36));
 }
 
+pub fn borderWidth(avatar_side: i32) i32 {
+    return @max(1, @divTrunc(avatar_side + 18, 36));
+}
+
 pub fn geometry(avatar: Avatar) Geometry {
-    const radius = cornerRadius(avatar);
-    const inset = if (avatar.circle) radius - @divTrunc(radius * 707, 1000) else 0;
     return .{
-        .right = avatar.right - inset,
-        .top = avatar.top + inset,
+        .right = avatar.right,
+        .top = avatar.top,
         .size = legs(avatar.size),
-        .radius = radius,
-        .clipped = !avatar.circle,
+        .border = borderWidth(avatar.size),
     };
 }
 
@@ -123,48 +121,51 @@ fn ink(hex: u32) u32 {
 pub fn draw(hdc: w.HANDLE, avatar: Avatar, badge: Mark) void {
     const g = geometry(avatar);
     if (g.size <= 0) return;
-    const color = ink(badge.color);
-    if (!g.clipped or g.radius <= 0) {
-        const points = [_]w.POINT{
-            .{ .x = g.left(), .y = g.top },
-            .{ .x = g.right, .y = g.top },
-            .{ .x = g.right, .y = g.bottom() },
-        };
-        smooth.fillPolygon(hdc, &points, color);
-        return;
-    }
-    if (g.radius >= g.size) return;
-    smooth.fillRoundedTriangle(hdc, g.left(), g.top, g.right, g.bottom(), g.radius, color);
+    const outer = [_]w.POINT{
+        .{ .x = g.left(), .y = g.top },
+        .{ .x = g.right, .y = g.top },
+        .{ .x = g.right, .y = g.bottom() },
+    };
+    smooth.fillPolygon(hdc, &outer, ink(separator));
+    const fill: i32 = g.size - g.border * 2;
+    if (fill <= 0) return;
+    const inner = [_]w.POINT{
+        .{ .x = g.left() + g.border, .y = g.top + g.border },
+        .{ .x = g.right - g.border, .y = g.top + g.border },
+        .{ .x = g.right - g.border, .y = g.bottom() - g.border },
+    };
+    smooth.fillPolygon(hdc, &inner, ink(badge.color));
 }
 
-const Coverage = enum { outside, edge, inside };
+const Coverage = enum { outside, inside, border, edge };
+
+fn inTriangle(x: i32, y: i32, right: i32, top: i32, legs_wide: i32) bool {
+    return x <= right and x >= right - legs_wide and y >= top and y <= top + legs_wide and (y - top) <= (right - x);
+}
+
+fn cornersInside(x: i32, y: i32, right: i32, top: i32, legs_wide: i32) bool {
+    const corners = [_][2]i32{ .{ x, y }, .{ x + 1, y }, .{ x, y + 1 }, .{ x + 1, y + 1 } };
+    for (corners) |corner| {
+        if (!inTriangle(corner[0], corner[1], right, top, legs_wide)) return false;
+    }
+    return true;
+}
+
+fn cornersOutside(x: i32, y: i32, right: i32, top: i32, legs_wide: i32) bool {
+    const corners = [_][2]i32{ .{ x, y }, .{ x + 1, y }, .{ x, y + 1 }, .{ x + 1, y + 1 } };
+    for (corners) |corner| {
+        if (inTriangle(corner[0], corner[1], right, top, legs_wide)) return false;
+    }
+    return true;
+}
 
 fn coverageOf(x: i32, y: i32, g: Geometry) Coverage {
-    const corners = [_][2]i32{ .{ x, y }, .{ x + 1, y }, .{ x, y + 1 }, .{ x + 1, y + 1 } };
-    var triangle_in = true;
-    var triangle_out = true;
-    for (corners) |corner| {
-        const below = corner[1] - g.top - (corner[0] - g.left());
-        if (below < 0) triangle_out = false else triangle_in = false;
-    }
-    var shape_in = triangle_in;
-    var shape_out = triangle_out;
-    if (g.clipped and g.radius > 0) {
-        const centre_x = g.right - g.radius;
-        const centre_y = g.top + g.radius;
-        const limit = g.radius * g.radius;
-        var circle_in = true;
-        var circle_out = true;
-        for (corners) |corner| {
-            const dx = corner[0] - centre_x;
-            const dy = corner[1] - centre_y;
-            if (dx * dx + dy * dy < limit) circle_out = false else circle_in = false;
-        }
-        shape_in = triangle_in and circle_in;
-        shape_out = triangle_out or circle_out;
-    }
-    if (shape_in) return .inside;
-    if (shape_out) return .outside;
+    const fill = g.size - g.border * 2;
+    const fill_right = g.right - g.border;
+    const fill_top = g.top + g.border;
+    if (fill - 2 > 0 and cornersInside(x, y, fill_right - 1, fill_top + 1, fill - 2)) return .inside;
+    if (cornersOutside(x, y, g.right, g.top, g.size)) return .outside;
+    if (cornersInside(x, y, g.right, g.top, g.size) and (fill <= 0 or cornersOutside(x, y, fill_right, fill_top, fill))) return .border;
     return .edge;
 }
 
@@ -176,6 +177,10 @@ fn channelDelta(first: u32, second: u32, shift: u5) u32 {
 
 fn paintedWithin(painted: u32, value: u32) bool {
     return channelDelta(painted, value, 16) + channelDelta(painted, value, 8) + channelDelta(painted, value, 0) <= 90;
+}
+
+fn channelSum(value: u32) u32 {
+    return ((value >> 16) & 0xFF) + ((value >> 8) & 0xFF) + (value & 0xFF);
 }
 
 fn triangleProof(avatar_side: i32, circle: bool) !void {
@@ -219,6 +224,7 @@ fn triangleProof(avatar_side: i32, circle: bool) !void {
     }
     var glyph: usize = 0;
     var solid: usize = 0;
+    var bordered: usize = 0;
     for (0..@intCast(g.size)) |row| {
         for (0..@intCast(g.size)) |column| {
             const x = g.left() + @as(i32, @intCast(column));
@@ -229,6 +235,11 @@ fn triangleProof(avatar_side: i32, circle: bool) !void {
                     if (!paintedWithin(painted, value)) std.debug.print("blend at {d},{d}: {x}\n", .{ x, y, value });
                     try std.testing.expect(paintedWithin(painted, value));
                     solid += 1;
+                },
+                .border => {
+                    if (channelSum(value) + 90 >= channelSum(painted)) std.debug.print("border at {d},{d}: {x}\n", .{ x, y, value });
+                    try std.testing.expect(channelSum(value) + 90 < channelSum(painted));
+                    bordered += 1;
                 },
                 .outside => try std.testing.expectEqual(background, value),
                 .edge => {},
@@ -242,22 +253,19 @@ fn triangleProof(avatar_side: i32, circle: bool) !void {
     try std.testing.expectEqual(@as(usize, 0), glyph);
     const box: usize = @intCast(g.size * g.size);
     try std.testing.expect(solid * 100 >= box * 8 and solid * 100 <= box * 80);
-    if (circle) {
-        try std.testing.expect(paintedWithin(painted, at(pixels, stride, g.right - 1, g.top)));
-    } else {
-        try std.testing.expectEqual(background, at(pixels, stride, g.right - 1, g.top));
-    }
+    if (bordered == 0) std.debug.print("no separator at size {d} border {d}\n", .{ g.size, g.border });
+    try std.testing.expect(bordered > 0);
 }
 
 test "MUBO-568 each resolved provider draws its own corner and unknown agents draw none" {
     try std.testing.expectEqual(Kind.claude, mark(1).?.kind);
     try std.testing.expectEqual(@as(u32, 0xD97757), mark(1).?.color);
     try std.testing.expectEqual(Kind.codex, mark(2).?.kind);
-    try std.testing.expectEqual(@as(u32, 0x3C78DC), mark(2).?.color);
+    try std.testing.expectEqual(@as(u32, 0x10A37F), mark(2).?.color);
     try std.testing.expectEqual(Kind.pi, mark(3).?.kind);
-    try std.testing.expectEqual(@as(u32, 0x8FCB6B), mark(3).?.color);
+    try std.testing.expectEqual(@as(u32, 0x8E95A2), mark(3).?.color);
     try std.testing.expectEqual(Kind.antigravity, mark(8).?.kind);
-    try std.testing.expectEqual(@as(u32, 0xA77FE0), mark(8).?.color);
+    try std.testing.expectEqual(@as(u32, 0x3C78DC), mark(8).?.color);
     for ([_]u8{ 0, 4, 5, 6, 7, 9, 255 }) |agent| {
         try std.testing.expect(mark(agent) == null);
     }
@@ -298,7 +306,7 @@ test "MUBO-568 the collapsed avatar keeps the solid corner at 100 and 150 percen
 
 test "MUBO-568 the corner triangle fills and stays inside the avatar at every size" {
     const list = geometry(.{ .right = 50, .top = 20, .size = 36, .circle = false });
-    try std.testing.expectEqual(Geometry{ .right = 50, .top = 20, .size = 10, .radius = 8, .clipped = true }, list);
+    try std.testing.expectEqual(Geometry{ .right = 50, .top = 20, .size = 10, .border = 1 }, list);
     try std.testing.expectEqual(@as(i32, 40), list.left());
     try std.testing.expectEqual(@as(i32, 30), list.bottom());
     try std.testing.expectEqual(list.right, 50);
@@ -306,12 +314,11 @@ test "MUBO-568 the corner triangle fills and stays inside the avatar at every si
     try std.testing.expectEqual(@as(i32, 16), geometry(.{ .right = 64, .top = 12, .size = 56, .circle = false }).size);
     try std.testing.expectEqual(@as(i32, 8), geometry(.{ .right = 34, .top = 9, .size = 28, .circle = false }).size);
     const round = geometry(.{ .right = 75, .top = 0, .size = 54, .circle = true });
-    try std.testing.expectEqual(@as(i32, 27), round.radius);
-    try std.testing.expectEqual(@as(i32, 67), round.right);
-    try std.testing.expectEqual(@as(i32, 8), round.top);
+    try std.testing.expectEqual(@as(i32, 75), round.right);
+    try std.testing.expectEqual(@as(i32, 0), round.top);
     try std.testing.expectEqual(@as(i32, 15), round.size);
-    try std.testing.expectEqual(false, round.clipped);
-    try std.testing.expect(round.right - round.size > 50 and round.bottom() <= 52);
+    try std.testing.expectEqual(@as(i32, 2), round.border);
+    try std.testing.expect(round.right <= 75 and round.bottom() <= 54);
 }
 
 test "MUBO-568 hover names the model and effort only when the chat reports them" {

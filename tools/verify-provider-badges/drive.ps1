@@ -29,11 +29,11 @@ $result = @{passed=$false; error=$null; checks=$checks; cleanup='pending'; shell
 $job = $null
 $profile = Join-Path $env:RUNNER_TEMP "provider-badges-$PID"
 $providers = @(
-    @{name='Codex work'; agent=1; hex='D97757'; pinned=$true},
-    @{name='Claude work'; agent=2; hex='3C78DC'; pinned=$true},
-    @{name='Pi work'; agent=3; hex='8FCB6B'; pinned=$false},
-    @{name='Antigravity work'; agent=8; hex='A77FE0'; pinned=$false},
-    @{name='Plain terminal'; agent=0; hex=''; pinned=$false}
+    @{name='Codex work'; agent=1; hex='D97757'; tol=26; pinned=$true},
+    @{name='Claude work'; agent=2; hex='10A37F'; tol=26; pinned=$true},
+    @{name='Pi work'; agent=3; hex='8E95A2'; tol=9; pinned=$false},
+    @{name='Antigravity work'; agent=8; hex='3C78DC'; tol=26; pinned=$false},
+    @{name='Plain terminal'; agent=0; hex=''; tol=26; pinned=$false}
 )
 function Wait-For([string]$Name, [scriptblock]$Check) {
     $watch = [Diagnostics.Stopwatch]::StartNew()
@@ -69,23 +69,31 @@ function Shot([string]$Name) {
 }
 function Badge($Row) {
     $side = [int][Math]::Max(6, [int][Math]::Floor(($Row.size * 10 + 18) / 36))
-    @{ side=$side; inset=0; radius=[int][Math]::Floor(($Row.size * 22 + 50) / 100); left=($Row.right - $side); top=$Row.y }
+    $border = [int][Math]::Max(1, [int][Math]::Floor(($Row.size + 18) / 36))
+    @{ side=$side; border=$border; right=$Row.right; left=($Row.right - $side); top=$Row.y }
 }
-function Badge-Coverage([int]$x, [int]$y, [int]$Side, [int]$Radius) {
-    $corners = @(@(0,0), @(1,0), @(0,1), @(1,1))
-    $triangleIn = $true; $triangleOut = $true
-    foreach ($corner in $corners) {
-        $below = ($y + $corner[1]) - ($x + $corner[0])
-        if ($below -lt 0) { $triangleOut = $false } else { $triangleIn = $false }
+function In-Triangle([int]$x, [int]$y, [int]$Right, [int]$Top, [int]$Legs) {
+    ($x -le $Right) -and ($x -ge ($Right - $Legs)) -and ($y -ge $Top) -and ($y -le ($Top + $Legs)) -and (($y - $Top) -le ($Right - $x))
+}
+function Corners-Inside([int]$x, [int]$y, [int]$Right, [int]$Top, [int]$Legs) {
+    foreach ($corner in @(@(0,0), @(1,0), @(0,1), @(1,1))) {
+        if (-not (In-Triangle ($x + $corner[0]) ($y + $corner[1]) $Right $Top $Legs)) { return $false }
     }
-    $circleIn = $true; $circleOut = $true
-    $centreX = $Side - $Radius; $centreY = $Radius; $limit = $Radius * $Radius
-    foreach ($corner in $corners) {
-        $dx = ($x + $corner[0]) - $centreX; $dy = ($y + $corner[1]) - $centreY
-        if (($dx * $dx + $dy * $dy) -lt $limit) { $circleOut = $false } else { $circleIn = $false }
+    $true
+}
+function Corners-Outside([int]$x, [int]$y, [int]$Right, [int]$Top, [int]$Legs) {
+    foreach ($corner in @(@(0,0), @(1,0), @(0,1), @(1,1))) {
+        if (In-Triangle ($x + $corner[0]) ($y + $corner[1]) $Right $Top $Legs) { return $false }
     }
-    if ($triangleIn -and $circleIn) { return 'inside' }
-    if ($triangleOut -or $circleOut) { return 'outside' }
+    $true
+}
+function Badge-Coverage([int]$x, [int]$y, $Box) {
+    $fill = $Box.side - $Box.border * 2
+    $fillRight = $Box.right - $Box.border; $fillTop = $Box.top + $Box.border
+    $safe = $fill - 2
+    if ($safe -gt 0 -and (Corners-Inside $x $y ($fillRight - 1) ($fillTop + 1) $safe)) { return 'inside' }
+    if (Corners-Outside $x $y $Box.right $Box.top $Box.side) { return 'outside' }
+    if ((Corners-Inside $x $y $Box.right $Box.top $Box.side) -and ($fill -le 0 -or (Corners-Outside $x $y $fillRight $fillTop $fill))) { return 'border' }
     'edge'
 }
 function Capture([int]$x, [int]$y, [int]$w, [int]$h) {
@@ -98,24 +106,21 @@ function Capture([int]$x, [int]$y, [int]$w, [int]$h) {
 function Near($Pixel, [int]$R, [int]$G, [int]$B, [int]$Tolerance) {
     ([Math]::Abs($Pixel.R - $R) -le $Tolerance) -and ([Math]::Abs($Pixel.G - $G) -le $Tolerance) -and ([Math]::Abs($Pixel.B - $B) -le $Tolerance)
 }
-function Painted($Pixel, [int]$R, [int]$G, [int]$B) {
-    (([Math]::Abs($Pixel.R - $R) + [Math]::Abs($Pixel.G - $G) + [Math]::Abs($Pixel.B - $B)) -le 90)
-}
 function Colour([string]$Hex) { @([Convert]::ToInt32($Hex.Substring(0, 2), 16), [Convert]::ToInt32($Hex.Substring(2, 2), 16), [Convert]::ToInt32($Hex.Substring(4, 2), 16)) }
 function Diagnose-Badge($Bitmap, $Box, [string]$Name, [string]$Reason, $Classes, $Colours, $Stats) {
     try { $Bitmap.Save("$Evidence/badge-$Name.png") } catch { }
     $lines = [Collections.Generic.List[string]]::new()
     $lines.Add("badge=$Name")
     $lines.Add("reason=$Reason")
-    $lines.Add("side=$($Box.side) radius=$($Box.radius) left=$($Box.left) top=$($Box.top)")
+    $lines.Add("side=$($Box.side) border=$($Box.border) left=$($Box.left) top=$($Box.top)")
     foreach ($entry in $Stats.GetEnumerator()) { $lines.Add("$($entry.Key)=$($entry.Value)") }
-    $lines.Add('classes: I=wholly inside the rounded corner, O=wholly outside it, E=its antialiased boundary')
+    $lines.Add('classes: I=wholly inside the provider fill a pixel clear of every edge, B=wholly in its dark separator border, O=wholly outside the triangle, E=an antialiased boundary')
     foreach ($row in $Classes) { $lines.Add($row) }
     $lines.Add('pixels: RRGGBB per pixel on the same grid')
     foreach ($row in $Colours) { $lines.Add($row) }
     [IO.File]::WriteAllLines("$Evidence/badge-$Name-pixels.txt", $lines)
 }
-function Check-Badge($Row, [string]$Hex, [string]$Name) {
+function Check-Badge($Row, [string]$Hex, [int]$Tolerance, [string]$Name) {
     $b = Badge $Row
     $bitmap = Capture $b.left $b.top $b.side $b.side
     try {
@@ -124,10 +129,10 @@ function Check-Badge($Row, [string]$Hex, [string]$Name) {
         $match = 0
         for ($y = 0; $y -lt $bitmap.Height; $y++) {
             for ($x = 0; $x -lt $bitmap.Width; $x++) {
-                if (Near $bitmap.GetPixel($x, $y) $rgb[0] $rgb[1] $rgb[2] 26) { $match++ }
+                if (Near $bitmap.GetPixel($x, $y) $rgb[0] $rgb[1] $rgb[2] $Tolerance) { $match++ }
             }
         }
-        $inside = 0; $outside = 0; $edge = 0; $missing = 0; $leaked = 0; $glyph = 0
+        $inside = 0; $outside = 0; $edge = 0; $bordered = 0; $missing = 0; $leaked = 0; $glyph = 0; $unbordered = 0
         $classes = [Collections.Generic.List[string]]::new()
         $colours = [Collections.Generic.List[string]]::new()
         for ($y = 0; $y -lt $bitmap.Height; $y++) {
@@ -135,15 +140,19 @@ function Check-Badge($Row, [string]$Hex, [string]$Name) {
             $colourRow = [Text.StringBuilder]::new()
             for ($x = 0; $x -lt $bitmap.Width; $x++) {
                 $pixel = $bitmap.GetPixel($x, $y)
-                $class = Badge-Coverage $x $y $b.side $b.radius
+                $class = Badge-Coverage $x $y $b
                 if ($class -eq 'inside') {
                     $inside++
                     [void]$classRow.Append('I')
-                    if (-not (Painted $pixel $rgb[0] $rgb[1] $rgb[2])) { $missing++ }
+                    if (-not (Near $pixel $rgb[0] $rgb[1] $rgb[2] $Tolerance)) { $missing++ }
                 } elseif ($class -eq 'outside') {
                     $outside++
                     [void]$classRow.Append('O')
-                    if (Near $pixel $rgb[0] $rgb[1] $rgb[2] 26) { $leaked++ }
+                    if (Near $pixel $rgb[0] $rgb[1] $rgb[2] $Tolerance) { $leaked++ }
+                } elseif ($class -eq 'border') {
+                    $bordered++
+                    [void]$classRow.Append('B')
+                    if (($pixel.R + $pixel.G + $pixel.B) -ge 240) { $unbordered++ }
                 } else {
                     $edge++
                     [void]$classRow.Append('E')
@@ -154,13 +163,15 @@ function Check-Badge($Row, [string]$Hex, [string]$Name) {
             $classes.Add($classRow.ToString())
             $colours.Add($colourRow.ToString())
         }
-        $stats = @{inside=$inside; outside=$outside; edge=$edge; missing=$missing; leaked=$leaked; glyph=$glyph; match=$match; area=$area}
+        $stats = @{inside=$inside; outside=$outside; bordered=$bordered; edge=$edge; missing=$missing; leaked=$leaked; unbordered=$unbordered; glyph=$glyph; match=$match; area=$area}
         $fail = $null
         if ($match -lt $area * .08) { $fail = "Provider colour absent: $Name match=$match area=$area" }
         elseif ($match -gt $area * .85) { $fail = "The badge fills its box instead of a triangle: $Name match=$match area=$area" }
-        elseif ($inside -lt 6 -or $inside * 100 -lt $area * 8) { $fail = "The triangle is missing its solid body: $Name inside=$inside area=$area" }
+        elseif ($inside -lt 4 -or $inside * 100 -lt $area * 6) { $fail = "The triangle is missing its solid body: $Name inside=$inside area=$area" }
         elseif ($missing -ne 0) { $fail = "The solid triangle body is not the provider colour: $Name missing=$missing inside=$inside" }
         elseif ($leaked -ne 0) { $fail = "The triangle paints outside its corner shape: $Name leaked=$leaked outside=$outside" }
+        elseif ($b.border -ge 2 -and $bordered -lt 4) { $fail = "The badge lost its dark separator border: $Name bordered=$bordered side=$($b.side)" }
+        elseif ($unbordered -ne 0) { $fail = "The separator border is not dark: $Name unbordered=$unbordered bordered=$bordered" }
         elseif ($glyph -ne 0) { $fail = "A drawn glyph appeared in the badge: $Name glyph=$glyph" }
         if ($fail) { Diagnose-Badge $bitmap $b $Name $fail $classes $colours $stats; throw $fail }
         $spill = 0
@@ -170,7 +181,7 @@ function Check-Badge($Row, [string]$Hex, [string]$Name) {
         )) {
             $patch = Capture $band.x $band.y $band.w $band.h
             try {
-                for ($y = 0; $y -lt $patch.Height; $y++) { for ($x = 0; $x -lt $patch.Width; $x++) { if (Near $patch.GetPixel($x, $y) $rgb[0] $rgb[1] $rgb[2] 26) { $spill++ } } }
+                for ($y = 0; $y -lt $patch.Height; $y++) { for ($x = 0; $x -lt $patch.Width; $x++) { if (Near $patch.GetPixel($x, $y) $rgb[0] $rgb[1] $rgb[2] $Tolerance) { $spill++ } } }
             } finally { $patch.Dispose() }
         }
         if ($spill -ne 0) {
@@ -180,7 +191,7 @@ function Check-Badge($Row, [string]$Hex, [string]$Name) {
             throw $reason
         }
         $bitmap.Save("$Evidence/badge-$Name.png")
-        $checks.Add(@{name="badge-$Name"; passed=$true; size=$Row.size; match=$match; area=$area; side=$b.side; radius=$b.radius; inside=$inside; outside=$outside; edge=$edge})
+        $checks.Add(@{name="badge-$Name"; passed=$true; size=$Row.size; match=$match; area=$area; side=$b.side; border=$b.border; inside=$inside; outside=$outside; edge=$edge})
     } finally { $bitmap.Dispose() }
 }
 function Check-NoBadge($Row, [string]$Name) {
@@ -193,7 +204,7 @@ function Check-NoBadge($Row, [string]$Name) {
             $rgb = Colour $provider.hex
             $match = 0
             for ($y = 0; $y -lt $bitmap.Height; $y++) {
-                for ($x = 0; $x -lt $bitmap.Width; $x++) { if (Near $bitmap.GetPixel($x, $y) $rgb[0] $rgb[1] $rgb[2] 26) { $match++ } }
+                for ($x = 0; $x -lt $bitmap.Width; $x++) { if (Near $bitmap.GetPixel($x, $y) $rgb[0] $rgb[1] $rgb[2] $provider.tol) { $match++ } }
             }
             if ($match -gt $area * .06) { throw "A $($provider.name) badge appeared without a provider: $Name match=$match area=$area" }
         }
@@ -294,11 +305,11 @@ try {
     for ($i = 0; $i -lt $providers.Count; $i++) {
         $row = @($expanded | Where-Object { $_.index -eq $i })[0]
         $place = if ($providers[$i].pinned) { 'pinned' } else { 'recent' }
-        if ($providers[$i].agent -eq 0) { Check-NoBadge $row "$place-$i" } else { Check-Badge $row $providers[$i].hex "$place-$i" }
+        if ($providers[$i].agent -eq 0) { Check-NoBadge $row "$place-$i" } else { Check-Badge $row $providers[$i].hex $providers[$i].tol "$place-$i" }
     }
     $listRow = @($expanded | Where-Object { $_.index -eq 2 })[0]
     $pinRow = @($expanded | Where-Object { $_.index -eq 0 })[0]
-    Save @{ requestedDpi=$Dpi; pinSize=$pinRow.size; listSize=$listRow.size; triangle=@(@{size='list'; side=(Badge $listRow).side; inset=0}, @{size='pinned'; side=(Badge $pinRow).side; inset=0}); roundedCorner=[int][Math]::Floor($listRow.size * 22 / 100 + 0.5) } "$Evidence/display.json"
+    Save @{ requestedDpi=$Dpi; pinSize=$pinRow.size; listSize=$listRow.size; triangle=@(@{size='list'; side=(Badge $listRow).side; border=(Badge $listRow).border}, @{size='pinned'; side=(Badge $pinRow).side; border=(Badge $pinRow).border}) } "$Evidence/display.json"
     Shot "sidebar-badges-$Dpi"
     $favourite = @($expanded | Where-Object { $_.index -eq 0 })[0]
     $marker = Capture ($favourite.right - [int][Math]::Floor(4 * $Dpi / 96) - 3) ($favourite.bottom - [int][Math]::Floor(4 * $Dpi / 96) - 3) 6 6
@@ -354,7 +365,7 @@ try {
     }
     for ($i = 0; $i -lt $providers.Count; $i++) {
         $row = @($collapsed | Where-Object { $_.index -eq $i })[0]
-        if ($providers[$i].agent -eq 0) { Check-NoBadge $row "collapsed-$i" } else { Check-Badge $row $providers[$i].hex "collapsed-$i" }
+        if ($providers[$i].agent -eq 0) { Check-NoBadge $row "collapsed-$i" } else { Check-Badge $row $providers[$i].hex $providers[$i].tol "collapsed-$i" }
     }
     Shot "sidebar-collapsed-badges-$Dpi"
     [ChatDeliveryDesktop]::Chord(@(0x11, 0x10, 0x42))

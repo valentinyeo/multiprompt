@@ -15,9 +15,9 @@ const Entry = struct { agent: u8, mark: Mark };
 
 const entries = [_]Entry{
     .{ .agent = 1, .mark = .{ .kind = .claude, .color = 0xD97757 } },
-    .{ .agent = 2, .mark = .{ .kind = .codex, .color = 0x3C78DC } },
-    .{ .agent = 3, .mark = .{ .kind = .pi, .color = 0x8FCB6B } },
-    .{ .agent = 8, .mark = .{ .kind = .antigravity, .color = 0xA77FE0 } },
+    .{ .agent = 2, .mark = .{ .kind = .codex, .color = 0x10A37F } },
+    .{ .agent = 3, .mark = .{ .kind = .pi, .color = 0x8E95A2 } },
+    .{ .agent = 8, .mark = .{ .kind = .antigravity, .color = 0x3C78DC } },
 };
 
 pub fn mark(agent: u8) ?Mark {
@@ -91,8 +91,7 @@ pub const Geometry = struct {
     right: i32,
     top: i32,
     size: i32,
-    radius: i32,
-    clipped: bool,
+    border: i32,
 
     pub fn left(self: Geometry) i32 {
         return self.right - self.size;
@@ -104,7 +103,7 @@ pub const Geometry = struct {
 };
 
 pub fn geometry(avatar: Avatar) Geometry {
-    return .{ .right = avatar.right - 4, .top = avatar.top + 4, .size = 10, .radius = 0, .clipped = false };
+    return .{ .right = avatar.right - 4, .top = avatar.top + 4, .size = 10, .border = 1 };
 }
 
 fn ink(hex: u32) u32 {
