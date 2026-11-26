@@ -2678,7 +2678,7 @@ pub fn chatRelayout(client_width: i32) void {
         var rc = chatMeasureBlockRect(hdc, sample, .{ .start = 0, .len = sample.len, .role = .prose, .first = true }, .single, width, y, null);
         rc.left += content.left;
         rc.right += content.left;
-        y = chat_activity_view.layout(rc, y);
+        y = chat_activity_view.layout(rc);
         g_working_rect = rc;
     }
     app_state.g_chat_content_h = y;

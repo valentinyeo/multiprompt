@@ -117,15 +117,15 @@ pub fn hasLine() bool {
     return line_rect != null;
 }
 
-pub fn layout(rect: RECT, top: i32) i32 {
+pub fn layout(rect: RECT) i32 {
     line_rect = rect;
     rows = 0;
-    if (!visible or !open) return top;
+    if (!visible or !open) return rect.bottom;
     rows = activity.expandedRows();
-    if (rows == 0) return top;
+    if (rows == 0) return rect.bottom;
     const height = uiScaled(ROW_H) * @as(i32, @intCast(rows));
-    rows_rect = RECT{ .left = rect.left, .top = top, .right = rect.right, .bottom = top + height };
-    return top + height;
+    rows_rect = RECT{ .left = rect.left, .top = rect.bottom, .right = rect.right, .bottom = rect.bottom + height };
+    return rect.bottom + height;
 }
 
 pub fn region(scroll_y: i32) ?RECT {

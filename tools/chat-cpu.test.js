@@ -201,7 +201,7 @@ const chat_activity_view = struct {
     fn reset() void {}
     fn refresh() void {}
     fn isVisible() bool { return false; }
-    fn layout(_: RECT, y: i32) i32 { return y; }
+    fn layout(rect: RECT) i32 { return rect.bottom; }
 };
 const chat_view = struct {
     fn activityStrip(_: bool, dots: bool) bool { return dots; }
