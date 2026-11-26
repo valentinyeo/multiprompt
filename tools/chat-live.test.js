@@ -56,9 +56,14 @@ test('provider identity stays attached to controls and restored chats', () => {
   assert.match(send, /identity\.pi == pending\.key\.pi/);
   assert.match(send, /key\.pi == pending\.key\.pi/);
   const session = read('src/chat_session.zig');
-  assert.match(session, /key\.pi == entry\.key\.pi/);
-  assert.match(session, /ai_agent = if \(entry\.key\.pi\) 3 else if \(entry\.key\.codex\) 2 else 1/);
+  assert.match(session, /key\.agentId\(\) == entry\.key\.agentId\(\)/);
+  assert.match(session, /app_state\.shells\[idx\]\.ai_agent = entry\.key\.agentId\(\);/);
   assert.match(session, /current\.identity\.same\(identity\)/);
+  const transcript = read('src/chat_transcript.zig');
+  assert.match(transcript, /pub fn agentId\(self: Identity\) u8 \{/);
+  for (const [id, provider] of [[1, 'claude'], [2, 'codex'], [3, 'pi'], [7, 'cursor'], [8, 'antigravity']]) {
+    assert.ok(transcript.includes(`${id} => "${provider}"`), provider);
+  }
 });
 
 test('D1 the live tail renders inside the same transcript buffer the view reads', () => {
