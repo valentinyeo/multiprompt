@@ -661,6 +661,9 @@ const CallKind = enum { rich, code, plain, table };
 const Call = struct { text: []const u16, kind: CallKind, level: u3 = 0, offset: usize, area: RECT, paint: bool };
 var calls: [1024]Call = undefined;
 var call_count: usize = 0;
+const Draw = struct { flags: u32, rect: RECT };
+var draws: [64]Draw = undefined;
+var draw_count: usize = 0;
 fn record(text: []const u16, kind: CallKind, level: u3, area: RECT, paint: bool, offset: usize, height: ?*i32) void {
     calls[call_count] = .{ .text = text, .kind = kind, .level = level, .area = area, .paint = paint, .offset = offset };
     call_count += 1;
@@ -693,7 +696,11 @@ fn themeConsoleFg() u32 { return 0; }
 fn SetTextColor(_: HANDLE, _: u32) u32 { return 0; }
 fn L(comptime s: []const u8) [*:0]const u16 { return std.unicode.utf8ToUtf16LeStringLiteral(s); }
 const chatDrawText = DrawTextW;
-fn DrawTextW(_: HANDLE, _: [*]const u16, _: i32, _: *RECT, _: u32) i32 { return 20; }
+fn DrawTextW(_: HANDLE, _: [*]const u16, _: i32, rect: *RECT, flags: u32) i32 {
+    draws[draw_count] = .{ .flags = flags, .rect = rect.* };
+    draw_count += 1;
+    return 20;
+}
 ${body('chatReceivedBlocks')}
 ${body('chatFlowBlock')}
 test "AUDIT injected agent Markdown reaches the same rich layout as assistant prose" {
@@ -754,6 +761,22 @@ test "AUDIT injected agent Markdown reaches the same rich layout as assistant pr
     call_count = 0;
     _ = chatFlowBlock(1, long, .{ .start = 0, .len = long.len, .role = .injected, .markdown = true }, .{}, false, null, 0, null);
     try std.testing.expectEqual(@as(usize, 300), call_count);
+    const list_text = w("1. alpha");
+    const lists = [_]ChatBlock{
+        .{ .start = 0, .len = list_text.len, .role = .prose, .markdown = true, .kind = .list, .level = 0, .prefix = 2 },
+        .{ .start = 0, .len = list_text.len, .role = .prose, .markdown = true, .kind = .list, .level = 1, .prefix = 3 },
+    };
+    for (lists) |item| {
+        call_count = 0;
+        draw_count = 0;
+        _ = chatFlowBlock(1, list_text, item, .{ .left = 100, .right = 360 }, true, null, 0, null);
+        const indent = @as(i32, item.level) * 22;
+        try std.testing.expectEqual(@as(usize, 1), draw_count);
+        try std.testing.expect(draws[0].flags & DT_RIGHT != 0);
+        try std.testing.expectEqual(@as(i32, 100 + indent), draws[0].rect.left);
+        try std.testing.expectEqual(@as(i32, 100 + indent + 24), draws[0].rect.right);
+        try std.testing.expectEqual(@as(i32, 100 + indent + 30), calls[0].area.left);
+    }
 }
 `, ['chat_markdown.zig', 'chat_transcript.zig'], 'AUDIT');
   assert.equal(run.status, 0, run.stdout + run.stderr);
