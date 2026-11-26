@@ -248,15 +248,25 @@ test('an accepted room send leaves no draft behind for the next start', () => {
   const frontend = read('room_frontend.zig');
   const fixture = fs.readFileSync(path.join(__dirname, 'fixtures/MUBO-533/accepted-draft.zig'), 'utf8');
   const declarations = ['pub const StoreLocation = struct {', 'pub const RoomLocation = struct {', 'pub const Front = union(enum) {'];
-  const functions = ['fn sameLocation(', 'fn textField(', 'fn dropDraft(', 'fn dropSubmittedDraft(', 'fn retireSubmittedDraft(', 'fn retireAcceptedDraft('];
+  const functions = ['fn sameLocation(', 'fn textField(', 'fn dropDraft(', 'fn dropSubmittedDraft(', 'fn retireSubmittedDraft(', 'fn retireAcceptedDraft(', 'fn postReceiptMatches(', 'fn acceptsPostReceipt(', 'fn acceptsReceipt(', 'fn validReceiptBindings('];
   const compose = source => `${fixture}\n${declarations.map(marker => declaration(source, marker)).join('\n')}\n${functions.map(marker => declaration(source, marker)).join('\n')}`;
-  run(compose(frontend));
+  const files = { 'room_post.zig': read('room_post.zig') };
+  run(compose(frontend), files);
   const unsaved = frontend.replace('    dropDraft(room, text);\n    _ = flushUi();\n', '    dropDraft(room, text);\n');
   assert.notEqual(unsaved, frontend);
-  assert.match(run(compose(unsaved), {}, 1), /an accepted receipt retires only its own saved draft after a restart[\s\S]*FAIL/);
+  assert.match(run(compose(unsaved), files, 1), /an accepted receipt retires only its own saved draft after a restart[\s\S]*FAIL/);
   const keepsUncertain = frontend.replace('if (record.state != .accepted or record.kind != .post or record.room_id.len != 36) return;', 'if (record.kind != .post or record.room_id.len != 36) return;');
   assert.notEqual(keepsUncertain, frontend);
-  assert.match(run(compose(keepsUncertain), {}, 1), /an uncertain send keeps its saved draft and its original body[\s\S]*FAIL/);
+  assert.match(run(compose(keepsUncertain), files, 1), /an uncertain send keeps its saved draft and its original body[\s\S]*FAIL/);
+  const trustsAnyRoom = frontend.replace('return std.mem.eql(u8, accepted.room_id, room_id) and std.mem.eql(u8, accepted.text, body);', 'return std.mem.eql(u8, accepted.text, body);');
+  assert.notEqual(trustsAnyRoom, frontend);
+  assert.match(run(compose(trustsAnyRoom), files, 1), /a receipt for another room, another body or no receipt at all never accepts the send[\s\S]*FAIL/);
+  const trustsAnyBody = frontend.replace('return std.mem.eql(u8, accepted.room_id, room_id) and std.mem.eql(u8, accepted.text, body);', 'return std.mem.eql(u8, accepted.room_id, room_id);');
+  assert.notEqual(trustsAnyBody, frontend);
+  assert.match(run(compose(trustsAnyBody), files, 1), /a receipt for another room, another body or no receipt at all never accepts the send[\s\S]*FAIL/);
+  const retiresOnAnyAccept = frontend.replace('    if (!postReceiptMatches(record.room_id, text, receipt.value)) return;\n', '');
+  assert.notEqual(retiresOnAnyAccept, frontend);
+  assert.match(run(compose(retiresOnAnyAccept), files, 1), /a saved accepted record whose receipt names another room or body keeps its draft[\s\S]*FAIL/);
 });
 
 test('a send pressed while a room opens is held for that room and never sent elsewhere', () => {

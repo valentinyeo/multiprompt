@@ -399,6 +399,22 @@ pub fn updateLocked(guard: *const Lock, command_id: []const u8, state: State, ev
     try persist(scope, record);
 }
 
+pub fn mayRollBackLaunch(previous: State) bool {
+    return previous == .prepared;
+}
+
+pub fn restorePrepared(guard: *const Lock, command_id: []const u8, previous: State) !void {
+    if (!mayRollBackLaunch(previous)) return error.InvalidTransition;
+    const scope = guard.scope;
+    var entry = (try load(scope)) orelse return error.NotFound;
+    defer entry.deinit();
+    var record = entry.record().*;
+    if (!std.mem.eql(u8, record.command_id, command_id)) return error.WrongCommand;
+    if (record.state != .uncertain or record.evidence.len != 0) return error.InvalidTransition;
+    record.state = .prepared;
+    try persist(scope, record);
+}
+
 const test_store = "10000000-0000-4000-8000-000000000001";
 const test_command = "20000000-0000-4000-8000-000000000002";
 const test_room = "30000000-0000-4000-8000-000000000003";
@@ -426,6 +442,13 @@ fn roundTrips(scope: Scope, record: Record) !bool {
     defer parsed.deinit();
     if (!std.mem.eql(u8, parsed.value.record.request, record.request) or parsed.value.record.kind != .post) return false;
     return validate(scope, parsed.value);
+}
+
+test "a launch refusal rolls a first attempt back to prepared and leaves an earlier uncertain retry alone" {
+    try std.testing.expect(mayRollBackLaunch(.prepared));
+    try std.testing.expect(!mayRollBackLaunch(.uncertain));
+    try std.testing.expect(!mayRollBackLaunch(.accepted));
+    try std.testing.expect(!mayRollBackLaunch(.rejected));
 }
 
 test "post journal record keeps the exact request through the envelope" {

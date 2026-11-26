@@ -178,8 +178,15 @@ pub const Controller = struct {
         defer entry.deinit();
         const record = entry.record();
         if (record.kind != kind or record.revision != revision or !std.mem.eql(u8, record.command_id, command_id) or !std.mem.eql(u8, record.room_id, room_id) or (record.state != .prepared and record.state != .uncertain)) return error.WrongCommand;
+        const previous = record.state;
         try journal.updateLocked(&guard, command_id, .uncertain, "");
-        if (!self.launchBytes(requestKind(kind), record.request)) return error.LaunchRefused;
+        if (!self.launchBytes(requestKind(kind), record.request)) {
+            if (journal.mayRollBackLaunch(previous)) journal.restorePrepared(&guard, command_id, previous) catch |err| {
+                var log: [128]u8 = undefined;
+                @import("diagnostics.zig").syncLog(std.fmt.bufPrint(&log, "[rooms] refused launch stays uncertain: {s}", .{@errorName(err)}) catch unreachable);
+            };
+            return error.LaunchRefused;
+        }
         self.journal_lock = guard;
     }
 

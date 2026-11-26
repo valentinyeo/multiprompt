@@ -312,6 +312,16 @@ test('the zai model family is known', () => {
   assert.deepEqual(verifier.pickVerifier('Author model: zai/glm-5.3-flash\n'), { engine: 'claude' });
 });
 
+test('every judge is excluded for every author family, plus an explicit no-Anthropic control', () => {
+  assert.equal(typeof verifier.verifierExclusions, 'function');
+  assert.deepEqual(verifier.verifierExclusions('Author model: openai/gpt-6.1-sol\nAuthor model: deepseek/deepseek-v4.1-flash\nAuthor model: google/gemini-4-neon\n'), ['deepseek', 'google', 'openai']);
+  assert.deepEqual(verifier.verifierExclusions('Author model: openai/gpt-6.1-sol\nAuthor model: deepseek/deepseek-v4.1-flash\nAuthor model: google/gemini-4-neon\nVerifier: no-anthropic\n'), ['anthropic', 'deepseek', 'google', 'openai']);
+  assert.deepEqual(verifier.verifierExclusions('verifier: NO-ANTHROPIC\nAuthor model: anthropic/claude-sonnet\n'), ['anthropic']);
+  assert.deepEqual(verifier.verifierExclusions('Author model: anthropic/claude-sonnet\n'), ['anthropic']);
+  assert.deepEqual(verifier.verifierExclusions('Body without a model line\n'), []);
+  assert.deepEqual(verifier.verifierExclusions('Author model: acme/some-model\n'), []);
+});
+
 test('a pull request with no independent verifier FAILs and names the reason', () => {
   const summary = verifier.summarize(evidenceDir({ 'verify-appearance': { status: 'passed' } }), ['appearance']);
   for (const [problem, reason] of [['no verifier from another model family', /no verifier from another model family/], ['missing Author model line', /missing Author model line/]]) {

@@ -1686,13 +1686,34 @@ fn sameLoadedRoom(location: RoomLocation) bool {
 
 fn retireAcceptedDraft(record: *const journal.Record, location: StoreLocation) void {
     if (record.state != .accepted or record.kind != .post or record.room_id.len != 36) return;
-    var parsed = std.json.parseFromSlice(std.json.Value, std.heap.page_allocator, record.request, .{ .allocate = .alloc_always }) catch return;
-    defer parsed.deinit();
-    const text = textField(parsed.value, "text") orelse return;
+    var request = std.json.parseFromSlice(std.json.Value, std.heap.page_allocator, record.request, .{ .allocate = .alloc_always }) catch return;
+    defer request.deinit();
+    const text = textField(request.value, "text") orelse return;
+    var receipt = std.json.parseFromSlice(std.json.Value, std.heap.page_allocator, record.evidence, .{ .allocate = .alloc_always }) catch return;
+    defer receipt.deinit();
+    if (!postReceiptMatches(record.room_id, text, receipt.value)) return;
     var room = RoomLocation{ .store = location, .room_id = undefined };
     @memcpy(&room.room_id, record.room_id);
     dropDraft(room, text);
     _ = flushUi();
+}
+
+fn postReceiptMatches(room_id: []const u8, body: []const u8, payload: std.json.Value) bool {
+    const accepted = room_post.acceptedHuman(payload) orelse return false;
+    return std.mem.eql(u8, accepted.room_id, room_id) and std.mem.eql(u8, accepted.text, body);
+}
+
+fn acceptsPostReceipt(item: *const PendingCommand, payload: std.json.Value) bool {
+    var parsed = std.json.parseFromSlice(std.json.Value, std.heap.page_allocator, item.request, .{ .allocate = .alloc_always }) catch return false;
+    defer parsed.deinit();
+    const body = textField(parsed.value, "text") orelse return false;
+    return postReceiptMatches(&item.room_id, body, payload);
+}
+
+fn acceptsReceipt(item: *const PendingCommand, payload: std.json.Value) bool {
+    if (!validReceiptBindings(item, payload)) return false;
+    if (item.kind != .post) return true;
+    return acceptsPostReceipt(item, payload);
 }
 
 fn validReceiptBindings(item: *const PendingCommand, payload: std.json.Value) bool {
@@ -1726,7 +1747,7 @@ fn finishCommand(c: *rooms.Controller, completion: rooms.Completion, fresh: bool
             defer result.deinit();
             if (result.kind == rooms.requestKind(item.kind) and result.value.value == .object) {
                 const payload = result.value.value.object.get("result") orelse .null;
-                if (validReceiptBindings(item, payload)) {
+                if (acceptsReceipt(item, payload)) {
                     evidence = std.json.Stringify.valueAlloc(item.arena.allocator(), payload, .{}) catch null;
                     if (evidence != null) state = .accepted;
                     if (state == .accepted and item.kind == .post) applyAcceptedPost(item, payload);
