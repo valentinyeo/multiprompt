@@ -258,10 +258,10 @@ test('an accepted room send leaves no draft behind for the next start', () => {
   const keepsUncertain = frontend.replace('if (record.state != .accepted or record.kind != .post or record.room_id.len != 36) return;', 'if (record.kind != .post or record.room_id.len != 36) return;');
   assert.notEqual(keepsUncertain, frontend);
   assert.match(run(compose(keepsUncertain), files, 1), /an uncertain send keeps its saved draft and its original body[\s\S]*FAIL/);
-  const trustsAnyRoom = frontend.replace('return std.mem.eql(u8, accepted.room_id, room_id) and std.mem.eql(u8, accepted.text, body);', 'return std.mem.eql(u8, accepted.text, body);');
+  const trustsAnyRoom = frontend.replace('return std.mem.eql(u8, accepted.room_id, room_id) and std.mem.eql(u8, accepted.text, body);', '_ = room_id;\n    return std.mem.eql(u8, accepted.text, body);');
   assert.notEqual(trustsAnyRoom, frontend);
   assert.match(run(compose(trustsAnyRoom), files, 1), /a receipt for another room, another body or no receipt at all never accepts the send[\s\S]*FAIL/);
-  const trustsAnyBody = frontend.replace('return std.mem.eql(u8, accepted.room_id, room_id) and std.mem.eql(u8, accepted.text, body);', 'return std.mem.eql(u8, accepted.room_id, room_id);');
+  const trustsAnyBody = frontend.replace('return std.mem.eql(u8, accepted.room_id, room_id) and std.mem.eql(u8, accepted.text, body);', '_ = body;\n    return std.mem.eql(u8, accepted.room_id, room_id);');
   assert.notEqual(trustsAnyBody, frontend);
   assert.match(run(compose(trustsAnyBody), files, 1), /a receipt for another room, another body or no receipt at all never accepts the send[\s\S]*FAIL/);
   const retiresOnAnyAccept = frontend.replace('    if (!postReceiptMatches(record.room_id, text, receipt.value)) return;\n', '');

@@ -389,8 +389,8 @@ test('the judge order is ladder-call then Codex then Claude with one ladder-call
   assert.equal([...workflow.matchAll(/valentinyeo\/token-ladder\/\.github\/actions\/ladder-call@main/g)].length, 1);
   assert.match(workflow, /id: ladder_call\n        if: steps\.evidence\.outcome == 'success' && [^\n]+\n        continue-on-error: true\n        uses: valentinyeo\/token-ladder\/\.github\/actions\/ladder-call@main\n        env:\n          AI_GATEWAY_API_KEY: /);
   assert.match(workflow, /id: ladder\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && steps\.ladder_call\.outcome == 'success'/);
-  assert.match(workflow, /id: openai\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && steps\.ladder\.outcome != 'success'\n        continue-on-error: true\n        env:\n          CODEX_AUTH_JSON: /);
-  assert.match(workflow, /id: claude\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && steps\.ladder\.outcome != 'success' && steps\.openai\.outcome != 'success'\n        continue-on-error: true\n        uses: anthropics\/claude-code-action@/);
+  assert.match(workflow, /id: openai\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && steps\.ladder\.outcome != 'success' && [^\n]+\n        continue-on-error: true\n        env:\n          CODEX_AUTH_JSON: /);
+  assert.match(workflow, /id: claude\n        if: steps\.evidence\.outcome == 'success' && [^\n]+ && steps\.ladder\.outcome != 'success' && steps\.openai\.outcome != 'success' && [^\n]+\n        continue-on-error: true\n        uses: anthropics\/claude-code-action@/);
   assert.match(workflow, /LADDER_LANE: \$\{\{ steps\.ladder\.outputs\.ladder_lane \|\| '' \}\}/);
   assert.match(workflow, /VERDICT: \$\{\{ steps\.ladder\.outputs\.structured_output \|\| steps\.openai\.outputs\.structured_output \|\| steps\.claude\.outputs\.structured_output \}\}/);
   assert.match(workflow, /build-ladder-request verifier-out/);
@@ -439,7 +439,7 @@ test('selection is deterministic and ladder keys are always available to the fir
   assert.match(workflow, /OPENROUTER_API_KEY: \$\{\{ secrets\.OPENROUTER_API_KEY \}\}/);
   assert.doesNotMatch(workflow, /needs\.resolve\.outputs\.engine ==/);
   assert.equal([...workflow.matchAll(/secrets\.CODEX_AUTH_JSON/g)].length, 1);
-  assert.match(workflow, /engine: \$\{\{ steps\.pr\.outputs\.engine \}\}\n      author_model_problem: \$\{\{ steps\.pr\.outputs\.author_model_problem \}\}/);
+  assert.match(workflow, /engine: \$\{\{ steps\.pr\.outputs\.engine \}\}\n      exclude_families: \$\{\{ steps\.pr\.outputs\.exclude_families \}\}\n      exclude_openai: \$\{\{ steps\.pr\.outputs\.exclude_openai \}\}\n      exclude_anthropic: \$\{\{ steps\.pr\.outputs\.exclude_anthropic \}\}\n      author_model_problem: \$\{\{ steps\.pr\.outputs\.author_model_problem \}\}/);
   assert.match(workflow, /AUTHOR_MODEL_PROBLEM: \$\{\{ needs\.resolve\.outputs\.author_model_problem \}\}/);
   assert.match(workflow, /name: pstack-verifier report[\s\S]*?needs: \[tests, resolve, select, head, before\]/);
 });

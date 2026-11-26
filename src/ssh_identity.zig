@@ -573,15 +573,15 @@ test "a rendered config that does not check out leaves the working one in place"
     const config = try std.fmt.allocPrint(a, "{s}/config", .{base});
     const working = "Host remote-1\r\n  HostName 127.0.0.1\r\n  User mpverify\r\n  Port 2222\r\n";
     try tmp.dir.writeFile(io, .{ .sub_path = "config", .data = working });
-    var table: servers.Table = @splat(.{});
-    table[0].status = .connected;
-    table[0].hostname.set("127.0.0.1");
-    table[0].user.set("mpverify");
-    table[0].port = 2222;
-    const rendered = try servers.renderConfig(a, "C:/keys/multibot_ed25519", "~/.ssh/config", "C:/ProgramData/ssh/ssh_config", &aliases, &table);
-    try std.testing.expect(!installConfig(a, "C:\\no-such-ssh.exe", config, rendered, &table));
+    var fixture: servers.Table = @splat(.{});
+    fixture[0].status = .connected;
+    fixture[0].hostname.set("127.0.0.1");
+    fixture[0].user.set("mpverify");
+    fixture[0].port = 2222;
+    const rendered = try servers.renderConfig(a, "C:/keys/multibot_ed25519", "~/.ssh/config", "C:/ProgramData/ssh/ssh_config", &aliases, &fixture);
+    try std.testing.expect(!installConfig(a, "C:\\no-such-ssh.exe", config, rendered, &fixture));
     try std.testing.expectEqualStrings(working, try tmp.dir.readFileAlloc(io, "config", a, .limited(4096)));
     try std.testing.expectError(error.FileNotFound, tmp.dir.access(io, "config.next", .{}));
-    try std.testing.expect(installConfig(a, "ssh", config, rendered, &table));
+    try std.testing.expect(installConfig(a, "ssh", config, rendered, &fixture));
     try std.testing.expectEqualStrings(rendered, try tmp.dir.readFileAlloc(io, "config", a, .limited(4096)));
 }
