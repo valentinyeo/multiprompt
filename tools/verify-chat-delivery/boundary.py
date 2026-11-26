@@ -1398,9 +1398,20 @@ def run_message_worker():
 
 def terminal_session(command):
     value = state()
-    if value.get("name") == "server-shell-input" and "exec ${SHELL:-bash} -l" in command:
-        record("invocations.jsonl", kind="login", session="server-shell")
-        return "server-shell", None
+    if value.get("name") == "server-shell-input":
+        if "exec ${SHELL:-bash} -l" in command:
+            record("invocations.jsonl", kind="login", session="server-shell")
+            return "server-shell", None
+        match = re.search(r"(?:^|; )tmux new-session -A -s '(term-[0-9a-f]{32})' -c \"\$PWD\"$", command)
+        if match:
+            sessions = value.setdefault("sessions", [])
+            if match[1] not in sessions:
+                sessions.append(match[1])
+                updated = ROOT / "terminal-state.json"
+                updated.write_text(json.dumps(value), encoding="utf-8")
+                updated.replace(ROOT / "state.json")
+            record("invocations.jsonl", kind="create", session=match[1], command=command)
+            return match[1], None
     if value.get("binding") and "exec ${SHELL:-bash} -l" in command:
         record("invocations.jsonl", kind="login", session="workspace")
         return "workspace", None
