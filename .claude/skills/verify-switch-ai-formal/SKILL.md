@@ -41,6 +41,8 @@ MUBO-221 adds `HOST_HISTORY_OWNERS` and `host_history_claim`, called once from `
 
 MUBO-582 adds an Antigravity model and effort choice to `host_settings` and the Antigravity launch argv. None of the twelve covered switch, history, usage-limit or auto-switch functions changed, and a model choice neither switches providers nor edits the decision table. Only the reader's whole-file hash moves; the model, bounds, decisions, probes and mutations are unchanged. Hosted CI must rerun the full self-test and native replay.
 
+MUBO-590 preserves a Pi chat's chosen provider/model in `HOST_SWITCH_CONFIG_KEYS` (`pi_model`) and restores `model_provider` and `model` onto the target Pi config in `host_switch_ai_locked` before `host_start`, without copying non-Pi `model` keys or altering busy refusal, start-failure abort, locator moves, queued-message adoption, handover history, usage-limit detection or auto-switch order. All six planted mutation targets, the native decision table, bounds and replays are unchanged; only the reader's whole-file hash moves. Hosted CI must rerun the full self-test and native replay.
+
 MUBO-243 adds a name-resolution path for published chat names and publishes a new Claude conversation to the account layout and the name entry on init. All twelve covered reader functions are unchanged from the prior sync, as is every other covered file, the model, bounds, decisions, probes and mutations. Only the reader hash and sync commit move. Hosted CI must rerun the full self-test and native replay; this review does not extend the model to conversation changes.
 
 That review covers the merge commit: trunk's optional `workspace` and `group` strings sit on the same publish path as the name resolution, so the merged reader is the reviewed source.

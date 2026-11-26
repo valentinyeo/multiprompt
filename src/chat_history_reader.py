@@ -3475,18 +3475,22 @@ def host_reply(query):
         return dict(status="refused", reason="unsupported_provider")
     if query.get("op") == "set_permission_mode" and provider not in ("claude", "codex"):
         return dict(status="refused", reason="unsupported_provider")
-    if not host_owned(provider, sid) and query.get("op") == "set_model" and provider == "pi":
-        return dict(status="unavailable", reason="host_not_running")
     if not host_owned(provider, sid):
         operation = query.get("op")
         if operation not in ("set_model", "set_effort", "set_permission_mode"):
             return dict(status="unavailable", reason="host_not_running")
         mode = query.get("mode") if operation == "set_permission_mode" else None
+        pi_choice = None
         if operation == "set_permission_mode":
             if mode not in HOST_PERMISSION_MODES:
                 return dict(status="refused", reason="invalid_permission_mode")
             key = "permission_mode"
             value = mode
+        elif operation == "set_model" and provider == "pi":
+            pi_provider, pi_model = host_pi_request_model(query)
+            if not pi_provider or not pi_model:
+                return dict(status="refused", reason="invalid_model")
+            pi_choice = (pi_provider, pi_model)
         else:
             key = "model" if operation == "set_model" else "effort"
             allowed = tuple(HOST_MODEL_CHOICES[provider]) if key == "model" else host_effort_choices(provider)
@@ -3502,6 +3506,11 @@ def host_reply(query):
             config = host_config(provider, sid)
             if config is None:
                 return dict(status="refused", reason="host_disabled")
+            if pi_choice is not None:
+                host_pi_save_model(config, pi_choice[0], pi_choice[1])
+                host_write(host_paths(provider, sid)["config"], config)
+                host_log(provider, sid, "pi_set_model", dict(provider=pi_choice[0], model=pi_choice[1]))
+                return dict(status="ok")
             config[key] = value
             if provider == "antigravity" and key in ("model", "effort"):
                 config = host_antigravity_normalize(config)
@@ -3517,7 +3526,9 @@ def host_reply(query):
         finally:
             host_release(lock)
     request = {key: query[key] for key in ("op", "request_id", "decision", "answers", "dismissed",
-                                           "action", "feedback", "input", "mode", "model", "effort", "provider_id", "data", "handover_file") if key in query}
+                                           "action", "feedback", "input", "mode", "model", "effort",
+                                           "provider_name", "model_provider", "pi_provider",
+                                           "provider_id", "data", "handover_file") if key in query}
     reply = host_request(provider, sid, request)
     return reply if isinstance(reply, dict) else dict(status="error", reason="invalid_reply")
 
@@ -3943,13 +3954,64 @@ def host_codex_argv(provider, sid, base):
 PI_MODEL_PART = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,159}")
 
 
+def host_pi_model_parts(model_provider, model):
+    if not isinstance(model, str) or not model:
+        return None, None
+    if model_provider in (None, ""):
+        if "/" not in model:
+            return None, None
+        model_provider, model = model.split("/", 1)
+    elif isinstance(model_provider, str) and model.startswith(model_provider + "/"):
+        model = model[len(model_provider) + 1:]
+    if not isinstance(model_provider, str) or PI_MODEL_PART.fullmatch(model_provider) is None:
+        return None, None
+    if PI_MODEL_PART.fullmatch(model) is None:
+        return None, None
+    return model_provider, model
+
+
+def host_pi_request_model(request):
+    raw_provider = request.get("provider_name")
+    if raw_provider in (None, ""):
+        raw_provider = request.get("model_provider")
+    if raw_provider in (None, ""):
+        raw_provider = request.get("pi_provider")
+    return host_pi_model_parts(raw_provider, request.get("model"))
+
+
+def host_pi_saved_model(config):
+    if not isinstance(config, dict):
+        return None, None
+    raw_provider = config.get("model_provider")
+    if raw_provider in (None, ""):
+        raw_provider = config.get("pi_provider")
+    chosen_provider, chosen_model = host_pi_model_parts(raw_provider, config.get("model"))
+    if chosen_provider and chosen_model:
+        return chosen_provider, chosen_model
+    saved = config.get("pi_model")
+    if isinstance(saved, dict):
+        return host_pi_model_parts(saved.get("provider"), saved.get("model"))
+    return None, None
+
+
+def host_pi_save_model(config, model_provider, model):
+    config["model_provider"] = model_provider
+    config["model"] = model
+    config["pi_model"] = dict(provider=model_provider, model=model)
+    config.pop("pi_provider", None)
+    return config
+
+
+def host_pi_model_choice(provider, sid):
+    chosen_provider, chosen_model = host_pi_saved_model(host_config(provider, sid))
+    if chosen_provider and chosen_model:
+        return chosen_provider, chosen_model
+    return HOST_PI_MODEL[1], HOST_PI_MODEL[3]
+
+
 def host_pi_choice(provider, sid):
-    config = host_config(provider, sid) or {}
-    chosen_provider = config.get("model_provider")
-    chosen_model = config.get("model")
-    if isinstance(chosen_provider, str) and isinstance(chosen_model, str) and PI_MODEL_PART.fullmatch(chosen_provider) and PI_MODEL_PART.fullmatch(chosen_model):
-        return ["--provider", chosen_provider, "--model", chosen_model]
-    return list(HOST_PI_MODEL)
+    chosen_provider, chosen_model = host_pi_model_choice(provider, sid)
+    return ["--provider", chosen_provider, "--model", chosen_model]
 
 
 def host_pi_argv(provider, sid, base):
@@ -4089,6 +4151,9 @@ def host_settings(provider, sid):
     if provider == "antigravity":
         model, effort = host_antigravity_choice(provider, sid)
         return dict(model=model, effort=effort)
+    if provider == "pi":
+        chosen_provider, chosen_model = host_pi_model_choice(provider, sid)
+        return dict(provider=chosen_provider, model=chosen_model, effort="")
     args = config.get("args") if isinstance(config.get("args"), list) else []
     command = config.get("command") if isinstance(config.get("command"), list) else []
     parts = command + args
@@ -4862,7 +4927,7 @@ def host_fresh_resume(provider, sid, tmux, session):
 
 HOST_AI_NAMES = dict(claude="Claude", codex="Codex", pi="Pi", antigravity="Antigravity")
 HOST_SWITCH_TARGETS = ("claude", "codex", "pi", "antigravity")
-HOST_SWITCH_CONFIG_KEYS = ("tmux", "cwd", "permission_mode", "spawn_mode", "face", "login", "nightly", "auto_switch")
+HOST_SWITCH_CONFIG_KEYS = ("tmux", "cwd", "permission_mode", "spawn_mode", "face", "login", "nightly", "auto_switch", "pi_model")
 HOST_SWITCH_HANDOVER_LIMIT = 6000
 HOST_SWITCH_MESSAGE_LIMIT = 1200
 HOST_AUTO_SWITCH_ORDER = ("claude", "codex", "pi")
@@ -5189,6 +5254,14 @@ def host_switch_ai_locked(provider, sid, target, reason=None):
                                                fresh_start=dict(phase="resume", file=handover.name, started=time.time(),
                                                                 switch_from=provider)))
         moved = {key: config[key] for key in HOST_SWITCH_CONFIG_KEYS if key in config}
+        if provider == "pi":
+            chosen_provider, chosen_model = host_pi_saved_model(config)
+            if chosen_provider and chosen_model:
+                moved["pi_model"] = dict(provider=chosen_provider, model=chosen_model)
+        if target == "pi":
+            chosen_provider, chosen_model = host_pi_saved_model(moved)
+            if chosen_provider and chosen_model:
+                host_pi_save_model(moved, chosen_provider, chosen_model)
         host_write(paths["config"], dict(moved, enabled=True, provider=target, sid=new_sid, switched_from=dict(provider=provider, sid=sid)))
     except (OSError, ValueError, sqlite3.Error):
         return dict(status="error", reason="switch_failed")
@@ -6584,8 +6657,10 @@ def host_pi_open(provider, sid, tmux, session):
     session["ready"] = True
     native = session["state"].get("context_session") or sid
     session["state"]["native_session"] = native
+    chosen_provider, chosen_model = host_pi_model_choice(provider, sid)
+    session["pi_model"] = dict(provider=chosen_provider, model=chosen_model)
     host_state_write(provider, sid, session["state"])
-    host_log(provider, sid, "init", dict(session=native))
+    host_log(provider, sid, "init", dict(session=native, provider=chosen_provider, model=chosen_model))
     host_event(provider, sid, tmux, session, "host.status", dict(state="ready"))
 
 
@@ -6830,18 +6905,14 @@ def host_pi_set_mode(provider, sid, session, mode):
 
 
 def host_pi_set_model(provider, sid, tmux, session, request):
-    model_provider = request.get("provider_name")
-    model = request.get("model")
-    if not isinstance(model_provider, str) or PI_MODEL_PART.fullmatch(model_provider) is None:
-        return host_refuse("invalid_model")
-    if not isinstance(model, str) or PI_MODEL_PART.fullmatch(model) is None:
+    model_provider, model = host_pi_request_model(request)
+    if not model_provider or not model:
         return host_refuse("invalid_model")
     if not host_control_send(session, dict(type="set_model", provider=model_provider, modelId=model)):
         return dict(status="error", reason="stdin_write_failed")
     config = host_config(provider, sid)
     if config is not None:
-        config["model_provider"] = model_provider
-        config["model"] = model
+        host_pi_save_model(config, model_provider, model)
         host_write(host_paths(provider, sid)["config"], config)
     session["pi_model"] = dict(provider=model_provider, model=model)
     host_log(provider, sid, "pi_set_model", dict(provider=model_provider, model=model))
