@@ -63,6 +63,11 @@ function Read-Shared([string]$Path) {
     }
     try { $reader = [IO.StreamReader]::new($stream); try { $reader.ReadToEnd() } finally { $reader.Dispose() } } finally { $stream.Dispose() }
 }
+function Read-After([int64]$Offset) {
+    $log = Read-Shared "$settings/debug.log"
+    if ($log.Length -le $Offset) { return '' }
+    return $log.Substring($Offset)
+}
 function Wait-For([string]$ConditionName, [scriptblock]$Check, [int]$Seconds = 45) {
     $timer = [Diagnostics.Stopwatch]::StartNew()
     do {
@@ -129,11 +134,11 @@ function Invoke-JourneyCommand {
     Press @(0x1B) 'Escape: dismiss overlay before the palette command'
     $offset = (Read-Shared "$settings/debug.log").Length
     Press @(0x11, 0x4B) 'Ctrl+K: open palette'
-    [void](Wait-For 'empty palette ready' { (Read-Shared "$settings/debug.log").Substring($offset) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
+    [void](Wait-For 'empty palette ready' { (Read-After $offset) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
     Type-Text $query
     $rowsPattern = '\[palette\] rows chars=' + $query.Length + ' count=\d+ ids=([^\r\n]+)'
     $ids = Wait-For "palette rows for $query" {
-        $rows = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($offset), $rowsPattern)
+        $rows = [regex]::Matches((Read-After $offset), $rowsPattern)
         if ($rows.Count -eq 0) { return $null }
         $found = @($rows[$rows.Count - 1].Groups[1].Value.Trim() -split ' ' | Where-Object { $_ })
         if (-not $found.Count -or ($null -ne $target -and $found -notcontains $target)) { return $null }
@@ -142,7 +147,7 @@ function Invoke-JourneyCommand {
     $index = if ($null -eq $target) { 0 } else { [Array]::IndexOf($ids, $target) }
     for ($i = 0; $i -lt $index; $i++) { Press @(0x28) "Down: row for $query" }
     Press @(0x0D) "Enter: $query"
-    [void](Wait-For "palette confirms $query" { (Read-Shared "$settings/debug.log").Substring($offset) -match '\[palette\] confirm target=\d+' })
+    [void](Wait-For "palette confirms $query" { (Read-After $offset) -match '\[palette\] confirm target=\d+' })
 }
 function Visible-Children([string]$Class, $Parent = $main) {
     $element = [Windows.Automation.AutomationElement]::FromHandle([IntPtr]$Parent)
@@ -576,7 +581,7 @@ Host remote-1
         [void](Wait-For 'room persisted' { (Room-Data (Snapshot 'create-poll')).Count -eq 1 })
         if ((Shot 'create-after') -notmatch 'Rooms534') { throw 'Saved room is not shown in its room view' }
         $published = Wait-For 'the room create published the shared chat helper on this host' {
-            $match = [regex]::Match((Read-Shared "$settings/debug.log").Substring($bridgeOffset), '\[room_bridge\] (published runtime|runtime already published) [0-9a-f]{12}')
+            $match = [regex]::Match((Read-After $bridgeOffset), '\[room_bridge\] (published runtime|runtime already published) [0-9a-f]{12}')
             if (-not $match.Success) { return $null }
             $match.Value
         }
@@ -831,8 +836,8 @@ Host remote-1
             try {
                 [void](Wait-For 'the real host ended the interrupted turn' {
                     $state = Snapshot 'interrupt-ended'
-                    $host = @($state.hosts | Where-Object { $_.state.native_session -ceq $bravoSid })
-                    $host.Count -eq 1 -and $host[0].state.result.subtype -ceq 'interrupted'
+                    $bravoHost = @($state.hosts | Where-Object { $_.state.native_session -ceq $bravoSid })
+                    $bravoHost.Count -eq 1 -and $bravoHost[0].state.result.subtype -ceq 'interrupted'
                 } 20)
                 break
             } catch { if ($attempt -eq 3) { throw } }

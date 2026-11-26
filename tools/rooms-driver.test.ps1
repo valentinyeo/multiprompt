@@ -44,12 +44,12 @@ function Reject([scriptblock]$Body, [string]$Message) {
     try { & $Body } catch { $caught = $true }
     Require $caught $Message
 }
-function Wait-For([string]$Name, [scriptblock]$Body, [int]$Seconds = 30) {
+function Wait-For([string]$ConditionName, [scriptblock]$Body, [int]$Seconds = 30) {
     for ($attempt = 0; $attempt -lt 5; $attempt++) {
         $value = & $Body
         if ($value) { return $value }
     }
-    throw "Timed out: $Name"
+    throw "Timed out: $ConditionName"
 }
 function Read-Shared([string]$Path) { return $script:log }
 function Invoke-JourneyCommand([string]$Text) { $script:opening = $true; $script:windowChecks = 0; $script:log += '[rooms] bridge reply received' }
