@@ -4,11 +4,11 @@ Source files: src/chat*, src/terminal*, src/chat_markdown*.zig, src/chat_connect
 
 ## Sub-features
 
-/plan and /permissions open the existing mode picker. Plan, Ask and Accept edits apply to the originating live chat. Unsupported terminal commands explain their limits without entering the outbox. Pi /model opens its provider model picker; other chats can still show the coming-soon notice.
+/plan and /permissions open the existing mode picker. Plan, Ask and Accept edits apply to the originating live chat. Unsupported terminal commands explain their limits without entering the outbox. Pi /model opens its provider model picker. In an Antigravity chat /model opens that chat's model and effort rows in the Plus menu, while its own slash skills and unsupported commands still send to the agent. Claude and Codex chats still show the coming-soon notice.
 
 ## How to get to it (user POV)
 
-Type /plan or /permissions in live chat. Press Enter, then choose a mode. Ctrl+K also lists the modes. In non-Pi chats, /model, /resume and /rewind keep the draft editable and show a plain notice. Pi /login opens provider authentication. The Plus menu also offers Bypass; the existing journey does not cover every Pi/provider path.
+Type /plan or /permissions in live chat. Press Enter, then choose a mode. Ctrl+K also lists the modes. In Claude and Codex chats, /model, /resume and /rewind keep the draft editable and show a plain notice; an Antigravity chat opens its model and effort rows instead of sending /model on. Pi /login opens provider authentication. The Plus menu also offers Bypass; the existing journey does not cover every Pi/provider path.
 
 ## Driving it with control.ps1
 

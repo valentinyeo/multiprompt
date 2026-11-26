@@ -1,0 +1,1 @@
+Open the Antigravity model picker from a slash command
