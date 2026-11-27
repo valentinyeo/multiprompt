@@ -27,3 +27,5 @@ Retain screenshots, raw controls, acknowledgements, resulting mode, executable i
 ## Gotchas
 
 Two saved remote tabs and one transcript round are seeded once before launch. The app-supplied reader runs the real host mode handler. Only SSH, host ownership and agent control transport are stand-ins. No shared session, credentials or paid agent is used. This verifies native routing and host controls, not a real agent session.
+
+MUBO-575 retains legacy slash and palette permission entries. The desktop still sends `manual` for old clients, and the host translates it to Claude's native `default` control request. The hosted slash journey checks native controls `plan,default,acceptEdits` while its independent saved-mode receipts remain `plan,manual,acceptEdits`. The new plus menu uses Default, Auto and Bypass; its four-row submenu path is owned by [chat-model](chat-model.md).

@@ -35,6 +35,10 @@ One logical chat address, at most two pending switch requests, five successful s
 
 ## Coverage and sync
 
+MUBO-575 adds four-row AI menus, a permission-mode enum value and palette IDs, shared-host full-access defaults, native Claude mode translation, persisted Codex permissions and CLI setters. The covered delivery/store/switch/usage-limit functions, ChatOutboxEntry, probes, decisions and planted mutations are unchanged. The reader-test diff only updates Codex startup-policy expectations outside IGSH_1266_SharedMessageHostTest. Whole-file hashes were recomputed with `sha256sum`; the model bounds and sync base stay unchanged. Hosted CI must run the formal self-tests; no local run or formal pass is claimed.
+
+
+
 MUBO-594 changes only `src/chat_history_reader.py` among the covered files. The new `message_edit` and `message_send_now` branches sit inside `message_store_transaction`, which no switch decision calls, and `message_store_request`'s flock set gains `message_send_now`. `host_switch_ai`, `host_switch_abort`, `host_switch_handover`, `host_switch_rows`, `host_switch_follow`, `host_dispatch_switch`, `host_usage_limit` and the auto-switch settings, target, set, trigger and run are unchanged, as are the fixtures and both JavaScript suites. Only the reader hash and the sync commit move; the model, bounds and replays stay unchanged.
 
 

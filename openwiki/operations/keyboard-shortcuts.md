@@ -278,8 +278,12 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Up / Down / Enter in Chat View | Up in an empty message box focuses the newest message; Up/Down move between messages including waiting ones, Enter opens the right-click options, Delete cancels a waiting message, Esc or typing returns to the box |
 | Enter / Ctrl+Enter in Chat View | Send your message; while dictating, stops the dictation and sends it with the spoken words; Shift+Enter adds a new line; Enter inserts an open command suggestion |
 | / in Chat View | Suggest Claude or Codex commands and skills; Up/Down, Tab or Enter inserts, Esc closes |
-| /plan or /permissions in live chat, or Ctrl+K -&gt; Chat View: Plus Menu | Choose Plan, Ask, Accept edits, or Bypass for this chat; /plan selects Plan first |
-| Ctrl+K "Chat View: Plus Menu" | Chat View: open the plus menu left of the message box: Attach file, Model, Effort and, in a Claude chat, Permission level; Up/Down/Enter or the mouse choose, Esc or a click outside closes |
+| /plan or /permissions in a Claude or Codex live chat | Open the permission picker; /plan selects Plan first. The plus menu offers this AI's permission modes |
+| Ctrl+K "Chat View: AI" | Open Switch AI for this chat; mb ai &lt;name&gt; claude\|codex\|pi\|antigravity sets the same AI twice safely |
+| Ctrl+K "Chat View: Model" | Choose only models for this AI, including the live Pi model list; mb model &lt;name&gt; &lt;model&gt; keeps the chat and its history |
+| Ctrl+K "Chat View: Effort" | Choose this AI's supported effort; mb effort &lt;name&gt; low\|medium\|high\|xhigh sets it without replacing the chat |
+| Ctrl+K "Chat View: Permission level" | Claude offers Default, Auto and Bypass; Codex shows approval and sandbox pairs; Pi and Antigravity always have full access. mb permission &lt;name&gt; &lt;level&gt; sets a supported mode |
+| Ctrl+K "Chat View: Plus Menu" | Chat View: open the four-row plus menu: AI, Model, Effort and Permission level; Up/Down/Enter or the mouse choose, Esc goes back, then closes. Attach files with Ctrl+K Attach File, paste or drop |
 | $ in Chat View (Codex) | Suggest Codex skills |
 | Ctrl+/ in Chat View | Browse commands and skills for this session |
 | Ctrl+K "Chat View: On Everywhere / Off Everywhere" | Switch every session once; Alt+C and tab switches keep each session independent afterwards |

@@ -457,7 +457,7 @@ async function spawnSession(ctx, flags) {
       try { return result.stdout.trim().split('\n').filter(Boolean).map(line => JSON.parse(line)); } catch { throw new Failure('invalid host response'); }
     };
     if (!config || config.enabled !== true) {
-      const [enabled] = runtime(['host', 'enable', provider, sid, '--tmux', session, '--cwd', folder, ...(provider === 'claude' ? ['--permission-mode', 'bypassPermissions'] : [])]);
+      const [enabled] = runtime(['host', 'enable', provider, sid, '--tmux', session, '--cwd', folder, ...(['claude', 'codex', 'pi', 'antigravity'].includes(provider) ? ['--permission-mode', 'bypassPermissions'] : [])]);
       if (enabled?.status !== 'enabled') throw new Failure('host enable failed');
     }
     const result = mode === 'headless' ? { changed: false, revision: current.data.revision } : await edit(ctx, layout => {

@@ -54,7 +54,7 @@ test('IGSH-1922 the plus menu and Ctrl+K list Fable next to Opus, Sonnet and Hai
   assert.match(plus, /\.model_fable => "Fable"/);
   assert.match(plus, /state\.active\[@intFromEnum\(Item\.model_fable\)\] = model == \.fable/);
   assert.match(read('src/chat_live.zig'), /pub const Model = enum \{ unknown, opus, sonnet, haiku, fable, sol, terra, luna, astra\b/);
-  assert.match(read('src/main.zig'), /\.model_fable => \.\{ \.model = \.fable \}/);
+  assert.match(read('src/plus_menu.zig'), /\.model_fable => \.\{ \.model = \.fable \}/);
   assert.match(read('src/chat_send.zig'), /\.fable => "Model: Fable"/);
   assert.match(read('src/sidebar.zig'), /SEARCH_CHAT_MODEL_FABLE_OFFSET => L\("Chat View: Model Fable"\)/);
   for (const file of ['src/shortcuts.zig', 'openwiki/operations/keyboard-shortcuts.md']) {

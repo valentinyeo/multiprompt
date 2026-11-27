@@ -482,6 +482,7 @@ pub fn chatModeFinish(lp: @import("win32.zig").LPARAM) void {
             .acceptEdits => "Accept edits on",
             .plan => "Plan on",
             .bypassPermissions => "Bypass on",
+            .auto => "Auto on",
         };
         showHeaderNoticeAscii(text, 3000, false);
     }

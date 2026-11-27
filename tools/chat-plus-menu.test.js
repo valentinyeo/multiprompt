@@ -13,7 +13,7 @@ test('IGSH-1521 the plus menu source exists and holds model, effort and permissi
   for (const name of ['attach', 'model_opus', 'model_sonnet', 'model_haiku', 'effort_low', 'effort_medium', 'effort_high', 'mode_ask', 'mode_edits', 'mode_plan', 'mode_bypass']) {
     assert.match(plus, new RegExp(`\\b${name}\\b`), name);
   }
-  assert.match(plus, /std\.mem\.eql\(u8, identity\.provider\(\), "claude"\)/);
+  assert.match(plus, /std\.mem\.eql\(u8, provider, "claude"\)/);
   assert.match(plus, /chatModePickerAvailable\(\)/);
   assert.match(plus, /chatSettingsEligible\(\)/);
 });
@@ -23,7 +23,8 @@ test('IGSH-1521 the plus button opens the menu instead of attaching directly', (
   assert.match(main, /4 => plus_menu\.open\(\)/);
   assert.doesNotMatch(main, /4 => _ = PostMessageW\(hwnd, WM_APP_CHAT_ATTACH/);
   assert.match(main, /WM_APP_PLUS_MENU_ACTION =>/);
-  assert.match(main, /\.attach => _ = PostMessageW\(hwnd, WM_APP_CHAT_ATTACH/);
+  assert.match(main, /plus_menu\.dispatch\(wp\)/);
+  assert.match(read('src/plus_menu.zig'), /\.attach => _ = focus\.PostMessageW\(app_state\.g_main_hwnd, w\.WM_APP_CHAT_ATTACH/);
   assert.match(main, /plus_menu\.close\(\)/);
   assert.match(read('src/chat_composer.zig'), /plus_menu\.zig"\)\.key\(wp\)/);
 });

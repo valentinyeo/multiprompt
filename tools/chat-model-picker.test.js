@@ -32,7 +32,7 @@ test('all six settings are searchable, painted and dispatched', () => {
       if (['OPUS', 'SONNET', 'HAIKU', 'FABLE', 'LOW', 'MEDIUM', 'HIGH'].includes(value)) {
         assert.ok(!palette.includes(`g_search_results[app_state.g_search_result_count] = ${id};`), `${id} folds into the plus menu`);
       } else {
-        assert.ok(palette.includes(`= ${id};`), label);
+        assert.ok(palette.includes(`.id = ${id},`), label);
       }
       assert.ok(sidebar.includes(`${id} => L("${label}")`), label);
       assert.ok(main.includes(`${id} => .{ .${kind.toLowerCase()} = .${value.toLowerCase()} }`), label);
@@ -64,7 +64,7 @@ test('F1 and keyboard docs point at the Plus Menu for model and effort', () => {
   for (const file of ['src/shortcuts.zig', 'openwiki/operations/keyboard-shortcuts.md']) {
     const text = read(file);
     assert.ok(text.includes('Chat View: Plus Menu'), file);
-    assert.ok(text.includes('Model, Effort and, in a Claude chat, Permission level'), file);
+    assert.ok(text.includes('AI, Model, Effort and Permission level'), file);
   }
 });
 

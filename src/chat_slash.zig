@@ -1,7 +1,7 @@
 const std = @import("std");
 
 pub const Route = enum { send, plan, permissions, model, login, unavailable };
-pub const PermissionMode = enum { manual, acceptEdits, plan, bypassPermissions };
+pub const PermissionMode = enum { manual, acceptEdits, plan, bypassPermissions, auto };
 
 const unsupported = [_][]const u8{
     "add-dir", "artifact-capabilities", "artifact-diagramming", "artifacts", "autofix-pr",
@@ -131,7 +131,7 @@ test "MUBO-586 antigravity model opens the picker while its skills still send" {
 
 test "mode requests serialize identity and supported mode" {
     const a = std.testing.allocator;
-    for ([_]PermissionMode{ .manual, .acceptEdits, .plan, .bypassPermissions }) |mode| {
+    for ([_]PermissionMode{ .manual, .acceptEdits, .plan, .bypassPermissions, .auto }) |mode| {
         const request = try modeRequest(a, 42, "claude", "session\"id", mode);
         defer a.free(request);
         const parsed = try std.json.parseFromSlice(std.json.Value, a, request, .{});

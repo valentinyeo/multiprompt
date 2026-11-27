@@ -9050,7 +9050,7 @@ class IGSH_1544_CodexHostTest(HostProviderCase):
         thread = self.params('thread/start')[0]
         if os.environ.get('MULTIBOT_GUIDANCE_EVIDENCE'):
             Path(os.environ['MULTIBOT_GUIDANCE_EVIDENCE']).write_text(json.dumps({'provider': 'codex', 'guidance': thread['developerInstructions']}))
-        self.assertEqual((thread['approvalPolicy'], thread['sandbox']), ('on-request', 'workspace-write'))
+        self.assertEqual((thread['approvalPolicy'], thread['sandbox']), ('never', 'danger-full-access'))
         self.assertIn('Computer view is view-only unless the user grants control', thread['developerInstructions'])
         self.assertIn('multibot-feedback', thread['developerInstructions'])
         self.assertIn('zsb --help', thread['developerInstructions'])
@@ -9059,10 +9059,10 @@ class IGSH_1544_CodexHostTest(HostProviderCase):
         turn = self.params('turn/start')[0]
         self.assertEqual(turn['threadId'], self.thread)
         self.assertEqual(turn['input'], [dict(type='text', text=self.text, text_elements=[])])
-        self.assertEqual(turn['sandboxPolicy']['type'], 'workspaceWrite')
+        self.assertEqual(turn['sandboxPolicy']['type'], 'dangerFullAccess')
         self.assertEqual(self.wait_for(lambda: reader.host_session_state(self.provider, self.sid).get('native_session')), self.thread)
         policies = [row for row in reader.host_log_tail(self.provider, self.sid, 50) if row['event'] == 'codex_permissions']
-        self.assertEqual(policies[0]['detail']['approval'], 'on-request')
+        self.assertEqual(policies[0]['detail']['approval'], 'never')
 
     def test_codex_streams_a_turn_and_round_trips_an_approval(self):
         self.enable()

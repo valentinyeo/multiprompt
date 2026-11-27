@@ -67,7 +67,7 @@ for (const provider of ['codex', 'pi', 'antigravity']) {
     assert.equal(r.code, 0, r.errors);
     const enable = r.calls.find(a => a[1] === 'enable');
     assert.deepEqual(enable.slice(0, 3), ['host', 'enable', provider]);
-    assert.ok(!enable.includes('--permission-mode'), `${provider} does not take the claude permission mode`);
+    assert.equal(enable[enable.indexOf('--permission-mode') + 1], 'bypassPermissions', `${provider} starts with full permissions`);
     assert.deepEqual(r.calls.find(a => a[1] === 'start').slice(0, 3), ['host', 'start', provider]);
     assert.equal(r.submitted[0].provider, provider);
     assert.equal(JSON.parse(r.out).provider, provider);

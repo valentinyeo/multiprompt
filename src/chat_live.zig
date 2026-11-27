@@ -18,7 +18,7 @@ pub const ItemStatus = enum { running, ok, failed, interrupted };
 pub const State = enum { idle, running };
 pub const Model = enum { unknown, opus, sonnet, haiku, fable, sol, terra, luna, astra, neon, carbon, argon, hydrogen, flash };
 pub const Effort = enum { unknown, low, medium, high, xhigh };
-pub const Mode = enum { unknown, manual, acceptEdits, plan, bypassPermissions };
+pub const Mode = enum { unknown, manual, acceptEdits, plan, bypassPermissions, auto };
 pub const Settings = struct { model: Model = .unknown, effort: Effort = .unknown, mode: Mode = .unknown, applied: bool = false };
 pub const RequestKind = enum { approval, question, plan };
 pub const Decision = enum { accept, accept_for_session, decline, cancel };

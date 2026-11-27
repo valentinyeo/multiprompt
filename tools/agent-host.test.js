@@ -11,8 +11,8 @@ test('IGSH-1266 new Claude sessions start on the app owned host and typing a com
   assert.match(host, /pub const ENABLED = true;/);
   assert.match(host, /pub fn hostedWorkspaceProvider\(program: \[\]const u8\) \?Provider/);
   assert.match(host, /pub fn eligible\(program: \[\]const u8\) bool \{\s*return ENABLED and hostedWorkspaceProvider\(program\) != null;/);
-  assert.match(host, /try std\.testing\.expect\(!eligible\("codex"\)\);/);
-  assert.match(host, /try std\.testing\.expect\(!eligible\("pi"\)\);/);
+  assert.match(host, /try std\.testing\.expect\(eligible\("codex"\)\);/);
+  assert.match(host, /try std\.testing\.expect\(eligible\("pi"\)\);/);
   assert.match(host, /try std\.testing\.expect\(eligible\("cursor"\)\);/);
   assert.match(host, /try std\.testing\.expect\(eligible\("antigravity"\)\);/);
   assert.match(host, /try std\.testing\.expect\(eligible\("agy"\)\);/);
@@ -42,7 +42,7 @@ test('IGSH-1266 new Claude sessions start on the app owned host and typing a com
   assert.match(choice, /if \(host_sid\) \|sid\| \{\s*const provider = agent_host\.hostedWorkspaceProvider\(program\) orelse return null;\s*return agent_host\.launchCommandFor\(host_out, provider, session, cwd, sid, runtime\);/);
   assert.match(choice, /return buildWorkspaceTmuxLaunchCmd\(command_out, session, cwd, program\);/);
   assert.match(choice, /try std\.testing\.expectEqualStrings\(expected, spawned\);/);
-  assert.match(choice, /try std\.testing\.expect\(workspaceLaunchCommand\("codex", "term-abc", "~\/projects", sid, agent_host\.READER, &host_buf, &command_buf\) == null\);/);
+  assert.match(choice, /try std\.testing\.expect\(workspaceLaunchCommand\("codex", "term-abc", "~\/projects", sid, agent_host\.READER, &host_buf, &command_buf\) != null\);/);
 
   assert.ok(!palette.includes('fn buildCodexTmuxLaunchCmd('), 'Codex no longer types into a terminal');
 });
@@ -53,7 +53,7 @@ test('IGSH-1447 Ctrl+T starts a live chat without a parking terminal or idle pro
   const format = launch.match(/std\.fmt\.bufPrint\(out, "([^"]*)"/);
   const args = launch.match(/\.\{ ([^}]*?) \}\) catch null;/);
   assert.ok(format && args, 'the launch command must be readable');
-  const mode = host.match(/const mode = if \(provider == \.claude\) "([^"]*)" else "";/);
+  const mode = host.match(/const mode = if \(provider == \.claude[^)]+\) "([^"]*)" else "";/);
   const values = { name: 'claude', session: 'live-abc', cwd: '~/projects', sid: 'ffffffff-ffff-4fff-bfff-ffffffffffff', mode: mode ? mode[1] : '', reader: '~/.multiprompt-runtime/reader.py' };
   const parts = format[1].split('{s}');
   const ordered = args[1].split(',').map((value) => value.trim());

@@ -27,6 +27,10 @@ commands:
   star <name> on|off [--host N]
   mute <name> on|off [--host N]
   manual <name> on|off [--host N]
+  ai <name> claude|codex|pi|antigravity [--host N]
+  model <name> <model-or-provider/model> [--host N]
+  effort <name> low|medium|high|xhigh [--host N]
+  permission <name> default|auto|bypass|untrusted|workspace-write|read-only [--host N]
   settings <frequent|favorites|all|frequent_first> on|off
   pull [--json]
   workspace list
@@ -1003,6 +1007,17 @@ function mpSessionsScript(env) {
   return join(dirname(fileURLToPath(import.meta.url)), 'mp-sessions');
 }
 
+async function chatControl(ctx, command, flags) {
+  if (flags._.length !== 2) throw new Failure(command + ' needs a chat name and a value');
+  const args = [command, ...flags._];
+  if (flags.host !== undefined) args.push('--host', String(hostSlot(flags.host)));
+  const sessions = ctx.sessions || (argv => spawnSync('python3', [mpSessionsScript(ctx.env), ...argv], { encoding: 'utf8', env: ctx.env, timeout: 60000 }));
+  const result = sessions(args);
+  if (result.stdout?.trim()) ctx.out(result.stdout.trim());
+  if (result.stderr?.trim()) ctx.err(result.stderr.trim());
+  return result.status ?? 1;
+}
+
 async function health(ctx, flags) {
   if (flags._.length) throw new Failure('health takes no arguments');
   const args = ['health'];
@@ -1038,6 +1053,9 @@ export async function run(argv, overrides = {}) {
       const flags = parse(rest);
       await pinSession({ env, out, err }, flags, command === 'pin');
       return 0;
+    }
+    if (['ai', 'model', 'effort', 'permission'].includes(command)) {
+      return await chatControl({ env, out, err, sessions: overrides.sessions }, command, parse(rest));
     }
     if (command === 'health') {
       const flags = parse(rest);
