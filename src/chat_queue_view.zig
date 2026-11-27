@@ -231,6 +231,16 @@ const QueueJob = struct {
     op: [20]u8,
 };
 
+var g_op_refresh: chat_queue.OpRefresh = .{};
+
+fn finishOp(shell_id: u32) void {
+    g_op_refresh.done(shell_id);
+}
+
+pub fn chatQueueRefresh() ?u32 {
+    return g_op_refresh.take();
+}
+
 fn opName(op: QueueOp) []const u8 {
     return if (op == .send_now) "message_send_now" else "message_edit";
 }
@@ -255,6 +265,7 @@ fn startQueueOp(entry: app_state.ChatOutboxEntry, op: QueueOp) bool {
 fn queueOpThread(job: *QueueJob) void {
     const a = std.heap.page_allocator;
     defer a.destroy(job);
+    defer finishOp(job.key.shell_id);
     const query = std.json.Stringify.valueAlloc(a, .{
         .op = std.mem.sliceTo(&job.op, 0),
         .message_protocol = 1,

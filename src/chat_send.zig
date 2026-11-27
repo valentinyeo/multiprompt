@@ -1430,6 +1430,14 @@ pub fn chatOutboxChanged() void {
     armChatOutboxTimerIfNeeded();
 }
 
+pub fn chatQueueOpDone(shell_id: u32) void {
+    for (app_state.g_chat_histories.items) |history| {
+        if (history.retired or history.key.shell_id != shell_id) continue;
+        history.message_next_tick = 0;
+    }
+    chatOutboxChanged();
+}
+
 fn chatOutboxEnqueueForShell(idx: u32, text: []const u16) bool {
     var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
     const key = chatOutboxKeyForShell(idx, &key_buf);
