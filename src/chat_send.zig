@@ -851,7 +851,12 @@ pub fn sendChatPrompt() void {
         };
         send_text = app_state.g_chat_message_wide[0..n];
     }
-    if (app_state.g_chat_skill_name_len == 0) selectMidSentenceSkill(send_text);
+    const auto_selected_skill = app_state.g_chat_skill_name_len == 0;
+    defer if (auto_selected_skill) {
+        app_state.g_chat_skill_name_len = 0;
+        app_state.g_chat_skill_body_len = 0;
+    };
+    if (auto_selected_skill) selectMidSentenceSkill(send_text);
     if (app_state.g_chat_skill_name_len > 0) {
         const prompt_utf8 = std.unicode.utf16LeToUtf8Alloc(std.heap.page_allocator, send_text) catch {
             showHeaderNoticeAscii("The skill prompt contains invalid text", 3500, true);
@@ -870,11 +875,15 @@ pub fn sendChatPrompt() void {
         };
         if (composed_utf8) |bytes| std.heap.page_allocator.free(bytes);
         composed_utf8 = composed;
-        const composed_len = std.unicode.utf8ToUtf16Le(app_state.g_chat_message_wide[0 .. app_state.g_chat_message_wide.len - 1], composed) catch {
+        const composed_room = app_state.g_chat_message_wide.len - 1;
+        const composed_len = std.unicode.calcUtf16LeLen(composed) catch {
             showHeaderNoticeAscii("The selected skill contains invalid text", 3500, true);
             return;
         };
-        send_text = app_state.g_chat_message_wide[0..composed_len];
+        if (composed_len <= composed_room and composed_len <= CHAT_OUTBOX_MSG_CAP and send_text.len <= CHAT_OUTBOX_MSG_CAP) {
+            const written = std.unicode.utf8ToUtf16Le(app_state.g_chat_message_wide[0..composed_room], composed) catch unreachable;
+            send_text = app_state.g_chat_message_wide[0..written];
+        }
     }
     if (chat_complete.endsInTriggerToken(send_text, chatAcAgent()) and send_text.len + 1 < text_buf.len and composed_utf8 == null) {
         text_buf[send_text.len] = ' ';
@@ -3135,7 +3144,7 @@ pub fn chatOutboxTick() void {
         for (0..count) |offset| {
             const idx: u32 = @intCast((app_state.g_chat_message_sync_next + offset) % count);
             const shell = app_state.shells[idx];
-            if (shell.kind != .tmux or (shell.ai_agent != 1 and shell.ai_agent != 2 and shell.ai_agent != 3)) continue;
+            if (!chatMessageGoesToHost(shell.kind, shell.ai_agent)) continue;
             if ((!app_state.g_chat_active or idx != app_state.active_shell) and chatOutboxSyncCountForShell(idx) == 0) continue;
             chatMessageSyncStart(idx);
             if (app_state.g_chat_message_sync_job != null) {

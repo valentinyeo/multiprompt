@@ -5127,6 +5127,142 @@ class MUBO_601_UnacknowledgedSendTest(MUBO_594_QueuedMessageActionsTest):
         self.assertEqual(self.text('message_mubo601_0002')['state'], 'queued')
 
 
+class MUBO_607_AntigravityTurnQueueTest(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name)
+        self.path = self.home / 'sid.jsonl'
+        self.path.write_text('')
+        self.base = dict(message_protocol=1, provider='antigravity', sid='sid', tmux='fixture')
+        self.sources = {name: base64.b64encode((ROOT / 'src/chat_connectors' / (name + '.py')).read_bytes()).decode()
+                        for name in ('claude', 'codex')}
+        self.addCleanup(patch.stopall)
+        patch.object(reader, 'HOME', self.home).start()
+        patch.object(reader, 'CONNECTOR_SOURCES', self.sources, create=True).start()
+        patch.object(reader, 'resolve_tmux_agent', return_value=('sid', self.path)).start()
+        patch.object(reader, 'send_response_preserve_draft', return_value={'status': 'sent'}).start()
+        patch.object(reader, 'send_now_response', return_value='ok').start()
+        self.session = dict(state=dict(native_session='native-conversation-607'))
+        self.agent = types.SimpleNamespace(stdin=io.BytesIO(), stdout=io.BytesIO(), pid=607)
+        reader.host_session_reset(self.session, self.agent)
+        self.session['ready'] = True
+        reader.host_write(reader.host_paths('antigravity', 'sid')['config'],
+                          dict(enabled=True, tmux='fixture', cwd=str(self.home), command=['agy']))
+        reader.host_state_write('antigravity', 'sid', self.session['state'])
+        patch.object(reader, 'host_dispatch_start', return_value=dict(status='owned')).start()
+        patch.object(reader, 'host_owned', return_value=True).start()
+        patch.object(reader, 'host_request', side_effect=self.host_request).start()
+        patch.object(reader, 'host_deliver', side_effect=self.deliver).start()
+        self.stop_agent = patch.object(reader, 'host_agent_stop').start()
+        self.start_agent = patch.object(reader, 'host_agent_start', side_effect=self.new_agent).start()
+
+    def new_agent(self, *args):
+        self.agent = types.SimpleNamespace(stdin=io.BytesIO(), stdout=io.BytesIO(), pid=608)
+        return self.agent
+
+    def host_request(self, provider, sid, request, **kwargs):
+        return reader.host_handle_request(provider, sid, self.base['tmux'], self.session, request)
+
+    def deliver(self, provider, sid, token, attempt, epoch, text, **kwargs):
+        return self.host_request(provider, sid, dict(op='deliver', id=token, attempt=attempt, epoch=epoch, text=text))
+
+    def request(self, op, **values):
+        return reader.message_store_request(dict(self.base, op='message_' + op, **values))
+
+    def submit(self, token='message_mubo607_0001', text='queued prompt'):
+        return self.request('submit', message_id=token, text=text)['message']
+
+    def text(self, token='message_mubo607_0001'):
+        return self.request('status', message_id=token)['message']
+
+    def send(self):
+        row = self.submit()
+        self.request('dispatch')
+        self.assertEqual(self.text()['state'], 'sent')
+        return row
+
+    def accept(self):
+        reader.host_accept('antigravity', 'sid', 'fixture', self.session, dict(event='step_update'))
+        self.assertTrue(self.session['inflight'].get('accepted'))
+
+    def test_a_second_message_stays_queued_while_an_antigravity_turn_runs(self):
+        self.send()
+        self.accept()
+        self.submit('message_mubo607_0002', 'follow up prompt')
+        self.request('dispatch')
+        self.assertEqual(self.text('message_mubo607_0002')['state'], 'queued')
+        reply = self.deliver('antigravity', 'sid', 'message_mubo607_0002', uuid.uuid4().hex, 0, 'follow up prompt')
+        self.assertEqual(reply, dict(status='busy', reason='antigravity_turn_active'))
+        self.assertEqual(len(self.agent.stdin.getvalue().splitlines()), 1)
+        self.assertIsNotNone(self.session['turn'])
+        sent = self.session['sends'][0]['at']
+        self.session['stdout_at'] = sent
+        reader.host_ack_watchdog('antigravity', 'sid', 'fixture', self.session, sent + reader.HOST_ACK_TIMEOUT + 1)
+        self.stop_agent.assert_not_called()
+        self.start_agent.assert_not_called()
+        self.assertEqual(self.agent.pid, 607)
+
+    def test_a_queued_follow_up_dispatches_when_the_turn_finishes(self):
+        self.send()
+        self.accept()
+        self.submit('message_mubo607_0002', 'follow up prompt')
+        self.request('dispatch')
+        self.assertEqual(self.text('message_mubo607_0002')['state'], 'queued')
+        reader.host_turn_end('antigravity', 'sid', 'fixture', self.session,
+                             dict(status='completed', usage={}), dict(subtype='done'))
+        self.assertIsNone(self.session['turn'])
+        self.assertEqual(self.session['sends'], [])
+        self.request('dispatch')
+        self.assertEqual(self.text('message_mubo607_0002')['state'], 'sent')
+        lines = [json.loads(line) for line in self.agent.stdin.getvalue().splitlines()]
+        self.assertEqual([line['message']['content'] for line in lines], ['queued prompt', 'follow up prompt'])
+        self.stop_agent.assert_not_called()
+
+    def test_the_watchdog_never_kills_a_live_accepted_turn(self):
+        self.send()
+        self.accept()
+        row = self.submit('message_mubo607_0002', 'follow up prompt')
+        stale = dict(id=row['id'], attempt=row['attempt'], epoch=0,
+                     at=time.time() - reader.HOST_ACK_TIMEOUT - 1, accepted=False)
+        self.session['sends'].append(stale)
+        self.session['stdout_at'] = stale['at']
+        reader.host_ack_watchdog('antigravity', 'sid', 'fixture', self.session, stale['at'] + reader.HOST_ACK_TIMEOUT + 1)
+        self.stop_agent.assert_not_called()
+        self.start_agent.assert_not_called()
+        self.assertEqual(self.agent.pid, 607)
+        self.assertIsNotNone(self.session['turn'])
+
+    def test_the_message_worker_spares_a_queued_follow_up_while_a_turn_runs(self):
+        self.send()
+        self.accept()
+        self.assertEqual(self.text()['state'], 'accepted')
+        row = self.submit('message_mubo607_0002', 'follow up prompt')
+        self.request('dispatch')
+        self.assertEqual(self.text('message_mubo607_0002')['state'], 'queued')
+        written = time.monotonic()
+
+        def host_state(provider, sid):
+            if time.monotonic() - written < 3.0:
+                return dict(inflight=dict(id='message_mubo607_0001'), sends=['message_mubo607_0001'])
+            accepted = reader.message_store_db('fixture')
+            with accepted:
+                accepted.execute("UPDATE shared_messages SET state='accepted',deadline=NULL WHERE id=?", (row['id'],))
+            accepted.close()
+            return dict()
+
+        with patch.object(reader, 'MESSAGE_WORKER_STALL_SECONDS', 1.5), \
+                patch.object(reader, 'MESSAGE_WORKER_IDLE_SECONDS', 0.2), \
+                patch.object(reader, 'host_session_state', side_effect=host_state), \
+                patch.object(reader, 'message_poll'), \
+                patch.object(reader, 'message_store_request'), \
+                patch.object(reader, 'host_log') as log:
+            reader.message_worker('fixture', 'antigravity', 'sid')
+        self.assertEqual(self.text('message_mubo607_0002')['state'], 'accepted',
+                         'a queued follow-up was marked failed while the Antigravity turn ran')
+        self.assertNotIn('worker_watchdog', [call.args[2] for call in log.call_args_list])
+
+
 class IGSH_1900_MpSendReportTest(unittest.TestCase):
     def module(self):
         import importlib.machinery
