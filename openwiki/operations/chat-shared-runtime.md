@@ -50,7 +50,12 @@
 - The manifest signature is checked with the key already embedded in the desktop updater.
 - The bundle checksum and its embedded release version are checked before anything runs.
 - The verified bundle is presented to the same loader a desktop push uses, so selection, tool versions and `active.json` keep their existing rules.
+- The loader also records the selected reader's release version in `reader-version.json`, keyed to its `sha256`.
+- `reader-version.json` holds `protocol`, `sha256` and `version`, and is never part of the fingerprint.
+- A reader-only update therefore moves the installed version even though no tool changed.
+- The older-release check compares against that recorded version, so a re-offer cannot loop and a downgrade stays refused.
 - A bad checksum, a tampered payload, a missing checksum line or an untrusted release leaves the installed runtime untouched.
+- The verified bundle is staged in its own temporary directory, outside the runtime directory an install cleans up.
 - A release older than the installed bundle never replaces it.
 - The command is `python3 ~/.multiprompt-runtime/reader.py host update-runtime`; add `--check` to report only.
 - A live host starts that check once, a minute after it starts, and no more often than every six hours.

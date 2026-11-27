@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 export const ASSET_NAME = 'multiprompt-runtime.py';
 export const READER_SOURCE = 'src/chat_history_reader.py';
@@ -95,7 +96,7 @@ export function parseArgs(argv) {
   return options;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
   const options = parseArgs(process.argv.slice(2));
   const bundle = buildRuntimeBundle(options);
   fs.mkdirSync(path.dirname(path.resolve(options.out)), { recursive: true });

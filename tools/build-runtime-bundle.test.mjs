@@ -1,10 +1,15 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
-import { ASSET_NAME, BUNDLE_SOURCES, buildRuntimeBundle, checkVersion, readAppVersion } from './build-runtime-bundle.mjs';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = `${fileURLToPath(new URL('..', import.meta.url))}`;
+const builderPath = `${root}tools/build-runtime-bundle.mjs`;
+
+async function builder() {
+  assert.equal(fs.existsSync(builderPath), true, 'tools/build-runtime-bundle.mjs must exist');
+  return import(pathToFileURL(builderPath).href);
+}
 
 function desktopBundle() {
   const zig = fs.readFileSync(`${root}src/chat_session.zig`, 'utf8');
@@ -40,7 +45,8 @@ function assemble(template, files, version) {
     : [values[index - 1], Buffer.from(part, 'utf8')]));
 }
 
-test('the release bundle is byte for byte what the desktop embeds', () => {
+test('the release bundle is byte for byte what the desktop embeds', async () => {
+  const { BUNDLE_SOURCES, buildRuntimeBundle, readAppVersion } = await builder();
   const version = readAppVersion(root);
   const { template, files } = desktopBundle();
   assert.deepEqual(files, ['src/room_service.py', 'src/room_bridge.py', 'src/chat_connectors/claude.py', 'src/chat_connectors/codex.py',
@@ -52,7 +58,8 @@ test('the release bundle is byte for byte what the desktop embeds', () => {
   assert.ok(desktop.equals(release), 'the published helper bundle must match the desktop bundle exactly');
 });
 
-test('the helper bundle carries the reader, the connector map and its release version', () => {
+test('the helper bundle carries the reader, the connector map and its release version', async () => {
+  const { buildRuntimeBundle } = await builder();
   const bundle = buildRuntimeBundle({ version: '0.28.900', root }).toString('utf8');
   const reader = fs.readFileSync(`${root}src/chat_history_reader.py`, 'utf8');
   assert.ok(bundle.endsWith(reader), 'the bundle ends with the canonical reader source');
@@ -61,7 +68,8 @@ test('the helper bundle carries the reader, the connector map and its release ve
   assert.ok(bundle.includes("MULTIBOT_APP_VERSION = '0.28.900'\n"), 'the bundle carries its release version');
 });
 
-test('the bundle version always comes from the release tag or main.zig', () => {
+test('the bundle version always comes from the release tag or main.zig', async () => {
+  const { buildRuntimeBundle, checkVersion } = await builder();
   assert.equal(checkVersion('0.28.900'), '0.28.900');
   assert.throws(() => checkVersion('v0.28.900'));
   assert.throws(() => checkVersion('0.28'));
@@ -69,7 +77,8 @@ test('the bundle version always comes from the release tag or main.zig', () => {
   assert.throws(() => buildRuntimeBundle({ version: 'latest', root }));
 });
 
-test('the release workflow publishes and checksums the helper bundle', () => {
+test('the release workflow publishes and checksums the helper bundle', async () => {
+  const { ASSET_NAME } = await builder();
   const workflow = fs.readFileSync(`${root}.github/workflows/release.yml`, 'utf8');
   assert.ok(workflow.includes('node tools/build-runtime-bundle.mjs dist/multiprompt-runtime.py'), 'the release job must assemble the helper bundle');
   const checksums = workflow.split('\n').find(line => line.includes('> SHA256SUMS.txt'));

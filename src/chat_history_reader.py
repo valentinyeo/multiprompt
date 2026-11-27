@@ -8148,11 +8148,26 @@ def runtime_update_active(home=None):
     return read_json((Path.home() if home is None else home) / HOST_RUNTIME_TOOLS / 'active.json')
 
 
+def runtime_update_selected_version(home=None):
+    home = Path.home() if home is None else home
+    record = read_json(home / HOST_RUNTIME_TOOLS / 'reader-version.json')
+    active = runtime_update_active(home)
+    if (type(record.get('protocol')) is not int or record.get('protocol') != 1 or
+            not isinstance(record.get('sha256'), str) or not isinstance(active.get('sha256'), str) or
+            record['sha256'] != active['sha256'] or runtime_version_key(record.get('version')) is None):
+        return None
+    return record['version']
+
+
 def runtime_update_version(home=None):
+    home = Path.home() if home is None else home
+    selected = runtime_update_selected_version(home)
+    if selected is not None:
+        return selected
     version = globals().get('MULTIBOT_APP_VERSION')
     if runtime_version_key(version) is not None:
         return version
-    record = read_json((Path.home() if home is None else home) / HOST_RUNTIME_TOOLS / 'tools.json')
+    record = read_json(home / HOST_RUNTIME_TOOLS / 'tools.json')
     tools = record.get('tools') if isinstance(record, dict) else None
     versions = [entry.get('version') for entry in tools.values() if isinstance(entry, dict)] if isinstance(tools, dict) else []
     published = [value for value in versions if runtime_version_key(value) is not None]
@@ -8163,16 +8178,13 @@ def runtime_update_install(data, home):
     root = home / HOST_RUNTIME_TOOLS
     if not root.is_dir():
         raise ValueError('no helper runtime is installed')
-    descriptor, path = tempfile.mkstemp(prefix='.tmp-runtime-', dir=str(root))
-    try:
-        with os.fdopen(descriptor, 'wb') as stream:
-            stream.write(data)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.chmod(path, 0o600)
+    with tempfile.TemporaryDirectory(prefix='multiprompt-update-') as scratch:
+        path = Path(scratch) / RUNTIME_UPDATE_ASSET
+        path.write_bytes(data)
+        path.chmod(0o600)
         environment = dict(os.environ, HOME=str(home), PYTHONDONTWRITEBYTECODE='1')
         request = json.dumps(dict(id=1, op='engine_info'), separators=(',', ':')) + '\n'
-        result = subprocess.run([sys.executable, '-u', path, '--serve'], input=request, text=True,
+        result = subprocess.run([sys.executable, '-u', str(path), '--serve'], input=request, text=True,
                                 capture_output=True, env=environment, timeout=180)
         if result.returncode != 0:
             raise ValueError('helper bundle did not install')
@@ -8186,12 +8198,9 @@ def runtime_update_install(data, home):
         active = runtime_update_active(home)
         if not isinstance(active, dict) or active.get('sha256') != info['sha256']:
             raise ValueError('helper bundle did not select its runtime')
+        if runtime_update_selected_version(home) is None:
+            raise ValueError('helper bundle did not record its release version')
         return info
-    finally:
-        try:
-            os.unlink(path)
-        except FileNotFoundError:
-            pass
 
 
 def runtime_update_stamp(home, tag):
@@ -10712,6 +10721,36 @@ if __name__ == '__main__':
                     except OSError:
                         pass
 
+                def read_reader_version():
+                    try:
+                        record = _json.loads(read('reader-version.json', 4096))
+                    except (OSError, ValueError):
+                        return None
+                    if (not isinstance(record, dict) or type(record.get('protocol')) is not int or record.get('protocol') != 1 or
+                            not isinstance(record.get('sha256'), str) or
+                            version_key(record.get('version')) is None):
+                        return None
+                    return record
+
+                def write_reader_version(digest):
+                    version = globals().get('MULTIBOT_APP_VERSION')
+                    if version_key(version) is None:
+                        return
+                    recorded = read_reader_version()
+                    if (recorded is not None and recorded['sha256'] == digest and
+                            version_key(recorded['version']) > version_key(version)):
+                        return
+                    payload = _json.dumps(dict(protocol=1, sha256=digest, version=version), sort_keys=True, separators=(',', ':')).encode()
+                    try:
+                        if read('reader-version.json', 4096) == payload:
+                            return
+                    except (OSError, ValueError):
+                        pass
+                    try:
+                        publish('reader-version.json', payload)
+                    except OSError:
+                        pass
+
                 def links_to(name, stem):
                     try:
                         return _os.readlink(_os.path.join(runtime_root, name)) == stem
@@ -10778,6 +10817,7 @@ if __name__ == '__main__':
                         raise ValueError('corrupt runtime')
                     if active['sha256'] == digest:
                         publish_tools(installed)
+                        write_reader_version(active['sha256'])
                         return installed, active
                 try:
                     installed = read(digest + '.py', 4 * 1024 * 1024)
@@ -10789,6 +10829,7 @@ if __name__ == '__main__':
                 active = dict(protocol=1, generation=generation, sha256=digest)
                 publish('active.json', _json.dumps(active, separators=(',', ':')).encode())
                 publish_tools(source)
+                write_reader_version(digest)
                 return source, active
             finally:
                 _os.close(lock)

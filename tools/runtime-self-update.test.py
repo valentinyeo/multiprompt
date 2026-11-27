@@ -43,6 +43,10 @@ class RuntimeSelfUpdateTest(unittest.TestCase):
         self.keypair = self.make_keypair()
         self.public = base64.b64decode(self.keypair['public'])
 
+    def symbol(self, name):
+        self.assertIn(name, READER, 'src/chat_history_reader.py must define ' + name)
+        return READER[name]
+
     def make_keypair(self):
         return json.loads(self.node(KEYGEN))
 
@@ -102,7 +106,7 @@ class RuntimeSelfUpdateTest(unittest.TestCase):
 
         def fetch(url, limit):
             calls.append(url)
-            if url == READER['RUNTIME_UPDATE_API']:
+            if url == self.symbol('RUNTIME_UPDATE_API'):
                 return json.dumps(document).encode()
             value = files[url]
             data = value.read_bytes() if isinstance(value, Path) else value
@@ -126,31 +130,36 @@ class RuntimeSelfUpdateTest(unittest.TestCase):
         return record
 
     def update(self, fetch, version, check=False, key=None, home=None):
-        return READER['runtime_update_run'](check=check, fetch=fetch, home=self.home if home is None else home,
-                                            key=self.public if key is None else key, version=version)
+        return self.symbol('runtime_update_run')(check=check, fetch=fetch, home=self.home if home is None else home,
+                                                key=self.public if key is None else key, version=version)
 
     def installed(self):
         return json.loads((self.runtime / 'active.json').read_text())
 
     def test_the_embedded_public_key_is_the_release_signing_key(self):
-        self.assertEqual(READER['RELEASE_SIGNING_PUBLIC_KEY'].strip(), (ROOT / 'src/release_signing_public_key.txt').read_text().strip())
-        self.assertEqual(len(READER['runtime_update_key']()), 32)
-        self.assertEqual(READER['RUNTIME_UPDATE_ASSET'], 'multiprompt-runtime.py')
+        public = self.symbol('RELEASE_SIGNING_PUBLIC_KEY')
+        key = self.symbol('runtime_update_key')
+        asset = self.symbol('RUNTIME_UPDATE_ASSET')
+        self.assertEqual(public.strip(), (ROOT / 'src/release_signing_public_key.txt').read_text().strip())
+        self.assertEqual(len(key()), 32)
+        self.assertEqual(asset, 'multiprompt-runtime.py')
 
     def test_the_default_download_reads_an_asset_and_stops_at_its_limit(self):
+        download = self.symbol('runtime_update_download')
         asset = self.write('asset.bin', b'payload')
-        self.assertEqual(READER['runtime_update_download'](asset.as_uri(), 16), b'payload')
+        self.assertEqual(download(asset.as_uri(), 16), b'payload')
         with self.assertRaises(ValueError):
-            READER['runtime_update_download'](asset.as_uri(), 4)
+            download(asset.as_uri(), 4)
 
     def test_the_manifest_signature_matches_the_release_signer(self):
+        valid = self.symbol('release_signature_valid')
         message = b'0123456789abcdef  multiprompt-runtime.py\n'
         signature = self.sign(message)
-        self.assertTrue(READER['release_signature_valid'](message, signature, self.public))
-        self.assertFalse(READER['release_signature_valid'](message + b'\n', signature, self.public))
-        self.assertFalse(READER['release_signature_valid'](message, signature, base64.b64decode(self.make_keypair()['public'])))
-        self.assertFalse(READER['release_signature_valid'](message, signature[:-1], self.public))
-        self.assertFalse(READER['release_signature_valid'](message, b'\x00' * 64, self.public))
+        self.assertTrue(valid(message, signature, self.public))
+        self.assertFalse(valid(message + b'\n', signature, self.public))
+        self.assertFalse(valid(message, signature, base64.b64decode(self.make_keypair()['public'])))
+        self.assertFalse(valid(message, signature[:-1], self.public))
+        self.assertFalse(valid(message, b'\x00' * 64, self.public))
 
     def test_a_server_without_the_desktop_installs_the_published_bundle(self):
         old = self.build('old-bundle.py', '0.28.900', send=self.write('old-mp-send.py', 'print("old")\n'))
@@ -170,8 +179,9 @@ class RuntimeSelfUpdateTest(unittest.TestCase):
         self.assertEqual((self.runtime / 'mp-send').read_text(), 'print("new")\n')
         self.assertTrue(os.access(self.runtime / 'mp-send', os.X_OK))
         self.assertEqual(json.loads((self.runtime / 'self-update.json').read_text())['tag'], 'v0.28.901')
-        self.assertEqual(READER['runtime_update_active'](self.home)['sha256'], active['sha256'])
-        self.assertIn(READER['RUNTIME_UPDATE_ORIGIN'] + 'v0.28.901/multiprompt-runtime.py', calls)
+        self.assertEqual(self.symbol('runtime_update_active')(self.home)['sha256'], active['sha256'])
+        self.assertEqual(self.symbol('runtime_update_selected_version')(self.home), '0.28.901')
+        self.assertIn(self.symbol('RUNTIME_UPDATE_ORIGIN') + 'v0.28.901/multiprompt-runtime.py', calls)
 
     def test_the_same_bundle_fingerprint_is_a_clean_no_op(self):
         old = self.build('noop-old.py', '0.28.900', send=self.write('noop-old-send.py', 'print("old")\n'))
@@ -251,23 +261,46 @@ class RuntimeSelfUpdateTest(unittest.TestCase):
         self.install(new)
         before = self.snapshot()
         calls, fetch = self.publish('v0.28.900', old)
-        result = self.update(fetch, '0.28.901')
+        result = self.update(fetch, None)
         self.assertEqual(result['status'], 'current', result)
         self.assertEqual(self.snapshot(), before)
 
-    def test_the_installed_version_comes_from_the_published_tools(self):
+    def test_a_reader_only_update_moves_the_recorded_version_forward(self):
+        old = self.build('reader-only-old.py', '0.28.900')
+        new = self.build('reader-only-new.py', '0.28.901', reader=self.changed_reader('reader-only-reader.py'))
+        first = self.install(old)
+        tools = (self.runtime / 'tools.json').read_bytes()
+        self.assertEqual(self.symbol('runtime_update_version')(self.home), '0.28.900')
+        calls, fetch = self.publish('v0.28.901', new)
+        result = self.update(fetch, None)
+        self.assertEqual(result['status'], 'updated', result)
+        self.assertNotEqual(self.installed()['sha256'], first['sha256'])
+        self.assertEqual(self.symbol('runtime_update_selected_version')(self.home), '0.28.901')
+        self.assertEqual(self.symbol('runtime_update_version')(self.home), '0.28.901')
+        self.assertEqual((self.runtime / 'tools.json').read_bytes(), tools, 'a reader-only update leaves the tools alone')
+        before = self.snapshot()
+        for tag, bundle in (('v0.28.901', new), ('v0.28.900', old)):
+            with self.subTest(tag=tag):
+                calls, fetch = self.publish(tag, bundle)
+                self.assertEqual(self.update(fetch, None, check=True)['status'], 'current')
+                self.assertEqual(self.update(fetch, None)['status'], 'current')
+        self.assertEqual(self.snapshot(), before)
+
+    def test_the_installed_version_comes_from_the_selected_reader(self):
         old = self.build('detect-old.py', '0.28.900')
         self.install(old)
-        self.assertEqual(READER['runtime_update_version'](self.home), '0.28.900')
+        self.assertEqual(self.symbol('runtime_update_version')(self.home), '0.28.900')
+        self.assertEqual(self.symbol('runtime_update_selected_version')(self.home), '0.28.900')
         older = self.build('detect-older.py', '0.28.899', reader=self.changed_reader('detect-reader.py'))
         calls, fetch = self.publish('v0.28.899', older)
         self.assertEqual(self.update(fetch, None)['status'], 'current')
 
     def test_the_periodic_check_runs_only_when_it_is_due(self):
-        self.assertTrue(READER['runtime_update_due'](self.home))
-        READER['runtime_update_stamp'](self.home, 'v0.28.901')
-        self.assertFalse(READER['runtime_update_due'](self.home))
-        self.assertTrue(READER['runtime_update_due'](self.home, now=self.installed_time() + READER['RUNTIME_UPDATE_INTERVAL']))
+        due = self.symbol('runtime_update_due')
+        self.assertTrue(due(self.home))
+        self.symbol('runtime_update_stamp')(self.home, 'v0.28.901')
+        self.assertFalse(due(self.home))
+        self.assertTrue(due(self.home, now=self.installed_time() + self.symbol('RUNTIME_UPDATE_INTERVAL')))
         self.assertEqual(json.loads((self.runtime / 'self-update.json').read_text())['tag'], 'v0.28.901')
 
     def installed_time(self):
@@ -285,8 +318,9 @@ class RuntimeSelfUpdateTest(unittest.TestCase):
         self.assertEqual(self.update(fetch, '0.28.901', check=True)['status'], 'current')
 
     def test_an_unknown_update_command_is_refused(self):
-        self.assertEqual(READER['runtime_update_command'](['--unknown'])['status'], 'error')
-        self.assertEqual(READER['runtime_update_command'](['--check', '--now'])['status'], 'error')
+        command = self.symbol('runtime_update_command')
+        self.assertEqual(command(['--unknown'])['status'], 'error')
+        self.assertEqual(command(['--check', '--now'])['status'], 'error')
 
 
 if __name__ == '__main__':
