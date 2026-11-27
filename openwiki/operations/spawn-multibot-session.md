@@ -108,3 +108,16 @@ The manual route remains **Ctrl+T**, **Ctrl+K → New Claude session**, and the 
 ## Install the agent skill
 
 The canonical skill is [spawn-multibot-session](../../.claude/skills/spawn-multibot-session/SKILL.md). The lead links that directory for each workspace owner into Claude, Codex, and hax skill directories, then refreshes discovery in running sessions. Repository presence alone does not prove fleet installation.
+
+## Change a running chat
+
+Run these commands on the server that owns the chat. Use `--host 0`, `--host 1` or `--host 2` to check its slot, including the third server. No account key is needed. Repeating a setting leaves the same result.
+
+- `mb ai "Chat name" claude|codex|pi|antigravity` uses Switch AI and keeps the visible history and tab.
+- `mb model "Chat name" <model>` chooses a model supported by the current AI. Pi uses `provider/model` from its model list.
+- `mb effort "Chat name" low|medium|high|xhigh` sets effort. Claude and Codex offer up to High; Antigravity offers XHigh only on Neon and Hydrogen.
+- `mb permission "Chat name" default|auto|bypass` sets Claude permissions. Codex accepts `untrusted`, `workspace-write`, `read-only` and `bypass`, mapping to its approval and sandbox pairs. Pi and Antigravity accept only full access (`bypass`).
+
+The same four controls are in each chat's plus menu and under Ctrl+K as **Chat View: AI**, **Model**, **Effort** and **Permission level**. Model and effort changes take effect on the running chat without clearing its history or pending messages. Claude and Antigravity finish the current turn before reopening the same conversation with new startup settings. Codex uses new settings on its next turn; Pi uses live RPC controls. New chats use Bypass or full access on every server; a saved explicit choice is retained.
+
+Android counterpart: https://app.hypertask.ai/detail/project-13734/285. Permission follow-up: https://app.hypertask.ai/detail/project-13734/172. Existing permission names and settings operations remain accepted by the shared host, so older desktop and Android clients remain compatible. Antigravity's legacy XHigh requests still normalize to High on models without XHigh; new controls omit that choice.

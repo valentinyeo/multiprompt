@@ -11,8 +11,8 @@ test('IGSH-1266 new Claude sessions start on the app owned host and typing a com
   assert.match(host, /pub const ENABLED = true;/);
   assert.match(host, /pub fn hostedWorkspaceProvider\(program: \[\]const u8\) \?Provider/);
   assert.match(host, /pub fn eligible\(program: \[\]const u8\) bool \{\s*return ENABLED and hostedWorkspaceProvider\(program\) != null;/);
-  assert.match(host, /try std\.testing\.expect\(!eligible\("codex"\)\);/);
-  assert.match(host, /try std\.testing\.expect\(!eligible\("pi"\)\);/);
+  assert.match(host, /try std\.testing\.expect\(eligible\("codex"\)\);/);
+  assert.match(host, /try std\.testing\.expect\(eligible\("pi"\)\);/);
   assert.match(host, /try std\.testing\.expect\(eligible\("cursor"\)\);/);
   assert.match(host, /try std\.testing\.expect\(eligible\("antigravity"\)\);/);
   assert.match(host, /try std\.testing\.expect\(eligible\("agy"\)\);/);
@@ -29,7 +29,7 @@ test('IGSH-1266 new Claude sessions start on the app owned host and typing a com
   assert.match(body, /pickRepoOpen\(with_agent, false, workspaceHostForNewTab\(workspace\), plain_claude\)/);
   assert.match(palette, /const plain_claude = app_state\.g_search_pick_repo_plain_claude;\s*closePickRepo\(\);/);
   assert.match(palette, /spawnWorkspaceSessionAt\(host, path, program_buf\[0\.\.program_len\], with_agent, plain_claude\)/);
-  assert.match(body, /const launch_cmd = workspaceLaunchCommand\(program, session, cwd, host_sid, &host_buf, &cmd_buf\) orelse \{/);
+  assert.match(body, /const launch_cmd = workspaceLaunchCommand\(program, session, cwd, host_sid, runtime, &host_buf, &cmd_buf\) orelse \{/);
   assert.match(body, /var host_buf: \[WORKSPACE_HOST_LAUNCH_MAX\]u8 = undefined;/);
   assert.match(body, /if \(launch_cmd\.len > app_state\.g_pending_tmux_cmd\.len\)/, 'the pending command buffer must be checked before the copy');
   assert.ok(body.indexOf('var host_buf: [WORKSPACE_HOST_LAUNCH_MAX]u8') < body.indexOf('workspaceLaunchCommand'), 'the host buffer must outlive the command');
@@ -39,10 +39,10 @@ test('IGSH-1266 new Claude sessions start on the app owned host and typing a com
   const commandEnd = palette.indexOf('pub fn spawnWorkspaceTmuxSession() bool {');
   assert.ok(command >= 0 && commandEnd > command, 'workspaceLaunchCommand must exist');
   const choice = palette.slice(command, commandEnd);
-  assert.match(choice, /if \(host_sid\) \|sid\| \{\s*const provider = agent_host\.hostedWorkspaceProvider\(program\) orelse return null;\s*return agent_host\.launchCommandFor\(host_out, provider, session, cwd, sid\);/);
+  assert.match(choice, /if \(host_sid\) \|sid\| \{\s*const provider = agent_host\.hostedWorkspaceProvider\(program\) orelse return null;\s*return agent_host\.launchCommandFor\(host_out, provider, session, cwd, sid, runtime\);/);
   assert.match(choice, /return buildWorkspaceTmuxLaunchCmd\(command_out, session, cwd, program\);/);
   assert.match(choice, /try std\.testing\.expectEqualStrings\(expected, spawned\);/);
-  assert.match(choice, /try std\.testing\.expect\(workspaceLaunchCommand\("codex", "term-abc", "~\/projects", sid, &host_buf, &command_buf\) == null\);/);
+  assert.match(choice, /try std\.testing\.expect\(workspaceLaunchCommand\("codex", "term-abc", "~\/projects", sid, agent_host\.READER, &host_buf, &command_buf\) != null\);/);
 
   assert.ok(!palette.includes('fn buildCodexTmuxLaunchCmd('), 'Codex no longer types into a terminal');
 });
@@ -53,24 +53,42 @@ test('IGSH-1447 Ctrl+T starts a live chat without a parking terminal or idle pro
   const format = launch.match(/std\.fmt\.bufPrint\(out, "([^"]*)"/);
   const args = launch.match(/\.\{ ([^}]*?) \}\) catch null;/);
   assert.ok(format && args, 'the launch command must be readable');
-  const mode = host.match(/const mode = if \(provider == \.claude\) "([^"]*)" else "";/);
-  const values = { name: 'claude', session: 'live-abc', cwd: '~/projects', sid: 'ffffffff-ffff-4fff-bfff-ffffffffffff', mode: mode ? mode[1] : '', READER: '~/.multiprompt-runtime/reader.py' };
+  const mode = host.match(/const mode = if \(provider == \.claude[^)]+\) "([^"]*)" else "";/);
+  const values = { name: 'claude', session: 'live-abc', cwd: '~/projects', sid: 'ffffffff-ffff-4fff-bfff-ffffffffffff', mode: mode ? mode[1] : '', reader: '~/.multiprompt-runtime/reader.py' };
   const parts = format[1].split('{s}');
   const ordered = args[1].split(',').map((value) => value.trim());
   assert.equal(parts.length - 1, ordered.length, 'every format hole must have one argument');
   const command = parts.reduce((text, part, index) => text + (index > 0 ? values[ordered[index - 1]] : '') + part, '');
   assert.equal(command,
-    "python3 ~/.multiprompt-runtime/reader.py host enable claude ffffffff-ffff-4fff-bfff-ffffffffffff --tmux live-abc --cwd ~/projects --permission-mode bypassPermissions >/dev/null 2>&1 && python3 ~/.multiprompt-runtime/reader.py host start claude ffffffff-ffff-4fff-bfff-ffffffffffff");
+    "python3 ~/.multiprompt-runtime/reader.py host enable claude ffffffff-ffff-4fff-bfff-ffffffffffff --tmux live-abc --cwd ~/projects --permission-mode bypassPermissions && python3 ~/.multiprompt-runtime/reader.py host start claude ffffffff-ffff-4fff-bfff-ffffffffffff");
+  assert.doesNotMatch(command, />\/dev\/null/, 'the enable result must reach the launch check');
   assert.doesNotMatch(command, /new-session|tmux attach|sleep/);
   assert.ok(!command.includes('handover'), 'the terminal must never own a live chat');
   assert.ok(!command.includes('send-keys'), 'nothing is typed into a shell');
   assert.ok(!command.includes('claude --session-id'), 'Claude must not run in the terminal');
   assert.ok(!command.includes('"'), 'the command is wrapped in double quotes for ssh');
 
+  const os = require('node:os');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'mp-launch-'));
+  const runtime = path.join(home, '.multiprompt-runtime');
+  fs.mkdirSync(runtime, { recursive: true });
+  fs.writeFileSync(path.join(runtime, 'reader.py'), [
+    '#!/usr/bin/env python3',
+    'import sys',
+    'print(\'{"status":"refused","reason":"unsupported_provider"}\')',
+    'sys.exit(1)',
+  ].join('\n'));
+  const launched = spawnSync('bash', ['-c', command], { env: { ...process.env, HOME: home }, encoding: 'utf8' });
+  assert.equal(launched.status, 1, 'a refused enable must fail the launch');
+  assert.match(launched.stdout, /unsupported_provider/, 'the refused reason must reach the launch check instead of being discarded');
+  assert.doesNotMatch(launched.stdout, /"started"/, 'host start must not run when the reader refuses the provider');
+
   const palette = read('src/command_palette.zig');
   assert.match(palette, /const live_chat = host_sid != null and newTabOpensChatView\(program\);/);
   assert.match(palette, /shell\.chat_view_on = true;/);
-  assert.match(palette, /live\.starting\(shell\.shell_id, host, host_sid\.\?\)/);
+  const starts = [...palette.matchAll(/live\.starting\(shell\.shell_id, host, ([A-Za-z_][\w.]*)\)/g)].map((match) => match[1]);
+  assert.ok(starts.length >= 2, 'both live chat starts must monitor the startup');
+  assert.ok(!starts.includes('host_sid'), 'the startup helper takes the resolved session id, not the optional');
   assert.match(palette, /if \(live_chat\) buildLiveChatSessionName/);
 });
 

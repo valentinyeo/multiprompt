@@ -13,43 +13,51 @@ function Model-Palette([string]$Query, [string]$Screenshot) {
     Shot $Screenshot
     Press @(0x0D) "Enter: $Query"
 }
-function Plus-Rows([string]$Screenshot) {
+function Plus-Rows([string]$Screenshot, [string]$Page = 'models') {
     $offset = (Read-Shared "$settings/debug.log").Length
     Model-Palette 'plus attach file' "palette-$Screenshot"
     [void](Wait-For 'plus menu open' { [ChatDeliveryDesktop]::PlusMenu($main) -ne [IntPtr]::Zero } 10)
-    $logged = Wait-For 'plus menu rows logged' {
-        $t = (Read-Shared "$settings/debug.log")
-        if ($t.Length -gt $offset) {
-            $fresh = $t.Substring($offset)
-            if ($fresh -match '\[chat\] plus menu model_opus rect=-?\d+,-?\d+,-?\d+,-?\d+') { $fresh }
-        }
+    $rootLog = Wait-For 'four plus menu rows logged' {
+        $fresh = (Read-Shared "$settings/debug.log").Substring($offset)
+        if ($fresh -match '\[chat\] plus menu permissions rect=') { $fresh }
+    } 10
+    $rootRects = @{}
+    foreach ($found in [regex]::Matches($rootLog, '\[chat\] plus menu (\w+) rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)')) {
+        $rootRects[$found.Groups[1].Value] = @([int]$found.Groups[2].Value, [int]$found.Groups[3].Value, [int]$found.Groups[4].Value, [int]$found.Groups[5].Value)
+    }
+    if ((($rootRects.Keys | Sort-Object) -join ',') -cne 'ai,efforts,models,permissions') { throw 'Plus menu must have exactly AI, Model, Effort and Permission level' }
+    Shot "$Screenshot-root"
+    $rect = $rootRects[$Page]
+    $menu = [ChatDeliveryDesktop]::PlusMenu($main)
+    Doctor
+    if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer) }
+    if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { throw 'Refusing plus menu page input: owned app is not foreground' }
+    $offset = (Read-Shared "$settings/debug.log").Length
+    $actions.Add(@{case=$plan.name; input='open plus menu page'; text=$Page})
+    [ChatDeliveryDesktop]::PressClient($menu, $app.Id, [int](($rect[0] + $rect[2]) / 2), [int](($rect[1] + $rect[3]) / 2))
+    $first = @{models='model_fable'; efforts='effort_high'; permissions='mode_bypass'}[$Page]
+    $logged = Wait-For 'plus menu choices logged' {
+        $fresh = (Read-Shared "$settings/debug.log").Substring($offset)
+        if ($fresh -match ('\[chat\] plus menu ' + $first + ' rect=')) { $fresh }
     } 10
     $rects = @{}
     foreach ($found in [regex]::Matches($logged, '\[chat\] plus menu (\w+) rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)')) {
         $rects[$found.Groups[1].Value] = @([int]$found.Groups[2].Value, [int]$found.Groups[3].Value, [int]$found.Groups[4].Value, [int]$found.Groups[5].Value)
     }
+    [void](Wait-For 'plus choices visible' { [ChatDeliveryDesktop]::PlusMenu($main) -ne [IntPtr]::Zero } 10)
     Shot $Screenshot
     return $rects
 }
 function Plus-Cell([hashtable]$Rects, [string]$Item) {
-    $anchors = @{
-        model_opus = @{first='model_opus'; index=0}; model_sonnet = @{first='model_opus'; index=1};
-        model_haiku = @{first='model_opus'; index=2}; model_fable = @{first='model_opus'; index=3};
-        effort_low = @{first='effort_low'; index=0}; effort_medium = @{first='effort_low'; index=1}; effort_high = @{first='effort_low'; index=2};
-        mode_ask = @{first='mode_ask'; index=0}; mode_edits = @{first='mode_ask'; index=1}; mode_plan = @{first='mode_ask'; index=2}; mode_bypass = @{first='mode_ask'; index=3}
-    }
-    if (-not $anchors.ContainsKey($Item)) { throw "Unknown plus menu row $Item" }
-    $spec = $anchors[$Item]
-    if (-not $Rects.ContainsKey($spec.first)) { throw "Plus menu did not show $($spec.first), so $Item cannot be chosen" }
-    $rect = $Rects[$spec.first]
-    $height = $rect[3] - $rect[1]
-    if ($height -le 0) { throw "Plus menu row $($spec.first) has no height" }
-    $top = $rect[1] + ($spec.index * $height)
-    return @{left=$rect[0]; top=$top; right=$rect[2]; bottom=$top + $height}
+    if (-not $Rects.ContainsKey($Item)) { throw "Plus menu did not show $Item" }
+    $rect = $Rects[$Item]
+    if ($rect[3] -le $rect[1]) { throw "Plus menu row $Item has no height" }
+    return @{left=$rect[0]; top=$rect[1]; right=$rect[2]; bottom=$rect[3]}
 }
 function Plus-Click([string]$Item, [string]$Screenshot) {
     for ($attempt = 1; $attempt -le 3; $attempt++) {
-        $rects = Plus-Rows $Screenshot
+        $page = if ($Item.StartsWith('model_')) { 'models' } elseif ($Item.StartsWith('effort_')) { 'efforts' } else { 'permissions' }
+        $rects = Plus-Rows $Screenshot $page
         $cell = Plus-Cell $rects $Item
         $menu = [ChatDeliveryDesktop]::PlusMenu($main)
         if ($menu -eq [IntPtr]::Zero) { throw 'Plus menu window disappeared before the click' }
@@ -64,6 +72,7 @@ function Plus-Click([string]$Item, [string]$Screenshot) {
         try { [void](Wait-For "plus menu closed after $Item" { [ChatDeliveryDesktop]::PlusMenu($main) -eq [IntPtr]::Zero } 5) } catch { $closed = $false }
         if ($closed) { return }
         if ($attempt -eq 3) { throw "Plus menu stayed open after clicking $Item" }
+        Press @(0x1B) "Escape: back to plus menu after $Item"
         Press @(0x1B) "Escape: close plus menu after $Item"
         [void](Wait-For "plus menu closed after escape $Item" { [ChatDeliveryDesktop]::PlusMenu($main) -eq [IntPtr]::Zero } 5)
     }
@@ -132,35 +141,25 @@ foreach ($choice in $choices) {
     Copy-Item "$state/model-argv.jsonl" "$caseDir/argv-$($choice.name).jsonl"
     Shot "model-after-$($choice.name)"
 }
-$plusOffset = (Read-Shared "$settings/debug.log").Length
-Model-Palette 'plus attach file' 'model-palette-active'
-$plusLog = Wait-For 'plus menu opened for active rows' { $t = (Read-Shared "$settings/debug.log").Substring($plusOffset); if ($t -match '\[chat\] plus menu model_opus rect=') { $t } }
-$plusRects = @{}
-foreach ($found in [regex]::Matches($plusLog, '\[chat\] plus menu (\w+) rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)')) {
-    $plusRects[$found.Groups[1].Value] = @([int]$found.Groups[2].Value, [int]$found.Groups[3].Value, [int]$found.Groups[4].Value, [int]$found.Groups[5].Value)
-}
-$plusMenu = Wait-For 'plus menu window' { $h = [ChatDeliveryDesktop]::PlusMenu($main); if ($h -ne [IntPtr]::Zero) { $h } } 10
-$plusBox = New-Object ChatDeliveryDesktop+Rect
-[void][ChatDeliveryDesktop]::GetWindowRect($plusMenu, [ref]$plusBox)
-Start-Sleep -Milliseconds 600
-Shot 'model-plus-menu-active'
-$plusWidth = $plusBox.Right - $plusBox.Left
-$plusHeight = $plusBox.Bottom - $plusBox.Top
-$plusShot = [Drawing.Bitmap]::new($plusWidth, $plusHeight)
-$plusGraphics = [Drawing.Graphics]::FromImage($plusShot)
-try { $plusGraphics.CopyFromScreen($plusBox.Left, $plusBox.Top, 0, 0, $plusShot.Size) } finally { $plusGraphics.Dispose() }
 $plusRows = [Collections.Generic.List[object]]::new()
-$plusGroups = @(
-    @{first='model_opus'; names=@('model_opus', 'model_sonnet', 'model_haiku', 'model_fable')},
-    @{first='effort_low'; names=@('effort_low', 'effort_medium', 'effort_high')},
-    @{first='mode_ask'; names=@('mode_ask', 'mode_edits', 'mode_plan', 'mode_bypass')}
-)
-foreach ($group in $plusGroups) {
-    if (-not $plusRects.ContainsKey($group.first)) { continue }
-    $rect = $plusRects[$group.first]
-    $rowHeight = $rect[3] - $rect[1]
-    for ($i = 0; $i -lt $group.names.Count; $i++) {
-        $left = $rect[0]; $right = $rect[2]; $top = $rect[1] + $i * $rowHeight; $bottom = $top + $rowHeight
+$plusActive = @('model_haiku', 'effort_high')
+$config = Read-Shared $configPath | ConvertFrom-Json
+$mode = if ($config.PSObject.Properties['permission_mode']) { [string]$config.permission_mode } else { 'manual' }
+$plusActive += @{manual='mode_ask'; default='mode_ask'; auto='mode_auto'; bypassPermissions='mode_bypass'}[$mode]
+foreach ($page in @('models', 'efforts', 'permissions')) {
+    $plusRects = Plus-Rows "model-plus-menu-active-$page" $page
+    if ($page -eq 'models') { Shot 'model-plus-menu-active' }
+    $plusMenu = [ChatDeliveryDesktop]::PlusMenu($main)
+    $plusBox = New-Object ChatDeliveryDesktop+Rect
+    [void][ChatDeliveryDesktop]::GetWindowRect($plusMenu, [ref]$plusBox)
+    $plusWidth = $plusBox.Right - $plusBox.Left
+    $plusHeight = $plusBox.Bottom - $plusBox.Top
+    $plusShot = [Drawing.Bitmap]::new($plusWidth, $plusHeight)
+    $plusGraphics = [Drawing.Graphics]::FromImage($plusShot)
+    try { $plusGraphics.CopyFromScreen($plusBox.Left, $plusBox.Top, 0, 0, $plusShot.Size) } finally { $plusGraphics.Dispose() }
+    foreach ($item in $plusRects.Keys) {
+        $rect = $plusRects[$item]
+        $left = $rect[0]; $right = $rect[2]; $top = $rect[1]; $bottom = $rect[3]
         $background = $plusShot.GetPixel([Math]::Min($right - 6, $plusWidth - 1), [Math]::Min([int](($top + $bottom) / 2), $plusHeight - 1))
         $accent = 0
         $mark = 0
@@ -173,12 +172,12 @@ foreach ($group in $plusGroups) {
                 if ($x -ge $right - 40 -and $x -lt $right - 14 -and ([Math]::Abs($pixel.R - $background.R) + [Math]::Abs($pixel.G - $background.G) + [Math]::Abs($pixel.B - $background.B)) -gt 90) { $mark++ }
             }
         }
-        $plusRows.Add(@{item=$group.names[$i]; accent=$accent; mark=$mark})
+        $plusRows.Add(@{item=$item; accent=$accent; mark=$mark})
     }
+    $plusShot.Dispose()
+    Press @(0x1B) 'Escape: back to plus menu'
+    Press @(0x1B) 'Escape: close plus menu'
 }
-$plusShot.Dispose()
-$plusActive = @('model_haiku', 'effort_high')
-if ($plusRects.ContainsKey('mode_ask')) { $plusActive += 'mode_ask' }
 $plusFailures = [Collections.Generic.List[string]]::new()
 foreach ($row in $plusRows) {
     if ($plusActive -contains $row.item -and $row.accent -lt 10) { $plusFailures.Add("$($row.item) is not drawn in the active style") }
@@ -186,7 +185,6 @@ foreach ($row in $plusRows) {
 }
 foreach ($name in $plusActive) { if (-not (@($plusRows | Where-Object { $_.item -eq $name }).Count)) { $plusFailures.Add("$name row is not in the menu") } }
 Save @{rows=$plusRows.ToArray(); expected_active=$plusActive; failures=$plusFailures.ToArray(); window=@{width=$plusWidth; height=$plusHeight}} "$caseDir/plus-active.json"
-Press @(0x1B) 'Escape: close plus menu'
 if ($plusFailures.Count) { throw ('Plus menu active rows: ' + ($plusFailures -join '; ')) }
 Model-Copy 'after'
 if ([ChatDeliveryDesktop]::Text($composer) -cne $plan.text) { throw 'Draft changed after history copy' }

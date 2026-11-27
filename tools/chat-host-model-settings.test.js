@@ -336,7 +336,7 @@ with tempfile.TemporaryDirectory() as directory:
         for operation, key, value in (('set_model', 'model', 'opus'), ('set_effort', 'effort', 'high')):
             request = dict(provider=other, sid=other_sid, op=operation, **{key:value})
             if other == 'pi' and operation == 'set_model':
-                assert r['host_reply'](request)['reason'] == 'host_not_running'
+                assert r['host_reply'](request)['reason'] == 'invalid_model'
                 other_session = dict(state={})
                 r['host_session_reset'](other_session)
                 assert r['host_handle_request'](other, other_sid, tmux, other_session, request)['status'] == 'refused'
@@ -344,11 +344,27 @@ with tempfile.TemporaryDirectory() as directory:
                 assert r['host_handle_request'](other, other_sid, tmux, other_session, chosen) == dict(status='error', reason='stdin_write_failed')
                 assert r['host_config'](other, other_sid) == other_config
                 continue
-            expected = 'invalid_model' if other == 'codex' and operation == 'set_model' else 'unsupported_provider'
-            assert r['host_reply'](request)['reason'] == expected
+            if other == 'hax':
+                expected = 'unsupported_provider'
+                assert r['host_reply'](request)['reason'] == expected
+                other_session = dict(state={})
+                r['host_session_reset'](other_session)
+                assert r['host_handle_request'](other, other_sid, tmux, other_session, request)['reason'] == expected
+                continue
+            if other == 'codex' and operation == 'set_model':
+                assert r['host_reply'](request)['reason'] == 'invalid_model'
+                other_session = dict(state={})
+                r['host_session_reset'](other_session)
+                assert r['host_handle_request'](other, other_sid, tmux, other_session, request)['reason'] == 'invalid_model'
+                continue
+            assert r['host_reply'](request)['status'] == 'ok', (other, request)
+            assert r['host_config'](other, other_sid)['effort'] == 'high'
+            assert r['host_settings'](other, other_sid)['effort'] == 'high'
+            other_config['effort'] = 'high'
             other_session = dict(state={})
             r['host_session_reset'](other_session)
-            assert r['host_handle_request'](other, other_sid, tmux, other_session, request)['reason'] == expected
+            assert r['host_handle_request'](other, other_sid, tmux, other_session, request)['status'] == 'ok', other
+            assert r['host_config'](other, other_sid)['effort'] == 'high'
         assert r['host_config'](other, other_sid) == other_config
         r['host_agent_start'] = original_start
         with patch.object(r['subprocess'], 'Popen', spawn):
@@ -363,13 +379,14 @@ with tempfile.TemporaryDirectory() as directory:
         before = len(events)
         native = Process()
         steps[:] = ['client']
+        tracked = other in ('codex', 'pi')
         def native_client(p, s, t, session, server):
-            assert ('settings' in session) == (other == 'codex') and ('starting_settings' in session) == (other == 'codex')
+            assert ('settings' in session) == tracked and ('starting_settings' in session) == tracked
             session['stop'] = True
         r['host_accept_client'] = native_client
         with patch.object(selectors, 'DefaultSelector', Selector):
             r['host_loop'](other, other_sid, tmux, dict(state={}), object(), native)
-        if other != 'codex':
+        if other == 'hax':
             assert not any(kind == 'host.settings' for kind, payload in events[before:])
             snapshot = r['message_store_request'](dict(message_protocol=1, provider=other, sid=other_sid, tmux=tmux, op='message_snapshot'))
             assert not any('host_settings' in item for item in snapshot['items']), snapshot

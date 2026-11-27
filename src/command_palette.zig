@@ -858,6 +858,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         const all = pi_models.models();
         return all[model_idx].nameText();
     }
+    if (target >= app_state.SEARCH_CHAT_AI_MENU_OFFSET and target <= app_state.SEARCH_CHAT_PERMISSION_MENU_OFFSET) return @import("plus_menu.zig").paletteTitle(target);
     return switch (target) {
         SEARCH_PI_MODELS_MENU_OFFSET => "Pi Model...",
         SEARCH_PI_MODELS_BACK_OFFSET => "Back",
@@ -1524,6 +1525,7 @@ pub fn roomPaletteAllowed(target: usize) bool {
 }
 
 pub fn paletteGroupOf(target: usize) ?u8 {
+    if (target >= app_state.SEARCH_CHAT_AI_MENU_OFFSET and target <= app_state.SEARCH_CHAT_PERMISSION_MENU_OFFSET) return 7;
     if (target == SEARCH_PI_MODELS_MENU_OFFSET or target == SEARCH_PI_MODELS_BACK_OFFSET or (target >= SEARCH_PI_MODEL_ROW_OFFSET and target < SEARCH_PI_MODEL_ROW_OFFSET + MAX_PI_MODELS)) return 7;
     if ((target >= SEARCH_CHAT_MODEL_OPUS_OFFSET and target <= SEARCH_CHAT_EFFORT_HIGH_OFFSET) or target == SEARCH_CHAT_MODEL_FABLE_OFFSET or target == SEARCH_CHAT_MODEL_SOL_OFFSET or target == SEARCH_CHAT_MODEL_TERRA_OFFSET or target == SEARCH_CHAT_MODEL_LUNA_OFFSET or target == SEARCH_CHAT_MODEL_ASTRA_OFFSET) return 7;
     if (target == SEARCH_COMPUTER_TOGGLE_OFFSET or target == SEARCH_COMPUTER_CONTROL_OFFSET or target == SEARCH_COMPUTER_WIDTH_OFFSET or target == SEARCH_COMPUTER_RETRY_OFFSET) return 5;
@@ -2478,6 +2480,7 @@ fn buildWorkspaceTmuxLaunchCmd(out: []u8, session: []const u8, cwd: []const u8, 
         if (!appendAsciiBuf(out, &len, cwd)) return null;
         if (!appendAsciiBuf(out, &len, " && ")) return null;
         if (!appendAsciiBuf(out, &len, program)) return null;
+        if (!appendAsciiBuf(out, &len, @import("agent_host.zig").newTerminalPermissionFlag(program))) return null;
         if (!appendAsciiBuf(out, &len, "' Enter; tmux attach -t ")) return null;
     } else if (!appendAsciiBuf(out, &len, " 2>/dev/null; tmux attach -t ")) return null;
     if (!appendAsciiBuf(out, &len, session)) return null;
@@ -2501,14 +2504,14 @@ test "IGSH-1447 a new Claude tab opens as a live chat and other tabs open as ter
     try std.testing.expect(newTabOpensChatView("claude-code"));
     try std.testing.expect(newTabOpensChatView(workspaceSessionProgram("", true)));
     try std.testing.expect(!newTabOpensChatView(""));
-    try std.testing.expect(!newTabOpensChatView("codex"));
-    try std.testing.expect(!newTabOpensChatView("pi"));
+    try std.testing.expect(newTabOpensChatView("codex"));
+    try std.testing.expect(newTabOpensChatView("pi"));
     try std.testing.expect(newTabOpensChatView("cursor"));
     try std.testing.expect(newTabOpensChatView("agent"));
     try std.testing.expect(newTabOpensChatView("antigravity"));
     try std.testing.expect(newTabOpensChatView("agy"));
     try std.testing.expect(!newTabOpensChatView("bash"));
-    try std.testing.expect(!newTabOpensChatView(workspaceSessionProgram("codex", true)));
+    try std.testing.expect(newTabOpensChatView(workspaceSessionProgram("codex", true)));
     try std.testing.expect(!newTabOpensChatView(workspaceSessionProgram("", false)));
     var out: [64]u8 = undefined;
     try std.testing.expect(std.mem.startsWith(u8, buildLiveChatSessionName(&out), "live-"));
@@ -2517,19 +2520,19 @@ test "IGSH-1447 a new Claude tab opens as a live chat and other tabs open as ter
 test "workspace tmux program runs after shell startup and neutral fallback stays unchanged" {
     var out: [512]u8 = undefined;
     const launched = buildWorkspaceTmuxLaunchCmd(&out, "term-test", "~/project", "claude") orelse return error.TestUnexpectedResult;
-    try std.testing.expectEqualStrings("tmux new-session -d -s term-test -c ~/project 2>/dev/null; tmux send-keys -t term-test 'cd ~/project && claude' Enter; tmux attach -t term-test", launched);
+    try std.testing.expectEqualStrings("tmux new-session -d -s term-test -c ~/project 2>/dev/null; tmux send-keys -t term-test 'cd ~/project && claude --dangerously-skip-permissions' Enter; tmux attach -t term-test", launched);
     const neutral = buildWorkspaceTmuxLaunchCmd(&out, "term-test", "~/projects", "") orelse return error.TestUnexpectedResult;
     try std.testing.expectEqualStrings("tmux new-session -d -s term-test -c ~/projects 2>/dev/null; tmux attach -t term-test", neutral);
     try std.testing.expect(buildWorkspaceTmuxLaunchCmd(&out, "term-test", "~/projects", "claude; exit") == null);
 }
 
 pub fn workspaceLaunchCommand(program: []const u8, session: []const u8, cwd: []const u8, host_sid: ?[]const u8,
-    host_out: []u8, command_out: []u8) ?[]const u8
+    runtime: []const u8, host_out: []u8, command_out: []u8) ?[]const u8
 {
     const agent_host = @import("agent_host.zig");
     if (host_sid) |sid| {
         const provider = agent_host.hostedWorkspaceProvider(program) orelse return null;
-        return agent_host.launchCommandFor(host_out, provider, session, cwd, sid);
+        return agent_host.launchCommandFor(host_out, provider, session, cwd, sid, runtime);
     }
     return buildWorkspaceTmuxLaunchCmd(command_out, session, cwd, program);
 }
@@ -2538,22 +2541,23 @@ test "IGSH-1447 a new Claude session spawns exactly the terminal launch command"
     var host_buf: [1024]u8 = undefined;
     var command_buf: [512]u8 = undefined;
     const sid = "ffffffff-ffff-4fff-bfff-ffffffffffff";
-    const spawned = workspaceLaunchCommand("claude", "term-abc", "~/projects", sid, &host_buf, &command_buf) orelse
+    const agent_host = @import("agent_host.zig");
+    const spawned = workspaceLaunchCommand("claude", "term-abc", "~/projects", sid, agent_host.READER, &host_buf, &command_buf) orelse
         return error.TestUnexpectedResult;
     var expected_buf: [1024]u8 = undefined;
-    const expected = @import("agent_host.zig").launchCommand(&expected_buf, "term-abc", "~/projects", sid) orelse
+    const expected = agent_host.launchCommand(&expected_buf, "term-abc", "~/projects", sid, agent_host.READER) orelse
         return error.TestUnexpectedResult;
     try std.testing.expectEqualStrings(expected, spawned);
     try std.testing.expect(std.mem.indexOf(u8, spawned, "host start claude ffffffff-ffff-4fff-bfff-ffffffffffff") != null);
     try std.testing.expect(std.mem.indexOf(u8, spawned, "claude --session-id") == null);
 
-    const codex = workspaceLaunchCommand("codex", "term-abc", "~/projects", null, &host_buf, &command_buf) orelse
+    const codex = workspaceLaunchCommand("codex", "term-abc", "~/projects", null, agent_host.READER, &host_buf, &command_buf) orelse
         return error.TestUnexpectedResult;
-    try std.testing.expect(std.mem.indexOf(u8, codex, "send-keys -t term-abc 'cd ~/projects && codex'") != null);
-    try std.testing.expect(workspaceLaunchCommand("codex", "term-abc", "~/projects", sid, &host_buf, &command_buf) == null);
-    try std.testing.expect(workspaceLaunchCommand("pi", "term-abc", "~/projects", sid, &host_buf, &command_buf) == null);
+    try std.testing.expect(std.mem.indexOf(u8, codex, "send-keys -t term-abc 'cd ~/projects && codex --dangerously-bypass-approvals-and-sandbox'") != null);
+    try std.testing.expect(workspaceLaunchCommand("codex", "term-abc", "~/projects", sid, agent_host.READER, &host_buf, &command_buf) != null);
+    try std.testing.expect(workspaceLaunchCommand("pi", "term-abc", "~/projects", sid, agent_host.READER, &host_buf, &command_buf) != null);
 
-    const neutral = workspaceLaunchCommand("", "term-abc", "~/projects", null, &host_buf, &command_buf) orelse
+    const neutral = workspaceLaunchCommand("", "term-abc", "~/projects", null, agent_host.READER, &host_buf, &command_buf) orelse
         return error.TestUnexpectedResult;
     try std.testing.expectEqualStrings("tmux new-session -d -s term-abc -c ~/projects 2>/dev/null; tmux attach -t term-abc", neutral);
 }
@@ -2570,11 +2574,11 @@ test "IGSH-1266 a repo path at the launch cap still starts a workspace session" 
     var term_buf: [WORKSPACE_TERM_LAUNCH_MAX]u8 = undefined;
     const sid = "ffffffff-ffff-4fff-bfff-ffffffffffff";
 
-    const hosted = workspaceLaunchCommand("claude", "term-13dcf6f", cwd, sid, &host_buf, &term_buf) orelse
+    const hosted = workspaceLaunchCommand("claude", "term-13dcf6f", cwd, sid, @import("agent_host.zig").READER, &host_buf, &term_buf) orelse
         return error.TestUnexpectedResult;
     try std.testing.expect(hosted.len <= app_state.g_pending_tmux_cmd.len);
 
-    const typed = workspaceLaunchCommand("", "term-13dcf6f", cwd, null, &host_buf, &term_buf) orelse
+    const typed = workspaceLaunchCommand("", "term-13dcf6f", cwd, null, @import("agent_host.zig").READER, &host_buf, &term_buf) orelse
         return error.TestUnexpectedResult;
     try std.testing.expect(typed.len <= app_state.g_pending_tmux_cmd.len);
     try std.testing.expect(std.mem.indexOf(u8, typed, cwd) != null);
@@ -2774,6 +2778,7 @@ pub fn finishSwitchAi(lp: @import("win32.zig").LPARAM) void {
     if (switch_ai.adoptShellAgent(&shell.ai_agent, &shell.claude_sid, &shell.claude_sid_len, result.agent, result.sid[0..result.sid_len])) {
         shell.hook_capable = true;
         saveSession();
+        @import("window_layout.zig").invalidateSidebar();
         if (app_state.g_chat_active and index == app_state.active_shell) @import("chat_session.zig").chatFileRequest(@import("chat_session.zig").chatFileIdentityForShell(index));
     }
     if (result.notice_len > 0) restartChatNotice(result.notice[0..result.notice_len]);
@@ -2963,16 +2968,16 @@ test "IGSH-1266 a new tab starts Claude unless the workspace names a program" {
     const randomness = [_]u8{0xff} ** 16;
     const agent_host = @import("agent_host.zig");
     const sid = agent_host.formatSessionId(&sid_buf, &randomness);
-    const spawned = workspaceLaunchCommand(workspaceSessionProgram("", true), "term-abc", "~/projects", sid, &host_buf, &command_buf) orelse
+    const spawned = workspaceLaunchCommand(workspaceSessionProgram("", true), "term-abc", "~/projects", sid, agent_host.READER, &host_buf, &command_buf) orelse
         return error.TestUnexpectedResult;
     var expected_buf: [1024]u8 = undefined;
-    const expected = agent_host.launchCommand(&expected_buf, "term-abc", "~/projects", sid) orelse
+    const expected = agent_host.launchCommand(&expected_buf, "term-abc", "~/projects", sid, agent_host.READER) orelse
         return error.TestUnexpectedResult;
     try std.testing.expectEqualStrings(expected, spawned);
     try std.testing.expect(std.mem.indexOf(u8, spawned, "host start claude ffffffff-ffff-4fff-bfff-ffffffffffff") != null);
     try std.testing.expect(std.mem.indexOf(u8, spawned, "claude --session-id") == null);
 
-    const neutral = workspaceLaunchCommand(workspaceSessionProgram("claude", false), "term-abc", "~/projects", null, &host_buf, &command_buf) orelse
+    const neutral = workspaceLaunchCommand(workspaceSessionProgram("claude", false), "term-abc", "~/projects", null, agent_host.READER, &host_buf, &command_buf) orelse
         return error.TestUnexpectedResult;
     try std.testing.expectEqualStrings("tmux new-session -d -s term-abc -c ~/projects 2>/dev/null; tmux attach -t term-abc", neutral);
 }
@@ -3169,9 +3174,23 @@ fn spawnWorkspaceSessionAt(host: u8, input_cwd: []const u8, configured_program: 
     } else input_cwd;
     var session_buf: [64]u8 = undefined;
     const session = if (live_chat) buildLiveChatSessionName(&session_buf) else buildWorkspaceTmuxSessionName(&session_buf);
+    if (live_chat) {
+        if (hostLaunchArm(.workspace, host, @intFromEnum(hosted.?), host_sid.?, session, cwd, program)) return true;
+        g_start_fail = .launch_command;
+        @import("diagnostics.zig").debugLog("[pick] new workspace session refused: launch preparation");
+        return false;
+    }
+    return openWorkspaceTab(host, cwd, program, session, "", "");
+}
+
+fn openWorkspaceTab(host: u8, cwd: []const u8, program: []const u8, session: []const u8, sid: []const u8, runtime: []const u8) bool {
+    g_start_fail = .none;
+    const agent_host = @import("agent_host.zig");
+    const hosted = agent_host.hostedWorkspaceProvider(program);
+    const host_sid: ?[]const u8 = if (sid.len > 0) sid else null;
     var cmd_buf: [WORKSPACE_TERM_LAUNCH_MAX]u8 = undefined;
     var host_buf: [WORKSPACE_HOST_LAUNCH_MAX]u8 = undefined;
-    const launch_cmd = workspaceLaunchCommand(program, session, cwd, host_sid, &host_buf, &cmd_buf) orelse {
+    const launch_cmd = workspaceLaunchCommand(program, session, cwd, host_sid, runtime, &host_buf, &cmd_buf) orelse {
         g_start_fail = .launch_command;
         @import("diagnostics.zig").debugLog("[pick] new workspace session refused: launch command does not fit");
         return false;
@@ -3204,19 +3223,19 @@ fn spawnWorkspaceSessionAt(host: u8, input_cwd: []const u8, configured_program: 
             app_state.shells[ns].ai_agent = 0;
         }
         app_state.shells[ns].name_source = .default;
-        if (host_sid) |sid| {
-            const sid_len = @min(sid.len, app_state.shells[ns].claude_sid.len);
-            @memcpy(app_state.shells[ns].claude_sid[0..sid_len], sid[0..sid_len]);
+        if (host_sid) |live_sid| {
+            const sid_len = @min(live_sid.len, app_state.shells[ns].claude_sid.len);
+            @memcpy(app_state.shells[ns].claude_sid[0..sid_len], live_sid[0..sid_len]);
             app_state.shells[ns].claude_sid_len = @intCast(sid_len);
         }
         const n = @min(cwd.len, app_state.shells[ns].cached_cwd.len - 1);
         @memcpy(app_state.shells[ns].cached_cwd[0..n], cwd[0..n]);
         app_state.shells[ns].cached_cwd_len = @intCast(n);
-        if (live_chat) {
+        if (host_sid) |live_sid| {
             const live = @import("chat_live.zig");
             const shell = &app_state.shells[ns];
             shell.chat_view_on = true;
-            const started = live.starting(shell.shell_id, host, host_sid.?);
+            const started = live.starting(shell.shell_id, host, live_sid);
             if (shell.native_terminal) @import("native_session.zig").launch(SessionIdentity.fromShell(shell.*) orelse return false);
             if (app_state.active_shell == ns) {
                 if (!app_state.g_chat_active) @import("chat_composer.zig").openChatView();
@@ -3270,8 +3289,74 @@ fn spawnHostedChatSession(provider: @import("agent_host.zig").Provider) bool {
     const sid = agent_host.mintSessionId(&sid_buf) orelse return false;
     var session_buf: [64]u8 = undefined;
     const session = buildLiveChatSessionName(&session_buf);
+    if (hostLaunchArm(.chat, host, @intFromEnum(provider), sid, session, cwd, "")) return true;
+    return launchRefused();
+}
+
+fn launchRefused() bool {
+    @import("diagnostics.zig").debugLog("[chat] launch refused: chat runtime unavailable");
+    @import("console.zig").showHeaderNoticeAscii("Could not start chat: chat runtime unavailable.", 6000, true);
+    return false;
+}
+
+fn hostLaunchArm(kind: app_state.HostLaunchKind, host: u8, provider: u8, sid: []const u8, session: []const u8, cwd: []const u8, program: []const u8) bool {
+    for (&app_state.g_host_launches, 0..) |*launch, slot| {
+        if (launch.session_len != 0 or launch.ready.load(.acquire)) continue;
+        launch.* = .{ .kind = kind, .host = host, .provider = provider, .group = app_state.g_pending_new_tab_group, .user_action = app_state.g_focus_user_action_tick };
+        app_state.g_pending_new_tab_group = 0;
+        @memcpy(launch.sid[0..sid.len], sid);
+        launch.sid_len = @intCast(sid.len);
+        @memcpy(launch.session[0..session.len], session);
+        launch.session_len = @intCast(session.len);
+        @memcpy(launch.cwd[0..cwd.len], cwd);
+        launch.cwd_len = @intCast(cwd.len);
+        @memcpy(launch.program[0..program.len], program);
+        launch.program_len = @intCast(program.len);
+        if (@import("chat_session.zig").chatHostLaunchPrepare(slot)) return true;
+        app_state.g_pending_new_tab_group = launch.group;
+        launch.* = .{};
+        return false;
+    }
+    return false;
+}
+
+fn focusAuthorizingTick(armed_action: u64, now: u64) u64 {
+    return if (armed_action != 0) now else 0;
+}
+
+pub fn finishHostLaunch(slot: usize) void {
+    if (slot >= app_state.g_host_launches.len) return;
+    const launch = app_state.g_host_launches[slot];
+    if (!launch.ready.load(.acquire)) return;
+    const prior_action = app_state.g_focus_user_action_tick;
+    app_state.g_focus_user_action_tick = focusAuthorizingTick(launch.user_action, GetTickCount64());
+    defer app_state.g_focus_user_action_tick = prior_action;
+    const spawnable = launch.session_len != 0 and launch.runtime_len != 0;
+    if (spawnable) {
+        app_state.g_pending_new_tab_group = launch.group;
+        switch (launch.kind) {
+            .chat => {
+                const provider = std.enums.fromInt(@import("agent_host.zig").Provider, launch.provider) orelse return;
+                _ = spawnHostedChatNow(provider, launch.host, launch.session[0..launch.session_len], launch.cwd[0..launch.cwd_len], launch.sid[0..launch.sid_len], launch.runtime[0..launch.runtime_len]);
+            },
+            .workspace => {
+                if (!openWorkspaceTab(launch.host, launch.cwd[0..launch.cwd_len], launch.program[0..launch.program_len], launch.session[0..launch.session_len], launch.sid[0..launch.sid_len], launch.runtime[0..launch.runtime_len])) {
+                    @import("console.zig").showHeaderNoticeAscii("Could not start the new session", 5000, true);
+                }
+            },
+        }
+        @import("sidebar.zig").applyPendingGroup();
+    } else {
+        _ = launchRefused();
+    }
+    app_state.g_pending_new_tab_group = 0;
+    app_state.g_host_launches[slot] = .{};
+}
+
+fn spawnHostedChatNow(provider: @import("agent_host.zig").Provider, host: u8, session: []const u8, cwd: []const u8, sid: []const u8, runtime: []const u8) bool {
+    const agent_host = @import("agent_host.zig");
     var host_buf: [WORKSPACE_HOST_LAUNCH_MAX]u8 = undefined;
-    const launch_cmd = agent_host.launchCommandFor(&host_buf, provider, session, cwd, sid) orelse return false;
+    const launch_cmd = agent_host.launchCommandFor(&host_buf, provider, session, cwd, sid, runtime) orelse return false;
     if (launch_cmd.len > app_state.g_pending_tmux_cmd.len) return false;
 
     @memcpy(app_state.g_pending_tmux_cmd[0..launch_cmd.len], launch_cmd);
@@ -3317,6 +3402,11 @@ fn spawnHostedChatSession(provider: @import("agent_host.zig").Provider) bool {
     return ok;
 }
 
+test "MUBO-221 a deferred launch the user asked for still focuses the chat it opens" {
+    try std.testing.expectEqual(@as(u64, 41_000), focusAuthorizingTick(40_000, 41_000));
+    try std.testing.expectEqual(@as(u64, 0), focusAuthorizingTick(0, 41_000));
+}
+
 pub fn spawnCodexTmuxSession() bool {
     return spawnHostedChatSession(.codex);
 }
@@ -3339,12 +3429,12 @@ test "IGSH-1546 Codex and Pi chats are live chats that never type into a termina
     var session_buf: [64]u8 = undefined;
     const session = buildLiveChatSessionName(&session_buf);
     const sid = "ffffffff-ffff-4fff-bfff-ffffffffffff";
-    const pi = agent_host.launchCommandFor(&host_buf, .pi, session, "~/projects", sid) orelse return error.TestUnexpectedResult;
+    const pi = agent_host.launchCommandFor(&host_buf, .pi, session, "~/projects", sid, agent_host.READER) orelse return error.TestUnexpectedResult;
     try std.testing.expect(pi.len <= app_state.g_pending_tmux_cmd.len);
     try std.testing.expect(std.mem.indexOf(u8, pi, "send-keys") == null);
     try std.testing.expect(std.mem.indexOf(u8, pi, "host start pi ffffffff-ffff-4fff-bfff-ffffffffffff") != null);
-    try std.testing.expect(!agent_host.eligible("pi"));
-    try std.testing.expect(!newTabOpensChatView("pi"));
+    try std.testing.expect(agent_host.eligible("pi"));
+    try std.testing.expect(newTabOpensChatView("pi"));
 }
 
 fn clampSearchSelectionAndScroll() void {
@@ -4547,18 +4637,21 @@ pub fn updateSearchResults() void {
     }
 
     chatPaletteRow(SEARCH_CHAT_TOOL_STEPS_OFFSET, &[_][]const u8{ "chat view open or fold all tool steps", "expand collapse tools" }, false);
+
     if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
         labelsMatchQuery(&[_][]const u8{ "Jump to newest message", "jump to bottom latest end" }, app_state.g_search_buf[0..app_state.g_search_len]))
     {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_NEWEST_OFFSET;
         app_state.g_search_result_count += 1;
     }
+
     if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
         labelsMatchQuery(&[_][]const u8{ "Chat View: Resync chat", "reload refresh repair messages" }, app_state.g_search_buf[0..app_state.g_search_len]))
     {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_RESYNC_OFFSET;
         app_state.g_search_result_count += 1;
     }
+
     if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
         liveChatTab(app_state.active_shell) and
         labelsMatchQuery(&[_][]const u8{ "Chat View: Restart this chat on the newest version", "relaunch update latest version restart chat" }, app_state.g_search_buf[0..app_state.g_search_len]))
@@ -4566,6 +4659,7 @@ pub fn updateSearchResults() void {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_RESTART_OFFSET;
         app_state.g_search_result_count += 1;
     }
+
     if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
         liveChatTab(app_state.active_shell) and
         labelsMatchQuery(&[_][]const u8{ "Chat View: Fresh start", "handover clear context same chat picture address" }, app_state.g_search_buf[0..app_state.g_search_len]))
@@ -4573,6 +4667,7 @@ pub fn updateSearchResults() void {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_FRESH_START_OFFSET;
         app_state.g_search_result_count += 1;
     }
+
     const switch_rows = [_]struct { id: usize, target: u8, name: []const u8 }{
         .{ .id = SEARCH_CHAT_SWITCH_CLAUDE_OFFSET, .target = 1, .name = "Chat View: Switch AI to Claude" },
         .{ .id = SEARCH_CHAT_SWITCH_CODEX_OFFSET, .target = 2, .name = "Chat View: Switch AI to Codex" },
@@ -4588,6 +4683,7 @@ pub fn updateSearchResults() void {
             app_state.g_search_result_count += 1;
         }
     }
+
     if (workspaceColorSlot() != null) {
         const q = app_state.g_search_buf[0..app_state.g_search_len];
         if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&.{ "Workspace: Switch every chat to Claude", "switch all chats ai workspace claude" }, q)) { app_state.g_search_results[app_state.g_search_result_count] = app_state.SEARCH_WS_SWITCH_CLAUDE_OFFSET; app_state.g_search_result_count += 1; }
@@ -4595,18 +4691,21 @@ pub fn updateSearchResults() void {
         if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&.{ "Workspace: Switch every chat to Antigravity", "switch all chats ai workspace antigravity agy" }, q)) { app_state.g_search_results[app_state.g_search_result_count] = app_state.SEARCH_WS_SWITCH_ANTIGRAVITY_OFFSET; app_state.g_search_result_count += 1; }
     }
     chatPaletteRow(SEARCH_CHAT_AUTO_SWITCH_OFFSET, &[_][]const u8{ "Chat View: Auto-switch AI when a plan runs out", "fallback next ai usage limit rate limit quota ran out of plan" }, true);
+
     if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
         labelsMatchQuery(&[_][]const u8{ "Chat View: Restart every idle live chat", "relaunch update all chats newest version nightly" }, app_state.g_search_buf[0..app_state.g_search_len]))
     {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_RESTART_ALL_OFFSET;
         app_state.g_search_result_count += 1;
     }
+
     if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
         labelsMatchQuery(&[_][]const u8{ "Chat View: More Menu", "three dots options approve stop rename history archive model" }, app_state.g_search_buf[0..app_state.g_search_len]))
     {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_MORE_MENU_OFFSET;
         app_state.g_search_result_count += 1;
     }
+
     if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
         labelsMatchQuery(&[_][]const u8{ "Chat View: Plus Menu", "plus attach file model effort permission level mode bypass" }, app_state.g_search_buf[0..app_state.g_search_len]))
     {
@@ -4614,6 +4713,9 @@ pub fn updateSearchResults() void {
         app_state.g_search_result_count += 1;
     }
 
+    if (@import("chat_session.zig").chatSettingsEligible()) {
+        for (@import("plus_menu.zig").palette_rows) |row| chatPaletteRow(row.id, &.{row.title}, false);
+    }
     chatPaletteRow(SEARCH_CHAT_TODO_OFFSET, &[_][]const u8{ "Chat View: Toggle todo list", "todos tasks plan progress" }, false);
     chatPaletteRow(SEARCH_CHAT_COPY_CODE_OFFSET, &[_][]const u8{ "chat view copy latest code block", "copy code", "ctrl shift d" }, false);
     if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
@@ -4646,7 +4748,7 @@ pub fn updateSearchResults() void {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_SELECT_ALL_OFFSET;
         app_state.g_search_result_count += 1;
     }
-    if (app_state.g_search_len > 0 and @import("chat_send.zig").chatModePickerAvailable() and !app_state.g_inbox_active and !app_state.g_all_sessions_active) {
+    if (app_state.g_search_len > 0 and @import("chat_send.zig").chatModeSelectable() and (@import("chat_session.zig").chatSettingsCodex() or std.mem.eql(u8, @import("chat_session.zig").chatFileIdentityForShell(app_state.active_shell).provider(), "claude")) and !app_state.g_inbox_active and !app_state.g_all_sessions_active) {
         const query = app_state.g_search_buf[0..app_state.g_search_len];
         for ([_]struct { target: usize, label: []const u8 }{
             .{ .target = SEARCH_CHAT_MODE_PLAN_OFFSET, .label = "chat permission mode: plan" },
@@ -5270,24 +5372,12 @@ pub fn updateSearchResults() void {
             app_state.g_search_result_count += 1;
         }
         if (@import("chat_session.zig").chatSettingsEligible() and @import("chat_session.zig").chatSettingsCodex()) {
-            if (app_state.g_search_result_count < app_state.g_search_results.len and (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Model Sol", app_state.g_search_buf[0..app_state.g_search_len]))) {
-                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_MODEL_SOL_OFFSET;
-                app_state.g_search_result_count += 1;
-            }
-            if (app_state.g_search_result_count < app_state.g_search_results.len and (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Model Terra", app_state.g_search_buf[0..app_state.g_search_len]))) {
-                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_MODEL_TERRA_OFFSET;
-                app_state.g_search_result_count += 1;
-            }
-            if (app_state.g_search_result_count < app_state.g_search_results.len and (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Model Luna", app_state.g_search_buf[0..app_state.g_search_len]))) {
-                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_MODEL_LUNA_OFFSET;
-                app_state.g_search_result_count += 1;
-            }
-            if (app_state.g_search_result_count < app_state.g_search_results.len and (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Model Astra", app_state.g_search_buf[0..app_state.g_search_len]))) {
-                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_MODEL_ASTRA_OFFSET;
-                app_state.g_search_result_count += 1;
-            }
-        }
-        if (@import("chat_session.zig").chatSettingsEligible() and !@import("chat_session.zig").chatSettingsCodex()) {
+            for ([_]struct { id: usize, title: []const u8 }{
+                .{ .id = SEARCH_CHAT_MODEL_SOL_OFFSET, .title = "Chat View: Model Sol" },
+                .{ .id = SEARCH_CHAT_MODEL_TERRA_OFFSET, .title = "Chat View: Model Terra" },
+                .{ .id = SEARCH_CHAT_MODEL_LUNA_OFFSET, .title = "Chat View: Model Luna" },
+                .{ .id = SEARCH_CHAT_MODEL_ASTRA_OFFSET, .title = "Chat View: Model Astra" },
+            }) |row| chatPaletteRow(row.id, &.{row.title}, false);
         }
         if (app_state.g_search_result_count < app_state.g_search_results.len and
             (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Allow", app_state.g_search_buf[0..app_state.g_search_len])))
@@ -6306,7 +6396,7 @@ test "IGSH-1266 Esc closes the pick repo list and starts no tab" {
 test "IGSH-1266 pick repo starts the session in the picked folder" {
     var host_buf: [1024]u8 = undefined;
     var command_buf: [512]u8 = undefined;
-    const picked = workspaceLaunchCommand("", "term-pick", "/home/x/projects/picked", null, &host_buf, &command_buf) orelse
+    const picked = workspaceLaunchCommand("", "term-pick", "/home/x/projects/picked", null, "", &host_buf, &command_buf) orelse
         return error.TestUnexpectedResult;
     var neutral_buf: [512]u8 = undefined;
     const neutral = buildWorkspaceTmuxLaunchCmd(&neutral_buf, "term-pick", "/home/x/projects/picked", "") orelse

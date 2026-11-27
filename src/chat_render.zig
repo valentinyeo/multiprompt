@@ -10,6 +10,7 @@ const chat_reply = @import("chat_reply.zig");
 const chat_shell_sync = @import("chat_shell_sync.zig");
 const chat_transcript = @import("chat_transcript.zig");
 const chat_style = @import("chat_style.zig");
+const chat_inline_code = @import("chat_inline_code.zig");
 const chat_options = @import("chat_options.zig");
 const chat_drop = @import("chat_drop.zig");
 const chat_keynav = @import("chat_keynav.zig");
@@ -18,6 +19,8 @@ const DragFinish = @import("win32.zig").DragFinish;
 const chat_code = @import("chat_code.zig");
 const chat_table_expand = @import("chat_table_expand.zig");
 const chat_diff = @import("chat_diff.zig");
+const chat_activity_view = @import("chat_activity_view.zig");
+const chat_view = @import("chat_view.zig");
 const WINAPI = @import("win32.zig").WINAPI;
 const DWORD = @import("win32.zig").DWORD;
 const UINT = @import("win32.zig").UINT;
@@ -797,7 +800,8 @@ fn chatRichText(hdc: HANDLE, text: []const u16, area: RECT, level: u3, paint: bo
                     }
                 }
             }
-            if (x > 0 and chatTextWidth(hdc, text[pos..end]) > max_w - x) {
+            const pad = if (style.code) chat_inline_code.padX() else 0;
+            if (!chat_inline_code.fits(x, chatTextWidth(hdc, text[pos..end]), max_w, pad)) {
                 x = 0;
                 y += line_h;
             }
@@ -809,14 +813,14 @@ fn chatRichText(hdc: HANDLE, text: []const u16, area: RECT, level: u3, paint: bo
                     measure_end = pos + 1024;
                     if (text[measure_end - 1] >= 0xD800 and text[measure_end - 1] <= 0xDBFF) measure_end += 1;
                 }
-                var measured = GetTextExtentExPointW(hdc, text[pos..measure_end].ptr, @intCast(measure_end - pos), @max(0, max_w - x), &fit, null, &size) != 0;
+                var measured = GetTextExtentExPointW(hdc, text[pos..measure_end].ptr, @intCast(measure_end - pos), @max(0, max_w - x - 2 * pad), &fit, null, &size) != 0;
                 if (measure_end < end and fit + 2 >= @as(i32, @intCast(measure_end - pos))) {
-                    measured = GetTextExtentExPointW(hdc, text[pos..end].ptr, @intCast(end - pos), @max(0, max_w - x), &fit, null, &size) != 0;
+                    measured = GetTextExtentExPointW(hdc, text[pos..end].ptr, @intCast(end - pos), @max(0, max_w - x - 2 * pad), &fit, null, &size) != 0;
                 }
                 const count = chat_code.fitCount(text[pos..end], fit);
                 const segment = text[pos .. pos + count];
                 const w = if (measured and count == end - pos) size.cx else chatTextWidth(hdc, segment);
-                var rc = RECT{ .left = area.left + x, .top = area.top + y, .right = area.left + x + w, .bottom = area.top + y + line_h };
+                var rc = RECT{ .left = area.left + x + pad, .top = area.top + y, .right = area.left + x + pad + w, .bottom = area.top + y + line_h };
                 if (hit) |pt| {
                     if (pt.find) |find| {
                         if (find.position >= offset + pos and find.position < offset + pos + count) find.y.* = rc.top;
@@ -830,17 +834,13 @@ fn chatRichText(hdc: HANDLE, text: []const u16, area: RECT, level: u3, paint: bo
                     }
                 }
                 if (paint) {
-                    if (span.style.code) {
-                        const brush = CreateSolidBrush(chatCodePanelColor());
-                        _ = FillRect(hdc, &rc, brush);
-                        _ = DeleteObject(brush);
-                    }
+                    if (span.style.code) chat_inline_code.paint(hdc, rc, app_state.g_light_theme);
                     @import("chat_find_ui.zig").paintRun(hdc, segment, offset + pos, rc.left, rc.top, line_h);
                     chatPaintSelectionRun(hdc, segment, offset + pos, rc.left, rc.top, line_h);
-                    _ = SetTextColor(hdc, if (target != null) customColorOr("link", if (app_state.g_light_theme) RGB(30, 90, 170) else RGB(110, 175, 245)) else customColorOr("text", themeConsoleFg()));
+                    _ = SetTextColor(hdc, if (target != null) customColorOr("link", if (app_state.g_light_theme) RGB(30, 90, 170) else RGB(110, 175, 245)) else if (span.style.code) chat_inline_code.textColor(app_state.g_light_theme) else customColorOr("text", themeConsoleFg()));
                     _ = chatDrawText(hdc, segment.ptr, @intCast(segment.len), &rc, DT_SINGLELINE | DT_NOPREFIX);
                 }
-                x += w;
+                x += chat_inline_code.chipWidth(w, pad);
                 pos += count;
                 if (pos < end) {
                     x = 0;
@@ -1072,7 +1072,7 @@ fn chatFlowBlock(hdc: HANDLE, text: []const u16, block: ChatBlock, area: RECT, p
             var marker = area;
             marker.left += indent;
             marker.right = body.left - uiScaled(6);
-            if (block.prefix == 2) _ = chatDrawText(hdc, L("\u{2022}"), 1, &marker, DT_SINGLELINE | DT_NOPREFIX) else _ = chatDrawText(hdc, text.ptr, @intCast(block.prefix), &marker, DT_SINGLELINE | DT_NOPREFIX);
+            if (block.prefix == 2) _ = chatDrawText(hdc, L("\u{2022}"), 1, &marker, DT_SINGLELINE | DT_NOPREFIX | DT_RIGHT) else _ = chatDrawText(hdc, text.ptr, @intCast(block.prefix), &marker, DT_SINGLELINE | DT_NOPREFIX | DT_RIGHT);
         }
         return chatRichText(hdc, text[block.prefix..], body, 0, paint, hit, offset + block.prefix, height, false);
     }
@@ -1894,6 +1894,9 @@ test "Chat View GDI layout keeps bubble width and avatar space consistent" {
     const link_text = std.unicode.utf8ToUtf16LeStringLiteral("[docs](https://example.test)");
     const link = chatFlowBlock(dc, link_text, reply, .{ .left = 0, .top = 0, .right = 320, .bottom = 100 }, false, .{ .x = 2, .y = 2 }, 0, null) orelse return error.TestUnexpectedResult;
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("https://example.test"), link_text[link.start..link.end]);
+    const file_text = std.unicode.utf8ToUtf16LeStringLiteral("[notes](file:///C:/notes.md)");
+    const file = chatFlowBlock(dc, file_text, reply, .{ .left = 0, .top = 0, .right = 320, .bottom = 100 }, false, .{ .x = 2, .y = 2 }, 0, null) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("file:///C:/notes.md"), file_text[file.start..file.end]);
 }
 
 test "IGSH-537 clicking either side of a URL underscore opens the exact address" {
@@ -1930,7 +1933,8 @@ test "IGSH-537 clicking either side of a URL underscore opens the exact address"
         .{ .text = w("<https://example.test/session_auto_01> https://example.test/session_next_02"), .prefix = w("https://example.test/session_auto_01") },
     }) |sequence| {
         _ = SelectObject(dc, chatRichFont(.{ .code = sequence.code }, 0));
-        const next_x = chatTextWidth(dc, sequence.prefix) + space_w + 2;
+        const chip = if (sequence.code) 2 * chat_inline_code.padX() else 0;
+        const next_x = chatTextWidth(dc, sequence.prefix) + chip + space_w + 2;
         const target = chatRichText(dc, sequence.text, area, 0, false, .{ .x = next_x, .y = 2 }, 17, null, false) orelse return error.TestUnexpectedResult;
         const start = std.mem.indexOf(u16, sequence.text, url).?;
         try std.testing.expectEqual(@as(usize, 17) + start, target.start);
@@ -2103,18 +2107,7 @@ fn chatWorkingDotsVisible() bool {
 }
 
 pub fn chatWorkingSync() void {
-    if (app_state.g_chat_transcript_hwnd == null) return;
-    if ((g_working_rect != null) != chatWorkingDotsVisible()) {
-        var rc: RECT = std.mem.zeroes(RECT);
-        chatViewClientRect(&rc);
-        chatRelayoutPreservingScroll(rc.right - rc.left, rc.bottom - rc.top);
-        _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
-    } else if (g_working_rect) |source| {
-        var rc = source;
-        rc.top -= app_state.g_chat_scroll_y;
-        rc.bottom -= app_state.g_chat_scroll_y;
-        _ = InvalidateRect(app_state.g_chat_transcript_hwnd, &rc, 0);
-    }
+    chat_activity_view.sync(chatWorkingDotsVisible(), g_working_rect, app_state.g_chat_scroll_y);
 }
 
 fn chatPaintWorking(hdc: HANDLE, now: u64) void {
@@ -2514,6 +2507,7 @@ fn chatPaintChoices(hdc: HANDLE, view_h: i32, paint: RECT) void {
 pub fn chatRelayout(client_width: i32) void {
     app_state.g_chat_layout_count +%= 1;
     g_working_rect = null;
+    chat_activity_view.reset();
     app_state.g_chat_layout_dirty = false;
     if (app_state.g_chat_layout_width != client_width or app_state.g_chat_layout_scale != uiScaled(1024) or app_state.g_chat_layout_top_pad != app_state.g_chat_top_pad or app_state.g_chat_layout_font_pt != app_state.g_chat_font_pt or app_state.g_chat_find_layout_open != app_state.g_chat_find_open) app_state.g_chat_layout_reuse = 0;
     app_state.g_chat_layout_width = client_width;
@@ -2679,14 +2673,15 @@ pub fn chatRelayout(client_width: i32) void {
     if (@max(app_state.g_chat_sel_anchor, app_state.g_chat_sel_caret) >= chat_hit.pending_selection_base and
         (old_echo_count != app_state.g_chat_echo_layout_count or
             !std.mem.eql(u64, old_echo_ids[0..old_echo_count], app_state.g_chat_echo_layout_ids[0..app_state.g_chat_echo_layout_count]))) chatSelectionClear();
-    if (chatWorkingDotsVisible()) {
+    chat_activity_view.refresh();
+    if (chat_view.activityStrip(chat_activity_view.isVisible(), chatWorkingDotsVisible())) {
         y += chatBlockGapBefore(has_previous or app_state.g_chat_echo_layout_count > 0 or g_shell_rect_count > 0, .prose, true, .single);
         const sample = std.unicode.utf8ToUtf16LeStringLiteral("Ready.");
         var rc = chatMeasureBlockRect(hdc, sample, .{ .start = 0, .len = sample.len, .role = .prose, .first = true }, .single, width, y, null);
         rc.left += content.left;
         rc.right += content.left;
+        y = chat_activity_view.layout(rc);
         g_working_rect = rc;
-        y = rc.bottom;
     }
     app_state.g_chat_content_h = y;
 }
@@ -5409,6 +5404,7 @@ var selection_offer_sid: [40]u8 = @splat(0);
 var selection_offer_position: LPARAM = 0;
 
 fn chatTranscriptMouseDown(hwnd: HANDLE, x: i32, y: i32) void {
+    if (chat_activity_view.toggleAndRelayout(y, app_state.g_chat_scroll_y)) return;
     selection_completion_pending = false;
     const now = GetTickCount64();
     const near = @abs(x - app_state.g_chat_sel_last_x) <= uiScaled(4) and @abs(y - app_state.g_chat_sel_last_y) <= uiScaled(4);
@@ -5818,6 +5814,7 @@ pub fn chatPaintTranscriptContent(mem_dc: HANDLE, w: i32, h: i32, paint: RECT) v
             chatPaintShellRow(mem_dc, &g_shell_view.rows[g_shell_rect_row[i]], rc);
         }
         chatPaintWorking(mem_dc, GetTickCount64());
+        chat_activity_view.paintLine(mem_dc, app_state.g_chat_scroll_y, chatWorkingDotsVisible());
         if (app_state.g_chat_block_count == 0) {
             const entry = chatHistoryEntry(chatFileIdentity());
             const missing_note = if (entry) |e| e.missing_message[0] != 0 else false;
@@ -5837,7 +5834,9 @@ pub fn chatPaintTranscriptContent(mem_dc: HANDLE, w: i32, h: i32, paint: RECT) v
         } else g_note_logged = false;
     }
     chatPaintTopFade(mem_dc, w);
+    chat_activity_view.paintPill(mem_dc, w, app_state.g_chat_top_pad);
     chatPaintScrollUi(&canvas, mem_dc, w, @max(1, h - app_state.g_chat_bottom_inset));
+    @import("chat_queue_view.zig").paint(mem_dc);
     @import("chat_find_ui.zig").paint(mem_dc, w);
 }
 
@@ -6364,8 +6363,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
         },
         @import("win32.zig").WM_DESTROY => {
             resetTranscriptBackbuffer();
-            return 0;
-        },
+            return 0; },
         WM_ERASEBKGND => return 1,
         WM_SIZE => {
             var client_rc: RECT = std.mem.zeroes(RECT);
@@ -6473,6 +6471,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
         },
         WM_LBUTTONDOWN => {
             if (app_state.g_chat_find_open and GET_Y(lp) < uiScaled(app_state.CHAT_FIND_TOP_H)) return 0;
+            if (@import("chat_queue_view.zig").click(GET_X(lp), GET_Y(lp))) return 0;
             _ = KillTimer(hwnd, selection_offer_timer);
             if (chatMessageActionAt(GET_X(lp), GET_Y(lp))) |action| {
                 const index = chat_hover_message orelse return 0;

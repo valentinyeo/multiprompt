@@ -34,6 +34,7 @@ function toggle(text) {
 function harness(source) {
   const production = names.map(name => fn(source, name)).join('\n\n')
     .replaceAll('@import("native_session.zig")', 'NativeSession')
+    .replaceAll('@import("sidebar.zig").isTabHidden', 'isTabHidden')
     .replaceAll('@import("chat_find_ui.zig").close', 'closeFind')
     .replaceAll('@import("chat_session.zig").chatHistoryStreamsKeep', 'chatHistoryStreamsKeep').replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark')
     .replaceAll('@import("window_layout.zig").chatWorkingIndicatorSync', 'syncWorking')
@@ -57,7 +58,7 @@ const TIMER_CHAT_BROWSER_SWAP = 1;
 const TIMER_CHAT_REFRESH = 2;
 const ISSUE_440_FULL_WIDTH_CHAT = true;
 const chatViewShouldShowForTab = @import("chat_view.zig").shouldShow;
-const Shell = struct { disconnected: bool = false, hwnd: HANDLE = 10, pid: u32 = 42, shell_id: u32 = 1, tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 0, chat_view_on: bool = true, pinned_top: bool = false, full_width: bool = false, full_width_pending_console_resize: bool = false, native_terminal: bool = false, console_inflight: bool = false };
+const Shell = struct { hidden: bool = false, disconnected: bool = false, hwnd: HANDLE = 10, pid: u32 = 42, shell_id: u32 = 1, tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 0, chat_view_on: bool = true, pinned_top: bool = false, full_width: bool = false, full_width_pending_console_resize: bool = false, native_terminal: bool = false, console_inflight: bool = false };
 const NativeSession = struct {
     fn alive(_: u32) bool { return true; }
     fn connect(_: u32) bool { return true; }
@@ -96,6 +97,7 @@ var focuses: usize = 0;
 fn ShowWindow(hwnd: HANDLE, cmd: i32) BOOL { visible[hwnd.?] = cmd != SW_HIDE; return 1; }
 fn ShowWindowAsync(hwnd: HANDLE, cmd: i32) BOOL { return ShowWindow(hwnd, cmd); }
 fn IsWindowVisible(hwnd: HANDLE) BOOL { return @intFromBool(visible[hwnd.?]); }
+fn isTabHidden(idx: u32) bool { return shells[idx].hidden; }
 fn verboseLoggingEnabled() bool { return false; }
 fn debugLog(_: []const u8) void {}
 fn closeFind(_: bool) void {}
@@ -222,6 +224,16 @@ test "closing chat stops receiving before revealing the console" {
     prepare(false, false);
     closeChatView();
     try std.testing.expectEqual(@as(usize, 1), stream_stops);
+    try std.testing.expect(visible[10]);
+}
+test "MUBO-597 closing chat never reveals a shell hidden by the workspace" {
+    prepare(false, false);
+    shells[0].hidden = true;
+    closeChatView();
+    try std.testing.expect(!g_chat_active);
+    try std.testing.expect(!visible[10]);
+    shells[0].hidden = false;
+    _ = showShellConsole(0, SW_SHOW, "workspace-return");
     try std.testing.expect(visible[10]);
 }
 test "closing behind palette preserves containment until palette is dismissed" {

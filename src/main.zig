@@ -495,7 +495,7 @@ const updateCardInit = @import("update_card.zig").updateCardInit;
 const startUpdateCardWatch = @import("update_card.zig").startUpdateCardWatch;
 const stopUpdateCardWatch = @import("update_card.zig").stopUpdateCardWatch;
 const updateCardHit = @import("update_card.zig").updateCardHit;
-const updateCardToggleNotes = @import("update_card.zig").updateCardToggleNotes;
+const updateCardSeeAll = @import("update_card.zig").updateCardSeeAll;
 const updateCardPoll = @import("update_card.zig").updateCardPoll;
 const updateCardDismiss = @import("update_card.zig").updateCardDismiss;
 const updateCardRelaunch = @import("update_card.zig").updateCardRelaunch;
@@ -1577,6 +1577,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         @import("native_session.zig").ready(@intCast(wp), lp != 0);
         return 0;
     }
+    if (msg == @import("win32.zig").WM_APP_NATIVE_SIZE) {
+        @import("native_session.zig").reportSize(@intCast(wp));
+        return 0;
+    }
     if (msg == @import("win32.zig").WM_APP_BROWSER_SIGNIN_DONE) {
         @import("browser_pane.zig").handleBrowserSigninDone(@bitCast(lp), wp);
         return 0;
@@ -2134,7 +2138,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     const upd_hit = updateCardHit(mx, my);
                     if (upd_hit != 0) {
                         app_state.g_shell_focused = false;
-                        if (upd_hit == 1) updateCardRelaunch(hwnd) else if (upd_hit == 2) updateCardDismiss() else if (upd_hit == 4) updateCardToggleNotes();
+                        if (upd_hit == 1) updateCardRelaunch(hwnd) else if (upd_hit == 2) updateCardDismiss() else if (upd_hit == 4) updateCardSeeAll();
                         _ = InvalidateRect(hwnd, null, 0);
                         return 0;
                     }
@@ -3911,40 +3915,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         @import("win32.zig").WM_APP_PLUS_MENU_ACTION => {
             if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
-            const item: plus_menu.Item = blk: {
-                inline for (std.meta.fields(plus_menu.Item)) |field| {
-                    if (wp == field.value) break :blk @enumFromInt(field.value);
-                }
-                return 0;
-            };
-            switch (item) {
-                .attach => _ = PostMessageW(hwnd, WM_APP_CHAT_ATTACH, 0, 0),
-                .model_opus, .model_sonnet, .model_haiku, .model_fable, .model_sol, .model_terra, .model_luna, .model_astra, .effort_low, .effort_medium, .effort_high => {
-                    const setting: @import("chat_live.zig").Setting = switch (item) {
-                        .model_opus => .{ .model = .opus },
-                        .model_sonnet => .{ .model = .sonnet },
-                        .model_haiku => .{ .model = .haiku },
-                        .model_fable => .{ .model = .fable },
-                        .model_sol => .{ .model = .sol },
-                        .model_terra => .{ .model = .terra },
-                        .model_luna => .{ .model = .luna },
-                        .model_astra => .{ .model = .astra },
-                        .effort_low => .{ .effort = .low },
-                        .effort_medium => .{ .effort = .medium },
-                        else => .{ .effort = .high },
-                    };
-                    if (@import("chat_send.zig").chatSetLiveSetting(setting)) @import("chat_send.zig").chatSettingNotice(setting) else showHeaderNoticeAscii("Could not change chat settings", 4000, true);
-                },
-                .mode_ask, .mode_edits, .mode_plan, .mode_bypass => {
-                    const mode: @import("chat_slash.zig").PermissionMode = switch (item) {
-                        .mode_ask => .manual,
-                        .mode_edits => .acceptEdits,
-                        .mode_plan => .plan,
-                        else => .bypassPermissions,
-                    };
-                    if (!@import("chat_send.zig").chatModeSelect(mode)) showHeaderNoticeAscii("Could not change permission mode; try again", 4000, true);
-                },
-            }
+            plus_menu.dispatch(wp);
             _ = InvalidateRect(hwnd, null, 0);
             return 0;
         },
@@ -3994,6 +3965,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         app_state.WM_APP_WORKSPACE_SWITCH_AI => { @import("workspace_switch_ai.zig").handleUiTask(lp); return 0; },
+        app_state.WM_APP_CHAT_HOST_READY => {
+            @import("command_palette.zig").finishHostLaunch(wp);
+            return 0;
+        },
         app_state.WM_APP_PI_MODEL_RESULT => {
             @import("chat_send.zig").chatPiModelFinish(lp);
             return 0;
@@ -5041,7 +5016,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_SEARCH_CONFIRM => {
-            if (lp != 0 and (lp != @as(isize, @intCast(app_state.g_search_revision)) or wp != @as(usize, app_state.g_search_sel) + 1)) return 0;
+            if (lp != 0 and (wp != @as(usize, app_state.g_search_sel) + 1 or (!app_state.g_search_active and lp != @as(isize, @intCast(app_state.g_search_revision))))) return 0;
             if (app_state.g_search_active and app_state.g_browser_url_mode) {
                 _ = PostMessageW(hwnd, WM_APP_BROWSER_OPEN_URL, 0, 0);
                 return 0;
@@ -5545,7 +5520,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     more_menu.open();
                     return 0;
                 }
-                if (target == app_state.SEARCH_CHAT_PLUS_MENU_OFFSET) {
+                if (target == app_state.SEARCH_CHAT_PLUS_MENU_OFFSET or (target >= app_state.SEARCH_CHAT_AI_MENU_OFFSET and target <= app_state.SEARCH_CHAT_PERMISSION_MENU_OFFSET)) {
                     app_state.g_search_active = false;
                     app_state.g_search_from_inbox = false;
                     app_state.g_shell_focused = false;
@@ -5554,7 +5529,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = InvalidateRect(hwnd, null, 0);
                     _ = @import("win32.zig").UpdateWindow(hwnd);
                     if (app_state.g_chat_active) _ = @import("win32.zig").UpdateWindow(app_state.g_chat_transcript_hwnd);
-                    plus_menu.open();
+                    plus_menu.openPage(plus_menu.palettePage(target));
                     return 0;
                 }
                 if (target == SEARCH_CHAT_FOCUS_MESSAGES_OFFSET) {
@@ -10217,4 +10192,8 @@ test "IGSH-836 palette keyboard survives stationary hover and real movement or c
     try std.testing.expect(w.PeekMessageW(&message, hwnd, WM_APP_SEARCH_CONFIRM, WM_APP_SEARCH_CONFIRM, 1) != 0);
     _ = wndProc(hwnd, message.message, message.wParam, message.lParam);
     try std.testing.expect(!app_state.g_search_theme_mode);
+}
+
+test {
+    _ = @import("provider_badge.zig");
 }

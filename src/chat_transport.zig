@@ -4,6 +4,8 @@ const state = @import("app_state.zig");
 const idle_budget = @import("idle_budget.zig");
 const a = std.heap.page_allocator;
 const MAX_BUFFER = 32 * 1024 * 1024;
+const STALL_MS = 10_000;
+const STALL_CHECK_MS = 250;
 
 pub const Channel = struct {
     host: *Host,
@@ -16,6 +18,7 @@ pub const Channel = struct {
     notify_message: u32 = 0,
     user: usize = 0,
     ended: bool = false,
+    ask_at: u64 = 0,
     bytes: std.ArrayList(u8) = .empty,
     offset: usize = 0,
     pending_bytes: usize = 0,
@@ -32,9 +35,14 @@ const Host = struct {
     running: bool = false,
     starting: bool = false,
     stopping: bool = false,
+    generation: u32 = 0,
+    last_rx: u64 = 0,
+    checked: u64 = 0,
     outgoing: std.ArrayList(Packet) = .empty,
     outgoing_bytes: usize = 0,
     wake: w.HANDLE = null,
+    ready: w.HANDLE = null,
+    progress: w.HANDLE = null,
     retry_at: u64 = 0,
     next_id: u32 = 0,
     channels: std.ArrayList(*Channel) = .empty,
@@ -86,10 +94,10 @@ fn packet(host: *Host, value: anytype) bool {
     return true;
 }
 
-fn transmit(host: *Host) void {
+fn transmit(host: *Host, generation: u32, input: w.HANDLE, process: w.HANDLE) void {
     while (true) {
         lock(host);
-        if (!host.running) {
+        if (!host.running or host.generation != generation) {
             host.mutex.unlock();
             return;
         }
@@ -108,8 +116,6 @@ fn transmit(host: *Host) void {
                 break;
             }
         }
-        const input = host.input;
-        const process = host.process;
         host.mutex.unlock();
         const sent = writeAll(input, item.bytes);
         a.free(item.bytes);
@@ -125,6 +131,7 @@ const Boot = struct {
     input: w.HANDLE,
     output: w.HANDLE,
     process: w.HANDLE,
+    generation: u32,
 };
 
 fn closeBoot(b: Boot) void {
@@ -143,6 +150,7 @@ fn abortBoot(b: Boot) void {
 }
 
 fn handshakeWorker(b: Boot) void {
+    defer _ = w.SetEvent(b.host.ready);
     const deadline = w.GetTickCount64() + 15_000;
     var ready: [15]u8 = undefined;
     var ready_len: usize = 0;
@@ -165,8 +173,14 @@ fn handshakeWorker(b: Boot) void {
         return;
     }
     lock(b.host);
+    if (b.host.generation != b.generation) {
+        const abort = Boot{ .host = b.host, .input = b.input, .output = b.output, .process = b.process, .generation = b.generation };
+        b.host.mutex.unlock();
+        closeBoot(abort);
+        return;
+    }
     if (b.host.stopping or !b.host.starting) {
-        const abort = Boot{ .host = b.host, .input = b.input, .output = b.output, .process = b.process };
+        const abort = Boot{ .host = b.host, .input = b.input, .output = b.output, .process = b.process, .generation = b.generation };
         b.host.starting = false;
         b.host.mutex.unlock();
         closeBoot(abort);
@@ -177,9 +191,13 @@ fn handshakeWorker(b: Boot) void {
     b.host.output = b.output;
     b.host.running = true;
     b.host.starting = false;
+    b.host.last_rx = w.GetTickCount64();
+    b.host.checked = 0;
+    const ready_event = b.host.ready;
     b.host.mutex.unlock();
+    if (ready_event != null) _ = w.SetEvent(ready_event);
     idle_budget.bump(.thread_spawn);
-    const thread = std.Thread.spawn(.{}, receive, .{b.host}) catch {
+    const thread = std.Thread.spawn(.{}, receive, .{b}) catch {
         lock(b.host);
         if (b.host.process) |process| _ = w.TerminateProcess(process, 0);
         b.host.running = false;
@@ -196,13 +214,19 @@ fn handshakeWorker(b: Boot) void {
 fn bootHost(host: *Host, index: u8) bool {
     if (host.wake == null) host.wake = w.CreateEventW(null, 0, 0, null);
     if (host.wake == null) return false;
+    if (host.ready == null) host.ready = w.CreateEventW(null, 0, 0, null);
+    if (host.ready == null) return false;
+    _ = w.ResetEvent(host.ready);
+    if (host.progress == null) host.progress = w.CreateEventW(null, 0, 0, null);
+    if (host.progress == null) return false;
     var cmd: [2048]u16 = undefined;
     var pos: usize = 0;
     const console = @import("console.zig");
     if (!console.appendSshExe(&cmd, &pos) or
         !console.appendWideAscii(&cmd, &pos, "-T -o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=5 -o ServerAliveCountMax=2 ") or
         !console.appendWideAscii(&cmd, &pos, console.tmuxSshTarget(index)) or
-        !console.appendWideAscii(&cmd, &pos, " python3 -u -c 'import base64,sys;exec(base64.b64decode(sys.stdin.buffer.readline()))'")) return false;
+        !console.appendWideAscii(&cmd, &pos, " ") or
+        !console.appendRemotePythonScript(&cmd, &pos, "import base64,sys;exec(base64.b64decode(sys.stdin.buffer.readline()))")) return false;
     cmd[pos] = 0;
     var sa = w.SECURITY_ATTRIBUTES{ .nLength = @sizeOf(w.SECURITY_ATTRIBUTES), .lpSecurityDescriptor = null, .bInheritHandle = 1 };
     var child_input: w.HANDLE = null;
@@ -232,6 +256,10 @@ fn bootHost(host: *Host, index: u8) bool {
     if (w.CreateProcessW(null, @ptrCast(&cmd), null, null, 1, console.SSH_HELPER_FLAGS, null, null, &si, &pi) == 0) return false;
     _ = w.CloseHandle(pi.hThread);
     process = pi.hProcess;
+    _ = w.CloseHandle(child_input);
+    child_input = null;
+    _ = w.CloseHandle(child_output);
+    child_output = null;
     if (state.g_tunnel_job == null or w.AssignProcessToJobObject(state.g_tunnel_job, process) == 0) {
         _ = w.TerminateProcess(process, 0);
         _ = w.CloseHandle(process);
@@ -284,7 +312,8 @@ fn bootHost(host: *Host, index: u8) bool {
         }
     }
     host.starting = true;
-    const job = Boot{ .host = host, .input = input, .output = output, .process = process };
+    host.generation +%= 1;
+    const job = Boot{ .host = host, .input = input, .output = output, .process = process, .generation = host.generation };
     const thread = std.Thread.spawn(.{}, handshakeWorker, .{job}) catch {
         host.starting = false;
         _ = w.TerminateProcess(process, 0);
@@ -330,6 +359,20 @@ pub fn openCommand(index: u8, command: []const u8) ?*Channel {
     return channel;
 }
 
+pub fn openCommandWait(index: u8, command: []const u8, timeout_ms: u32) ?*Channel {
+    if (openCommand(index, command)) |channel| return channel;
+    if (index >= hosts.len) return null;
+    const host = &hosts[index];
+    lock(host);
+    const starting = host.starting;
+    const ready = host.ready;
+    const running = host.running;
+    host.mutex.unlock();
+    if (starting and w.WaitForSingleObject(ready, timeout_ms) != 0) return null;
+    if (!starting and !running) return null;
+    return openCommand(index, command);
+}
+
 pub fn openTerminal(index: u8, hwnd: w.HANDLE, message: u32, user: usize) ?*Channel {
     const channel = open(index, false) orelse return null;
     lock(channel.host);
@@ -361,6 +404,7 @@ pub fn write(channel: *Channel, line: []const u8) bool {
         notify(channel);
         return false;
     }
+    if (channel.bytes.items.len == channel.offset) channel.ask_at = w.GetTickCount64();
     channel.started = true;
     return true;
 }
@@ -381,11 +425,28 @@ pub fn read(channel: *Channel, bytes: []u8, wait: bool) ?usize {
             host.mutex.unlock();
             return n;
         }
+        checkAlive(host);
         const ended = channel.ended or state.g_chat_history_channels_closing.load(.acquire);
         host.mutex.unlock();
         if (ended) return null;
         if (!wait) return 0;
         w.Sleep(5);
+    }
+}
+
+pub fn readWithin(channel: *Channel, bytes: []u8, timeout_ms: u32) ?usize {
+    const host = channel.host;
+    const deadline = w.GetTickCount64() + timeout_ms;
+    while (true) {
+        const n = read(channel, bytes, false) orelse return null;
+        if (n > 0) return n;
+        const now = w.GetTickCount64();
+        if (now >= deadline) return null;
+        lock(host);
+        const progress = host.progress;
+        host.mutex.unlock();
+        if (progress == null) return null;
+        _ = w.WaitForSingleObject(progress, @intCast(@min(deadline - now, 50)));
     }
 }
 
@@ -425,13 +486,31 @@ pub fn shutdown() void {
     }
 }
 
+pub fn kick(index: u8) void {
+    if (open(index, false)) |channel| close(channel);
+}
+
+pub fn waitReady(index: u8, timeout_ms: u32) bool {
+    if (index >= hosts.len) return false;
+    const host = &hosts[index];
+    lock(host);
+    const already = host.running;
+    const ready = host.ready;
+    host.mutex.unlock();
+    if (already) return true;
+    if (ready == null or w.WaitForSingleObject(ready, timeout_ms) != 0) return false;
+    lock(host);
+    const running = host.running;
+    host.mutex.unlock();
+    return running;
+}
+
 pub fn respawn(index: u8) void {
     if (index >= hosts.len or state.g_chat_history_channels_closing.load(.acquire)) return;
     const host = &hosts[index];
     lock(host);
     defer host.mutex.unlock();
-    if ((host.running or host.starting) and host.process != null) _ = w.TerminateProcess(host.process, 0);
-    host.starting = false;
+    if (host.running) abandon(host);
 }
 
 fn rejectTerminal(channel: *Channel) bool {
@@ -448,6 +527,7 @@ fn dispatch(host: *Host, line: []const u8) bool {
     defer host.mutex.unlock();
     for (host.channels.items) |channel| {
         if (channel.id != parsed.value.channel or channel.ended) continue;
+        channel.ask_at = 0;
         if (parsed.value.closed) {
             channel.ended = true;
             notify(channel);
@@ -471,51 +551,110 @@ fn dispatch(host: *Host, line: []const u8) bool {
         }
         channel.bytes.appendSlice(a, bytes) catch return false;
         if (!channel.terminal) channel.bytes.append(a, '\n') catch return false;
+        if (host.progress != null) _ = w.SetEvent(host.progress);
         notify(channel);
         return true;
     }
     return true;
 }
 
-fn receive(host: *Host) void {
+fn answersRequests(channel: *const Channel) bool {
+    return !channel.watch and !channel.terminal;
+}
+
+fn wedged(host: *Host, now: u64) bool {
+    if (host.process) |process| {
+        if (w.WaitForSingleObject(process, 0) == 0) return true;
+    }
+    for (host.channels.items) |channel| {
+        if (channel.ended or channel.ask_at == 0 or !answersRequests(channel)) continue;
+        if (now < channel.ask_at + STALL_MS) continue;
+        if (now < host.last_rx + STALL_MS) continue;
+        return true;
+    }
+    return false;
+}
+
+fn abandon(host: *Host) void {
+    @import("diagnostics.zig").debugLog("[chat-transport] multiplexer wedged, restarting");
+    host.generation +%= 1;
+    host.running = false;
+    if (host.process) |process| _ = w.TerminateProcess(process, 0);
+    host.process = null;
+    host.input = null;
+    host.output = null;
+    for (host.channels.items) |channel| {
+        channel.ended = true;
+        channel.pending_bytes = 0;
+        channel.pending_packets = 0;
+        notify(channel);
+    }
+    for (host.outgoing.items) |item| a.free(item.bytes);
+    host.outgoing.clearAndFree(a);
+    host.outgoing_bytes = 0;
+    _ = w.SetEvent(host.wake);
+    host.retry_at = w.GetTickCount64() + 250;
+}
+
+fn checkAlive(host: *Host) void {
+    if (!host.running) return;
+    const now = w.GetTickCount64();
+    if (host.checked != 0 and now < host.checked + STALL_CHECK_MS) return;
+    host.checked = now;
+    if (wedged(host, now)) abandon(host);
+}
+
+fn receive(b: Boot) void {
+    const host = b.host;
+    const generation = b.generation;
+    const process = b.process;
+    const input = b.input;
+    const output = b.output;
     var writer: ?std.Thread = null;
     defer {
         lock(host);
-        host.running = false;
-        host.starting = false;
-        host.stopping = true;
-        _ = w.SetEvent(host.wake);
-        _ = w.TerminateProcess(host.process, 0);
-        for (host.channels.items) |channel| {
-            channel.ended = true;
-            channel.pending_bytes = 0;
-            channel.pending_packets = 0;
-            notify(channel);
+        if (host.generation == generation) {
+            host.running = false;
+            host.starting = false;
+            host.stopping = true;
+            _ = w.SetEvent(host.wake);
+            _ = w.TerminateProcess(process, 0);
+            for (host.channels.items) |channel| {
+                channel.ended = true;
+                channel.pending_bytes = 0;
+                channel.pending_packets = 0;
+                notify(channel);
+            }
+            for (host.outgoing.items) |item| a.free(item.bytes);
+            host.outgoing.clearAndFree(a);
+            host.outgoing_bytes = 0;
         }
-        for (host.outgoing.items) |item| a.free(item.bytes);
-        host.outgoing.clearAndFree(a);
-        host.outgoing_bytes = 0;
         host.mutex.unlock();
         if (writer) |thread| thread.join();
         lock(host);
-        _ = w.CloseHandle(host.process);
-        _ = w.CloseHandle(host.input);
-        _ = w.CloseHandle(host.output);
-        host.process = null;
-        host.input = null;
-        host.output = null;
-        host.stopping = false;
-        host.retry_at = w.GetTickCount64() + 250;
+        _ = w.CloseHandle(process);
+        _ = w.CloseHandle(input);
+        _ = w.CloseHandle(output);
+        if (host.generation == generation) {
+            host.process = null;
+            host.input = null;
+            host.output = null;
+            host.stopping = false;
+            host.retry_at = w.GetTickCount64() + 250;
+        }
         host.mutex.unlock();
     }
     idle_budget.bump(.thread_spawn);
-    writer = std.Thread.spawn(.{}, transmit, .{host}) catch return;
+    writer = std.Thread.spawn(.{}, transmit, .{ host, generation, input, process }) catch return;
     var frame: std.ArrayList(u8) = .empty;
     defer frame.deinit(a);
     var chunk: [65536]u8 = undefined;
     while (!state.g_chat_history_channels_closing.load(.acquire)) {
         var n: u32 = 0;
-        if (w.ReadFile(host.output, &chunk, chunk.len, &n, null) == 0 or n == 0) return;
+        if (w.ReadFile(output, &chunk, chunk.len, &n, null) == 0 or n == 0) return;
+        lock(host);
+        if (host.generation == generation) host.last_rx = w.GetTickCount64();
+        host.mutex.unlock();
         frame.appendSlice(a, chunk[0..n]) catch return;
         while (std.mem.indexOfScalar(u8, frame.items, '\n')) |end| {
             if (!dispatch(host, frame.items[0..end])) return;
@@ -524,4 +663,21 @@ fn receive(host: *Host) void {
         }
         if (frame.items.len > 6 * MAX_BUFFER + 1024) return;
     }
+}
+
+test "MUBO-533 a silent multiplexer is dropped while an idle watcher is left alone" {
+    var host = Host{};
+    defer host.channels.deinit(a);
+    host.running = true;
+    host.last_rx = 100;
+    var slots: [2]Channel = undefined;
+    slots[0] = .{ .host = &host, .id = 1, .watch = true, .ask_at = 101 };
+    slots[1] = .{ .host = &host, .id = 2, .watch = false, .ask_at = 101 };
+    try host.channels.append(a, &slots[0]);
+    try std.testing.expect(!wedged(&host, 101 + STALL_MS));
+    try host.channels.append(a, &slots[1]);
+    try std.testing.expect(!wedged(&host, 100 + STALL_MS));
+    try std.testing.expect(wedged(&host, 101 + STALL_MS));
+    host.last_rx = 102;
+    try std.testing.expect(!wedged(&host, 101 + STALL_MS));
 }

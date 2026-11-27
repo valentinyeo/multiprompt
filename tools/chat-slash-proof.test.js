@@ -32,7 +32,7 @@ with tempfile.TemporaryDirectory() as folder:
         assert reply['status'] == 'ok', reply
         assert json.loads((root / 'slash-mode.json').read_text())['mode'] == mode
     controls = [row['request'] for file, row in records if file == 'slash-control.jsonl']
-    assert controls == [dict(subtype='set_permission_mode', mode=mode) for mode in ('plan', 'manual', 'acceptEdits')], controls
+    assert controls == [dict(subtype='set_permission_mode', mode=mode) for mode in ('plan', 'default', 'acceptEdits')], controls
     reply = reader.host_reply(dict(op='set_permission_mode', provider='claude', sid=sid, mode='unsupported'))
     assert reply['status'] == 'refused', reply
     assert json.loads((root / 'slash-mode.json').read_text())['mode'] == 'acceptEdits'
@@ -51,13 +51,13 @@ test('live slash screenshot journey drives every requested command and checks in
   for (const command of ['/plan', '/permissions', '/model', '/resume', '/rewind']) assert.ok(text.includes(`'${command}'`), command);
   for (const receipt of ['slash-control.jsonl', 'slash-mode.json', 'slash-replies.jsonl']) assert.ok(text.includes(receipt), receipt);
   assert.match(text, /controls\.Count -ne 3/);
-  assert.match(text, /plan,manual,acceptEdits/);
+  assert.match(text, /plan,default,acceptEdits/);
   assert.match(text, /ordinarySends = 0/);
   assert.match(text, /Snapshot 'slash-plan-picker'/);
   assert.match(text, /Snapshot 'slash-permissions-picker'/);
   assert.ok(fs.readFileSync('.claude/skills/verify-multiprompt/control.ps1', 'utf8').includes("'chat-slash.ps1'"));
   const workflow = fs.readFileSync('.github/workflows/verify.yml', 'utf8');
-  assert.match(workflow, /Build the Windows app once for this push[^]*?run: zig build -Drelease=false -Dcpu=x86_64_v3/);
+  assert.match(workflow, /Build the Windows app once for this push[^]*?run: zig build -Drelease=false [^\n]*-Dcpu=x86_64_v3/);
   assert.ok(workflow.includes('version: ${{ steps.identity.outputs.version }}'));
   assert.ok(workflow.includes("$version = '${{ needs.build-app.outputs.version }}'"));
 });

@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const DEFAULT_URL = 'https://account.multiprompt.dev';
+export const PROVIDERS = ['claude', 'codex', 'pi', 'antigravity', 'hax'];
 const USAGE = `usage: mp-layout <command> [options]
 
 commands:
@@ -14,10 +15,10 @@ commands:
   create-section <name>                            add a workspace
   move --to <workspace> [--create] <session>...    move sessions into a workspace in one change
   move --to <workspace> --match <glob> [--host N]  move every session whose name matches
-  spawn --name NAME --folder DIR --workspace WORKSPACE [--host N] [--group GROUP] [--mode visible|headless] [--provider claude|hax] [--task TEXT]  create or reveal a live chat
+  spawn --name NAME --folder DIR --workspace WORKSPACE [--host N] [--group GROUP] [--mode visible|headless] [--provider ${PROVIDERS.join('|')}] [--task TEXT]  create or reveal a live chat
   open <session> [--workspace <name>] [--host N] [--title <text>|--name <text>] [--group <group>] [--star] [--move] [--no-tmux]
   open --kind shell --tmux <session> --name <title> --workspace <name> [--host N] [--group <group>] [--star] [--move] [--no-tmux]
-  open --kind chat --name NAME --folder DIR --workspace WORKSPACE [--host N] [--group GROUP] [--mode visible|headless] [--provider claude|hax] [--task TEXT]
+  open --kind chat --name NAME --folder DIR --workspace WORKSPACE [--host N] [--group GROUP] [--mode visible|headless] [--provider ${PROVIDERS.join('|')}] [--task TEXT]
 
 every write names its server: --host wins, then the host recorded when the chat was created,
 then this machine's slot, which is MULTIPROMPT_HOST or "multiprompt_slot" on this machine's
@@ -376,7 +377,7 @@ async function spawnSession(ctx, flags) {
   const mode = flags.mode ?? 'visible';
   if (!['visible', 'headless'].includes(mode)) throw new Failure('mode must be visible or headless');
   const provider = flags.provider ?? 'claude';
-  if (!['claude', 'hax'].includes(provider)) throw new Failure('provider must be claude or hax');
+  if (!PROVIDERS.includes(provider)) throw new Failure('provider must be one of: ' + PROVIDERS.join(', '));
   if (!name || name.length > 64 || /[\p{Cc}\p{Cs}]/u.test(name)) throw new Failure('invalid session name');
   if (!flags.workspace.trim() || Buffer.byteLength(flags.workspace, 'utf8') > 31 || /[\p{Cc}\p{Cs}]/u.test(flags.workspace)) throw new Failure('invalid workspace');
   if (flags.task !== undefined && (!flags.task.trim() || flags.task.includes('\0') || Buffer.byteLength(flags.task, 'utf8') > 65536)) throw new Failure('invalid task');
@@ -456,7 +457,7 @@ async function spawnSession(ctx, flags) {
       try { return result.stdout.trim().split('\n').filter(Boolean).map(line => JSON.parse(line)); } catch { throw new Failure('invalid host response'); }
     };
     if (!config || config.enabled !== true) {
-      const [enabled] = runtime(['host', 'enable', provider, sid, '--tmux', session, '--cwd', folder, ...(provider === 'claude' ? ['--permission-mode', 'bypassPermissions'] : [])]);
+      const [enabled] = runtime(['host', 'enable', provider, sid, '--tmux', session, '--cwd', folder, ...(['claude', 'codex', 'pi', 'antigravity'].includes(provider) ? ['--permission-mode', 'bypassPermissions'] : [])]);
       if (enabled?.status !== 'enabled') throw new Failure('host enable failed');
     }
     const result = mode === 'headless' ? { changed: false, revision: current.data.revision } : await edit(ctx, layout => {

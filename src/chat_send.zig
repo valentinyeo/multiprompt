@@ -418,10 +418,28 @@ pub fn chatModePickerAvailable() bool {
     return chat_mode_picker_key.shell_id != 0;
 }
 
-pub fn chatModeSelect(mode: @import("chat_slash.zig").PermissionMode) bool {
+pub fn chatModeSelectable() bool {
+    return chatModePickerAvailable() or @import("chat_session.zig").chatSettingsEligible();
+}
+
+fn chatModePickerTargetsActiveShell() bool {
     const key = chat_mode_picker_key;
     const index = @import("inbox.zig").findShellById(key.shell_id) orelse return false;
-    if (key.sid[0] == 0 or !std.meta.eql(key, chatFileIdentityForShell(index))) return false;
+    return key.sid[0] != 0 and std.meta.eql(key, chatFileIdentityForShell(index));
+}
+
+fn chatModeSendLive(mode: @import("chat_slash.zig").PermissionMode) bool {
+    if (app_state.active_shell >= app_state.shell_count or !@import("chat_session.zig").chatSettingsEligible()) return false;
+    const key = chatFileIdentityForShell(app_state.active_shell);
+    const identity = key.checked() orelse return false;
+    const live = @import("chat_live.zig");
+    const line = live.modeLine(std.heap.page_allocator, live.SETTING_REQUEST_ID, key.provider(), std.mem.sliceTo(&key.sid, 0), @tagName(mode)) catch return false;
+    return chatLiveReply(.{ .identity = identity, .bytes = line });
+}
+
+pub fn chatModeSelect(mode: @import("chat_slash.zig").PermissionMode) bool {
+    const key = chat_mode_picker_key;
+    if (!chatModePickerTargetsActiveShell()) return chatModeSendLive(mode);
     if (chat_mode_busy.cmpxchgStrong(false, true, .acq_rel, .acquire) != null) return false;
     const job = std.heap.page_allocator.create(ChatModeJob) catch {
         chat_mode_busy.store(false, .release);
@@ -482,6 +500,7 @@ pub fn chatModeFinish(lp: @import("win32.zig").LPARAM) void {
             .acceptEdits => "Accept edits on",
             .plan => "Plan on",
             .bypassPermissions => "Bypass on",
+            .auto => "Auto on",
         };
         showHeaderNoticeAscii(text, 3000, false);
     }
@@ -752,7 +771,7 @@ pub fn sendChatPrompt() void {
         const live = !@import("chat_view.zig").canToggle(shell.tmux_session[0..shell.tmux_session_len]);
         const selected_skill = app_state.g_chat_ac_skill_shell_id == shell.shell_id and app_state.g_chat_ac_skill_command_len > 0 and std.mem.startsWith(u16, text, app_state.g_chat_ac_skill_command[0..app_state.g_chat_ac_skill_command_len]);
         const interactive = app_state.g_chat_ac_dialog_shell_id == shell.shell_id and app_state.g_chat_ac_dialog_len > 0 and std.mem.startsWith(u16, text, app_state.g_chat_ac_dialog_command[0..app_state.g_chat_ac_dialog_len]);
-        const route = @import("chat_slash.zig").decide(live, text, selected_skill, interactive);
+        const route = @import("chat_slash.zig").decideForAgent(live, shell.ai_agent, text, selected_skill, interactive);
         switch (route) {
             .plan, .permissions => {
                 chatModeOpenPicker(route == .plan);
@@ -761,6 +780,9 @@ pub fn sendChatPrompt() void {
             .model => {
                 if (shell.ai_agent == 3) {
                     chatPiModelPicker();
+                } else if (shell.ai_agent == 8) {
+                    clearChatModelCommand();
+                    @import("plus_menu.zig").open();
                 } else {
                     showHeaderNoticeAscii("Model picker is coming soon", 4000, false);
                 }
@@ -2572,6 +2594,19 @@ pub fn chatEchoRemove(id: u64) void {
     chatOutboxChanged();
 }
 
+pub fn chatEchoDropLocal(id: u64) void {
+    const ei = chatOutboxIndexById(id) orelse return;
+    const entry = app_state.g_chat_outbox.orderedRemove(ei);
+    if (!saveChatOutbox()) {
+        app_state.g_chat_outbox.insertAssumeCapacity(ei, entry);
+        showHeaderNoticeAscii("Could not save message removal; try again", 3500, true);
+        return;
+    }
+    if (entry.text.len > 0) std.heap.page_allocator.free(entry.text);
+    if (app_state.g_chat_verify_echo_id == id) chatVerifyClear();
+    chatOutboxChanged();
+}
+
 pub fn chatEchoRetryAllForActive() void {
     if (app_state.active_shell >= app_state.shell_count) return;
     var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
@@ -3457,18 +3492,11 @@ fn sshProbeThread(job: *SshProbeJob) void {
         if (job.abandoned.load(.acquire)) return;
         if (checked[item.host]) continue;
         checked[item.host] = true;
-        var wide: [2048]u16 = undefined;
-        var pos: usize = 0;
-        if (!@import("console.zig").appendSshExe(&wide, &pos)) continue;
-        if (!@import("console.zig").appendWideAscii(&wide, &pos, "-T -o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=5 -o ServerAliveCountMax=2 ")) continue;
-        if (!@import("console.zig").appendWideAscii(&wide, &pos, @import("console.zig").tmuxSshTarget(item.host))) continue;
-        if (!@import("console.zig").appendWideAscii(&wide, &pos, " \"tmux list-clients -F '#{session_name}' 2>/dev/null; tmux list-sessions -F '@@I #{session_name}|#{start_time}:#{pid}:#{session_id}' 2>/dev/null; listing=$(tmux list-sessions -F '@@S #{session_name}' 2>&1); if [ $? -eq 0 ]; then printf '%s\\n' \\\"$listing\\\"; printf '@@LS_OK@@\\n'; else case $listing in *'no server running'*|*'error connecting to'*'No such file or directory'*) printf '@@LS_OK@@\\n';; *) printf '%s\\n' \\\"$listing\\\" >&2;; esac; fi; printf '@@MP_LIVE@@\\n'\"")) continue;
-        const a = std.heap.page_allocator;
-        const cmd = std.unicode.utf16LeToUtf8Alloc(a, wide[0..pos]) catch continue;
-        defer a.free(cmd);
+        const command = "tmux list-clients -F '#{session_name}' 2>/dev/null; tmux list-sessions -F '@@I #{session_name}|#{start_time}:#{pid}:#{session_id}' 2>/dev/null; listing=$(tmux list-sessions -F '@@S #{session_name}' 2>&1); if [ $? -eq 0 ]; then printf '%s\\n' \"$listing\"; printf '@@LS_OK@@\\n'; else case $listing in *'no server running'*|*'error connecting to'*'No such file or directory'*) printf '@@LS_OK@@\\n';; *) printf '%s\\n' \"$listing\" >&2;; esac; fi; printf '@@MP_LIVE@@\\n@@MP_PROBE_END@@\\n'";
         var output: [131072]u8 = undefined;
         const started = GetTickCount64();
-        const result = @import("vps.zig").sshOneShotCaptureInput(cmd, &output, null, 10_000);
+        const length = @import("vps.zig").captureSharedCommand(item.host, command, &output, "@@MP_PROBE_END@@");
+        const result = .{ .len = length orelse 0, .success = length != null, .exit_code = @as(u32, if (length != null) 0 else 1) };
         const probe = &job.results[item.host];
         probe.exit_code = result.exit_code;
         probe.ms = GetTickCount64() -| started;
@@ -4800,12 +4828,18 @@ pub fn chatSettingNotice(setting: @import("chat_live.zig").Setting) void {
             .terra => "Model: Terra",
             .luna => "Model: Luna",
             .astra => "Model: Astra",
+            .neon => "Model: Neon",
+            .carbon => "Model: Carbon",
+            .argon => "Model: Argon",
+            .hydrogen => "Model: Hydrogen",
+            .flash => "Model: Flash",
             .unknown => return,
         },
         .effort => |effort| switch (effort) {
             .low => "Effort: Low",
             .medium => "Effort: Medium",
             .high => "Effort: High",
+            .xhigh => "Effort: XHigh",
             .unknown => return,
         },
     };

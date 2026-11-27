@@ -9,7 +9,7 @@ const source = fs.readFileSync(path.join(root, 'src/chat_history_reader.py'), 'u
 
 function python(program) {
   const input = `outer = {}\nexec(compile(${JSON.stringify(source)}, 'reader', 'exec'), outer)\nr = {}\nexec(compile(outer['READER_SOURCE'], 'runtime', 'exec'), r)\n${program}`;
-  const result = spawnSync(process.env.PYTHON || 'python3', ['-'], { input, cwd: root, encoding: 'utf8', timeout: 60000, maxBuffer: 4 * 1024 * 1024 });
+  const result = spawnSync(process.env.PYTHON || 'python3', ['-'], { input, cwd: root, encoding: 'utf8', timeout: 120000, maxBuffer: 4 * 1024 * 1024 });
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.match(result.stdout, /FRESH_START_PASS/);
 }

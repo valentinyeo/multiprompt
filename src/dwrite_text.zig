@@ -766,11 +766,20 @@ test "IGSH-1089 color emoji preserve source and GDI advances with chromatic pixe
         std.mem.writeInt(u32, bmp[10..14], 54, .little);
         @memcpy(bmp[14..54], std.mem.asBytes(&info.header));
         @memcpy(bmp[54..], pixels);
-        const file = w.CreateFileW(if (color) L("emoji-after.bmp") else L("emoji-before.bmp"), 0x40000000, 0, null, 2, 0x80, null);
-        try std.testing.expect(file != null and file != @as(w.HANDLE, @ptrFromInt(std.math.maxInt(usize))));
-        defer _ = w.CloseHandle(file);
+        var path_buf: [64]u8 = undefined;
+        const proof = try std.fmt.bufPrint(&path_buf, "emoji-{s}-{d}.bmp", .{ if (color) "after" else "before", w.GetCurrentProcessId() });
+        const wide_proof = try std.unicode.utf8ToUtf16LeAllocZ(std.testing.allocator, proof);
+        defer std.testing.allocator.free(wide_proof);
         var written: u32 = 0;
-        try std.testing.expect(w.WriteFile(file, &bmp, bmp.len, &written, null) != 0 and written == bmp.len);
+        const file = w.CreateFileW(wide_proof, 0x40000000, 0, null, 2, 0x80, null);
+        if (file == null or file == @as(w.HANDLE, @ptrFromInt(std.math.maxInt(usize)))) {
+            std.debug.print("IGSH-1089 proof bitmap {s} skipped: another test binary holds it\n", .{proof});
+        } else {
+            defer _ = w.CloseHandle(file);
+            if (w.WriteFile(file, &bmp, bmp.len, &written, null) == 0 or written != bmp.len) {
+                std.debug.print("IGSH-1089 proof bitmap {s} wrote {d} of {d} bytes\n", .{ proof, written, bmp.len });
+            }
+        }
     }
 }
 

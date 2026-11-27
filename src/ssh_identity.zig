@@ -221,6 +221,34 @@ fn loadLocked() void {
     table = servers.decode(bytes);
 }
 
+fn renderedConfigChecks(a: std.mem.Allocator, exe: []const u8, next: []const u8, snapshot: *const servers.Table) bool {
+    const probe = std.fmt.allocPrint(a, "\"{s}\" -F \"{s}\" -G {s}", .{ exe, next, aliases[0] }) catch return false;
+    const checked = run(a, probe, 5000) catch Output{ .ok = false, .text = "" };
+    if (!checked.ok) return false;
+    return sameAddresses(a, exe, next, snapshot);
+}
+
+fn installConfig(a: std.mem.Allocator, exe: []const u8, config: []const u8, rendered: []const u8, snapshot: *const servers.Table) bool {
+    const next = std.fmt.allocPrint(a, "{s}.next", .{config}) catch return false;
+    defer a.free(next);
+    if (!files.writeFileAtomicSync(next, rendered)) return false;
+    var next_w_buf: [520]u16 = undefined;
+    var config_w_buf: [520]u16 = undefined;
+    const next_w = files.win32WidePath(&next_w_buf, next) orelse return false;
+    const config_w = files.win32WidePath(&config_w_buf, config) orelse return false;
+    if (!renderedConfigChecks(a, exe, next, snapshot)) {
+        debugLog("ssh-key: new config did not check out, keeping the working one");
+        _ = w.DeleteFileW(next_w.ptr);
+        return false;
+    }
+    if (w.MoveFileExW(next_w.ptr, config_w.ptr, 1 | 8) == 0) {
+        debugLog("ssh-key: new config could not replace the working one");
+        _ = w.DeleteFileW(next_w.ptr);
+        return false;
+    }
+    return true;
+}
+
 fn publish(a: std.mem.Allocator, exe: []const u8) void {
     acquire();
     const snapshot = table;
@@ -235,11 +263,8 @@ fn publish(a: std.mem.Allocator, exe: []const u8) void {
     const key = keyFile(&key_buf) orelse return;
     const system_config = envPath(&system_buf, "PROGRAMDATA", "\\ssh\\ssh_config") orelse return;
     const config = configFile(&config_buf) orelse return;
-    const next = std.fmt.allocPrint(a, "{s}.next", .{config}) catch return;
     var config_w_buf: [520]u16 = undefined;
-    var next_w_buf: [520]u16 = undefined;
     const config_w = files.win32WidePath(&config_w_buf, config) orelse return;
-    const next_w = files.win32WidePath(&next_w_buf, next) orelse return;
     var any_forced = false;
     for (snapshot) |slot| any_forced = any_forced or servers.forced(slot);
     if (!any_forced) {
@@ -253,16 +278,7 @@ fn publish(a: std.mem.Allocator, exe: []const u8) void {
         _ = w.DeleteFileW(config_w.ptr);
         return;
     };
-    if (!files.writeFileAtomicSync(next, rendered)) return;
-    const probe = std.fmt.allocPrint(a, "\"{s}\" -F \"{s}\" -G {s}", .{ exe, next, aliases[0] }) catch return;
-    const checked = run(a, probe, 5000) catch Output{ .ok = false, .text = "" };
-    if (!checked.ok or !sameAddresses(a, exe, next, &snapshot) or w.MoveFileExW(next_w.ptr, config_w.ptr, 1 | 8) == 0) {
-        debugLog("ssh-key: config check failed, using default ssh settings");
-        console.setSshConfig(null);
-        _ = w.DeleteFileW(config_w.ptr);
-        _ = w.DeleteFileW(next_w.ptr);
-        return;
-    }
+    if (!installConfig(a, exe, config, rendered, &snapshot)) return;
     console.setSshConfig(config);
 }
 
@@ -544,4 +560,28 @@ pub fn addServer(name: []const u8, address: []const u8, user: []const u8, port: 
     table[free] = slot;
     lock.unlock();
     return launch(.{ .add = free });
+}
+
+test "a rendered config that does not check out leaves the working one in place" {
+    const io = std.testing.io;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const base = try tmp.dir.realPathFileAlloc(io, ".", a);
+    const config = try std.fmt.allocPrint(a, "{s}/config", .{base});
+    const working = "Host remote-1\r\n  HostName 127.0.0.1\r\n  User mpverify\r\n  Port 2222\r\n";
+    try tmp.dir.writeFile(io, .{ .sub_path = "config", .data = working });
+    var fixture: servers.Table = @splat(.{});
+    fixture[0].status = .connected;
+    fixture[0].hostname.set("127.0.0.1");
+    fixture[0].user.set("mpverify");
+    fixture[0].port = 2222;
+    const rendered = try servers.renderConfig(a, "C:/keys/multibot_ed25519", "~/.ssh/config", "C:/ProgramData/ssh/ssh_config", &aliases, &fixture);
+    try std.testing.expect(!installConfig(a, "C:\\no-such-ssh.exe", config, rendered, &fixture));
+    try std.testing.expectEqualStrings(working, try tmp.dir.readFileAlloc(io, "config", a, .limited(4096)));
+    try std.testing.expectError(error.FileNotFound, tmp.dir.access(io, "config.next", .{}));
+    try std.testing.expect(installConfig(a, "ssh", config, rendered, &fixture));
+    try std.testing.expectEqualStrings(rendered, try tmp.dir.readFileAlloc(io, "config", a, .limited(4096)));
 }

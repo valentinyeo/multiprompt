@@ -1,3 +1,4 @@
+import hashlib
 import importlib.machinery
 import importlib.util
 import json
@@ -116,12 +117,12 @@ class MpSendTest(unittest.TestCase):
         self.assertEqual(chats[tmux]["state"], "stopped")
         self.assertEqual(chats[tmux]["name"], "Paused Lead")
 
-    def hosted_fixture(self, tmux, sid, name, pid, physical=()):
+    def hosted_fixture(self, tmux, sid, name, pid, physical=(), provider="claude"):
         host = self.home / ".local/state/multiprompt/agent-host"
         host.mkdir(parents=True, exist_ok=True)
         key = "k" + str(len(list(host.glob("*.config.json"))))
         (host / (key + ".config.json")).write_text(json.dumps(dict(cwd="/work/x", enabled=True, tmux=tmux)))
-        (host / (key + ".state.json")).write_text(json.dumps(dict(sid=sid, pid=pid, provider="claude", started=1.0)))
+        (host / (key + ".state.json")).write_text(json.dumps(dict(sid=sid, pid=pid, provider=provider, started=1.0)))
         names = self.home / ".local/state/multiprompt/chat-names.json"
         known = json.loads(names.read_text()) if names.is_file() else {}
         known[tmux] = dict(name=name, at=1.0)
@@ -162,6 +163,41 @@ class MpSendTest(unittest.TestCase):
         with patch.dict(os.environ, env):
             chats = {row["tmux"]: row for row in module.live_chats()}
         self.assertNotIn("live-gone", chats)
+
+    def test_MUBO_583_antigravity_is_a_supported_provider_like_the_reader(self):
+        module = load_mp_send()
+        reader = module.reader_module(str(READER))
+        self.assertIn("antigravity", module.PROVIDERS)
+        self.assertEqual(set(reader.HOST_PROVIDERS), set(module.PROVIDERS))
+
+    def test_MUBO_583_an_antigravity_chat_is_listed_and_the_send_form_accepts_it(self):
+        env = self.hosted_fixture("live-antigravity", SID, "Antigravity Lead", os.getpid(), provider="antigravity")
+        listed = self.run_send("list", "--json", **env)
+        self.assertEqual(listed.returncode, 0, listed.stderr)
+        chats = {row["tmux"]: row for row in json.loads(listed.stdout)}
+        self.assertEqual(chats["live-antigravity"]["provider"], "antigravity")
+        refused = self.run_send("antigravity", SID, "hello", "--tmux", "mp-test-antigravity")
+        self.assertEqual(refused.returncode, 2, refused.stderr)
+        self.assertIn("no live host or pane agent", refused.stderr)
+
+    def test_MUBO_583_read_returns_the_last_antigravity_answer(self):
+        env = self.hosted_fixture("live-antigravity", SID, "Antigravity Lead", os.getpid(), provider="antigravity")
+        host = self.home / ".local/state/multiprompt/agent-host"
+        key = hashlib.sha256(("antigravity:" + SID).encode()).hexdigest()[:32]
+        (host / (key + ".state.json")).write_text(json.dumps(dict(sid=SID, provider="antigravity", pid=os.getpid(),
+                                                                  display_history=True)))
+        rows = (dict(role="user", text="hello"), dict(role="assistant", text="first answer"),
+                dict(role="user", text="again"), dict(role="assistant", text="newest answer"))
+        (host / (key + ".history.jsonl")).write_text(
+            "\n".join(json.dumps(dict(type="multiprompt_history", row=row)) for row in rows), encoding="utf-8")
+        done = self.run_send("read", "Antigravity Lead", **env)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout.strip(), "newest answer")
+
+    def test_MUBO_583_an_unknown_provider_is_still_refused(self):
+        done = self.run_send("gemini", SID, "hello", "--tmux", "mp-test-gemini")
+        self.assertEqual(done.returncode, 2)
+        self.assertIn("invalid choice", done.stderr)
 
     def test_IGSH_1266_installed_runtime_reader_is_preferred(self):
         runtime = self.home / ".multiprompt-runtime"

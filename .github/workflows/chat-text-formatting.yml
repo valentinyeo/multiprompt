@@ -1,0 +1,59 @@
+name: Chat text formatting
+
+on:
+  pull_request:
+    paths:
+      - 'src/chat_inline_code.zig'
+      - 'src/chat_markdown.zig'
+      - 'src/link_detect.zig'
+      - 'tools/fixtures/inline-stubs.js'
+      - 'tools/chat-text-formatting.test.js'
+      - 'tools/chat-view-gaps.test.js'
+      - '.claude/skills/verify-multiprompt/features/chat-text-formatting.md'
+      - '.github/workflows/chat-text-formatting.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  formatting:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Install Zig 0.16.0
+        uses: ./.github/actions/setup-zig
+      - name: Check the inline code chip, labelled links and list markers
+        shell: bash
+        run: |
+          set +e
+          node --test --test-reporter=tap tools/chat-text-formatting.test.js > "$RUNNER_TEMP/formatting.log" 2>&1
+          echo "formatting=$?" >> "$GITHUB_ENV"
+      - name: Write the receipt
+        shell: bash
+        run: |
+          set +e
+          node tools/ci-receipt-summary.mjs "$RUNNER_TEMP/receipt" formatting "$RUNNER_TEMP/formatting.log" "$formatting" '^# (pass|fail) |^(ok|not ok) [0-9]+ - '
+          echo "receipt=$?" >> "$GITHUB_ENV"
+          true
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: chat-text-formatting
+          path: ${{ runner.temp }}/receipt/
+          if-no-files-found: error
+      - name: Fail when the formatting proof or the receipt failed
+        run: test "$formatting" = 0 && test "$receipt" = 0

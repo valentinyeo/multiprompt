@@ -1,7 +1,7 @@
 const std = @import("std");
 
 pub const Route = enum { send, plan, permissions, model, login, unavailable };
-pub const PermissionMode = enum { manual, acceptEdits, plan, bypassPermissions };
+pub const PermissionMode = enum { manual, acceptEdits, plan, bypassPermissions, auto };
 
 const unsupported = [_][]const u8{
     "add-dir", "artifact-capabilities", "artifact-diagramming", "artifacts", "autofix-pr",
@@ -36,6 +36,20 @@ pub fn decide(live: bool, text: []const u16, selected_skill: bool, interactive_h
     return if (live and result == .send and interactive_hint) .unavailable else result;
 }
 
+pub fn decideForAgent(live: bool, ai_agent: u8, text: []const u16, selected_skill: bool, interactive_hint: bool) Route {
+    if (ai_agent == 3) {
+        if (!live or selected_skill) return .send;
+        return switch (route(true, text)) {
+            .model => .model,
+            .login => .login,
+            else => .send,
+        };
+    }
+    if (ai_agent != 8) return decide(live, text, selected_skill, interactive_hint);
+    if (!live or selected_skill) return .send;
+    return if (route(true, text) == .model) .model else .send;
+}
+
 fn equals(wide: []const u16, ascii: []const u8) bool {
     if (wide.len != ascii.len) return false;
     for (wide, ascii) |a, b| if (a != b) return false;
@@ -64,6 +78,7 @@ test "mode replies require an explicit acknowledgement" {
 }
 
 test "live slash commands route without changing terminal or custom messages" {
+    @setEvalBranchQuota(10_000);
     const w = std.unicode.utf8ToUtf16LeStringLiteral;
     try std.testing.expectEqual(Route.plan, route(true, w("/plan ")));
     try std.testing.expectEqual(Route.permissions, route(true, w("/permissions")));
@@ -79,11 +94,44 @@ test "live slash commands route without changing terminal or custom messages" {
     try std.testing.expectEqual(Route.send, decide(true, w("/resume custom"), true, true));
     try std.testing.expectEqual(Route.unavailable, decide(true, w("/new-builtin"), false, true));
     try std.testing.expectEqual(Route.send, decide(false, w("/new-builtin"), false, true));
+    try std.testing.expectEqual(Route.send, decideForAgent(true, 8, w("/valentin-mode"), false, false));
+    try std.testing.expectEqual(Route.send, decideForAgent(true, 8, w("/poteto-mode"), false, false));
+    try std.testing.expectEqual(Route.send, decideForAgent(true, 8, w("/plan"), false, false));
+    try std.testing.expectEqual(Route.send, decideForAgent(true, 8, w("/plan outline the steps"), false, false));
+    try std.testing.expectEqual(Route.plan, decideForAgent(true, 1, w("/plan"), false, false));
+    try std.testing.expectEqual(Route.model, decideForAgent(true, 3, w("/model"), false, false));
+    try std.testing.expectEqual(Route.model, decideForAgent(true, 3, w("/model openai-codex/gpt-5.6-sol"), false, false));
+    try std.testing.expectEqual(Route.login, decideForAgent(true, 3, w("/login"), false, false));
+    try std.testing.expectEqual(Route.login, decideForAgent(true, 3, w("/login anthropic"), false, false));
+    try std.testing.expectEqual(Route.send, decideForAgent(false, 3, w("/model"), false, false));
+    try std.testing.expectEqual(Route.send, decideForAgent(false, 3, w("/login"), false, false));
+    try std.testing.expectEqual(Route.send, decideForAgent(true, 3, w("/valentin-mode"), false, false));
+    try std.testing.expectEqual(Route.send, decideForAgent(true, 3, w("/board-drain"), true, false));
+    try std.testing.expectEqual(Route.send, decideForAgent(true, 3, w("/plan"), false, false));
+    try std.testing.expectEqual(Route.send, decideForAgent(true, 3, w("/plan outline the steps"), false, false));
+    try std.testing.expectEqual(Route.send, decideForAgent(true, 3, w("/compact"), false, false));
+    try std.testing.expectEqual(Route.send, decideForAgent(true, 3, w("/reload"), false, false));
+}
+
+test "MUBO-586 antigravity model opens the picker while its skills still send" {
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    try std.testing.expectEqual(Route.model, decideForAgent(true, 8, w("/model"), false, false));
+    try std.testing.expectEqual(Route.model, decideForAgent(true, 8, w("  /model  "), false, false));
+    try std.testing.expectEqual(Route.model, decideForAgent(true, 8, w("/model"), false, true));
+    try std.testing.expectEqual(Route.send, decideForAgent(true, 8, w("/model"), true, false));
+    try std.testing.expectEqual(Route.send, decideForAgent(false, 8, w("/model"), false, false));
+    try std.testing.expectEqual(Route.send, decideForAgent(true, 8, w("/model-pro"), false, false));
+    try std.testing.expectEqual(Route.send, decideForAgent(true, 8, w("/valentin-mode"), false, false));
+    try std.testing.expectEqual(Route.send, decideForAgent(true, 8, w("/poteto-mode"), false, false));
+    try std.testing.expectEqual(Route.send, decideForAgent(true, 8, w("/rewind"), false, true));
+    try std.testing.expectEqual(Route.model, decideForAgent(true, 1, w("/model"), false, false));
+    try std.testing.expectEqual(Route.model, decideForAgent(true, 3, w("/model"), false, false));
+    try std.testing.expectEqual(Route.unavailable, decideForAgent(true, 1, w("/rewind"), false, false));
 }
 
 test "mode requests serialize identity and supported mode" {
     const a = std.testing.allocator;
-    for ([_]PermissionMode{ .manual, .acceptEdits, .plan, .bypassPermissions }) |mode| {
+    for ([_]PermissionMode{ .manual, .acceptEdits, .plan, .bypassPermissions, .auto }) |mode| {
         const request = try modeRequest(a, 42, "claude", "session\"id", mode);
         defer a.free(request);
         const parsed = try std.json.parseFromSlice(std.json.Value, a, request, .{});

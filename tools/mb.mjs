@@ -7,7 +7,7 @@ import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isAbsolute, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { run as layoutRun, resolveTabHost, needsLayoutHosts } from './mp-layout.mjs';
+import { run as layoutRun, resolveTabHost, needsLayoutHosts, PROVIDERS } from './mp-layout.mjs';
 
 const DEFAULT_URL = 'https://account.multiprompt.dev';
 const LAYOUT_FEATURES = 'groups,bot_appearance,bot_palette8,workspace_color,bot_photo';
@@ -15,7 +15,7 @@ const USAGE = `usage: mb <command> [options]
 
 commands:
   list [--json]
-  open --kind shell|chat --tmux <name> --workspace <name> [--group <group>] [--title <text>] [--host N] [--folder DIR] [--star] [--face N] [--color N] [--photo FILE]
+  open --kind shell|chat --tmux <name> --workspace <name> [--group <group>] [--title <text>] [--host N] [--folder DIR] [--provider claude|codex|pi|antigravity|hax] [--star] [--face N] [--color N] [--photo FILE]
   close <name> [--host N]
   archive <name> [--host N] [--json]
   unarchive <name> [--host N] [--json]
@@ -28,6 +28,10 @@ commands:
   star <name> on|off [--host N]
   mute <name> on|off [--host N]
   manual <name> on|off [--host N]
+  ai <name> claude|codex|pi|antigravity [--host N]
+  model <name> <model-or-provider/model> [--host N]
+  effort <name> low|medium|high|xhigh [--host N]
+  permission <name> default|auto|bypass|untrusted|workspace-write|read-only [--host N]
   settings <frequent|favorites|all|frequent_first> on|off
   pull [--json]
   workspace list
@@ -307,7 +311,7 @@ async function open(ctx, flags) {
     if (flags.group) args.push('--group', flags.group);
     if (flags.host !== undefined) args.push('--host', String(flags.host));
     if (flags.provider) args.push('--provider', flags.provider);
-    if (flags.model === 'claude' || flags.model === 'hax') args.push('--provider', flags.model);
+    else if (PROVIDERS.includes(flags.model)) args.push('--provider', flags.model);
     const code = await layoutRun(args, { env: ctx.env, fetch: ctx.fetch, out: ctx.out, err: line => ctx.err(line.replace(/^mp-layout: /, 'mb: ')), tmux: ctx.tmux, runtime: ctx.runtime, lock: ctx.lock, resolveFolder: ctx.resolveFolder });
     if (code !== 0) return code;
     if (flags.face !== undefined || flags.color !== undefined || flags.photo) return style(ctx, { ...flags, _: [name] });
@@ -1229,7 +1233,7 @@ async function applyRoster(ctx, file, dry) {
   if (result.changed) for (const runner of plan.opened) {
     if (runner.kind !== 'shell') continue;
     const host = runner.host;
-    owners.sessions[`${host}:${runner.name.toLowerCase()}`] = { owner: 'mb', name: runner.name, session: runner.name, host, kind: runner.kind, command: runner.command, model: runner.model, workspace: runner.workspace, provider: runner.model === 'claude' || runner.model === 'hax' ? runner.model : null, sid: null };
+    owners.sessions[`${host}:${runner.name.toLowerCase()}`] = { owner: 'mb', name: runner.name, session: runner.name, host, kind: runner.kind, command: runner.command, model: runner.model, workspace: runner.workspace, provider: PROVIDERS.includes(runner.model) ? runner.model : null, sid: null };
   }
   for (const runner of plan.updates) {
     const host = runner.host;
@@ -1331,6 +1335,17 @@ function mpSessionsScript(env) {
   return join(dirname(fileURLToPath(import.meta.url)), 'mp-sessions');
 }
 
+async function chatControl(ctx, command, flags) {
+  if (flags._.length !== 2) throw new Failure(command + ' needs a chat name and a value');
+  const args = [command, ...flags._];
+  if (flags.host !== undefined) args.push('--host', String(hostSlot(flags.host)));
+  const sessions = ctx.sessions || (argv => spawnSync('python3', [mpSessionsScript(ctx.env), ...argv], { encoding: 'utf8', env: ctx.env, timeout: 60000 }));
+  const result = sessions(args);
+  if (result.stdout?.trim()) ctx.out(result.stdout.trim());
+  if (result.stderr?.trim()) ctx.err(result.stderr.trim());
+  return result.status ?? 1;
+}
+
 async function health(ctx, flags) {
   if (flags._.length) throw new Failure('health takes no arguments');
   const args = ['health'];
@@ -1366,6 +1381,9 @@ export async function run(argv, overrides = {}) {
       const flags = parse(rest);
       await pinSession({ env, out, err }, flags, command === 'pin');
       return 0;
+    }
+    if (['ai', 'model', 'effort', 'permission'].includes(command)) {
+      return await chatControl({ env, out, err, sessions: overrides.sessions }, command, parse(rest));
     }
     if (command === 'health') {
       const flags = parse(rest);

@@ -62,6 +62,10 @@
     "selectChatReply: showHeaderNoticeAscii(\"This message is too large to quote\",3500,true)",
     "selectChatSkill: showHeaderNoticeAscii(\"This skill is too large for Chat View\",3500,true)"
   ],
+  "chat_queue_view.zig": [
+    "edit: showHeaderNoticeAscii(\"Editing a queued message\",2500,false)",
+    "sendNow: showHeaderNoticeAscii(\"Could not ask this chat to take the queued message now\",4000,true)"
+  ],
   "chat_render.zig": [
     "chatAttachFromClipboard: if(read_ok)chatAttachPaths(paths.items)elseshowHeaderNoticeAscii(\"Could not read those files\",3000,true)",
     "chatAttachFromClipboard: showHeaderNoticeAscii(\"Could not read the image on the clipboard\",3000,true)",
@@ -101,6 +105,7 @@
     "chatCancelFinish: else=>showHeaderNoticeAscii(\"Could not cancel the message; try again\",3500,true)",
     "chatEchoDiscardUnsentForActive: showHeaderNoticeAscii(\"No unsent messages for this tab\",3000,false)",
     "chatEchoDiscardUnsentForActive: showHeaderNoticeAscii(msg,3000,false)",
+    "chatEchoDropLocal: showHeaderNoticeAscii(\"Could not save message removal; try again\",3500,true)",
     "chatEchoPushQueuedForShell: if(!quiet)showHeaderNoticeAscii(\"Could not ask this chat's agent to take the queued message now\",4000,true)",
     "chatEchoPushQueuedForShell: showHeaderNoticeAscii(\"Asked Claude to take the queued message now\",2500,false)",
     "chatEchoPushQueuedForShell: showHeaderNoticeAscii(\"Could not reach this terminal; press Ctrl+X Ctrl+S in the terminal\",4000,true)",
@@ -157,9 +162,11 @@
     "sendChatPrompt: showHeaderNoticeAscii(\"Wait for chat settings to update\",3500,false)"
   ],
   "command_palette.zig": [
+    "finishHostLaunch: @import(\"console.zig\").showHeaderNoticeAscii(\"Could not start the new session\",5000,true)",
+    "launchRefused: @import(\"console.zig\").showHeaderNoticeAscii(\"Could not start chat: chat runtime unavailable.\",6000,true)",
+    "openWorkspaceTab: if(!started)@import(\"console.zig\").showHeaderNoticeAscii(\"Could not monitor chat startup\",5000,true)",
     "showMissingWorkspaceFolder: @import(\"console.zig\").showHeaderNoticeAscii(notice,8000,true)",
-    "spawnHostedChatSession: if(!started)@import(\"console.zig\").showHeaderNoticeAscii(\"Could not monitor chat startup\",5000,true)",
-    "spawnWorkspaceSessionAt: if(!started)@import(\"console.zig\").showHeaderNoticeAscii(\"Could not monitor chat startup\",5000,true)"
+    "spawnHostedChatNow: if(!started)@import(\"console.zig\").showHeaderNoticeAscii(\"Could not monitor chat startup\",5000,true)"
   ],
   "console.zig": [
     "notifyTabCapReached: showHeaderNoticeAscii(\"Tab limit reached (256) - close a tab\",4000,true)"
@@ -189,7 +196,6 @@
     "showPickRepoFailure: showHeaderNoticeAscii(\"Set workspace folder: could not save\",4000,true)",
     "wndProc: if(!@import(\"browser_pane.zig\").signInGoogleForShell(ti))showHeaderNoticeAscii(\"Sign in to Google needs a Chrome profile tab\",5000,true)",
     "wndProc: if(!@import(\"chat_send.zig\").chatModeSelect(mode))showHeaderNoticeAscii(\"Could not change permission mode; try again\",4000,true)",
-    "wndProc: if(!@import(\"chat_send.zig\").chatModeSelect(mode))showHeaderNoticeAscii(\"Could not change permission mode; try again\",4000,true)",
     "wndProc: if(!@import(\"chat_send.zig\").chatPiModelSelect(@intCast(model_idx)))showHeaderNoticeAscii(\"Could not switch the model yet\",4000,true)",
     "wndProc: if(!@import(\"clipboard.zig\").setUnicodeClipboardTextWithRetry(wide_id[0..len]))showHeaderNoticeAscii(\"Could not copy chat ID\",3000,true)",
     "wndProc: if(!@import(\"command_palette.zig\").startAdoptHost(ti))showHeaderNoticeAscii(\"Move chat: this session cannot move yet\",4000,true)",
@@ -199,7 +205,6 @@
     "wndProc: if(!capacityBlockNoticeActive())showHeaderNoticeAscii(\"Archived session restore failed\",4000,true)",
     "wndProc: if(!photo.reset(digest))showHeaderNoticeAscii(\"Could not reset image\",4000,true)",
     "wndProc: if(!pi_models.ready())showHeaderNoticeAscii(\"Asking Pi for its model list...\",4000,false)",
-    "wndProc: if(@import(\"chat_send.zig\").chatSetLiveSetting(setting))@import(\"chat_send.zig\").chatSettingNotice(setting)elseshowHeaderNoticeAscii(\"Could not change chat settings\",4000,true)",
     "wndProc: if(@import(\"chat_send.zig\").chatSetLiveSetting(setting))@import(\"chat_send.zig\").chatSettingNotice(setting)elseshowHeaderNoticeAscii(\"Could not change chat settings\",4000,true)",
     "wndProc: if(lp!=0)@import(\"chat_render.zig\").chatFileNotice(lp)elseshowHeaderNoticeAscii(chatAttachErrorText(wp),4000,true)",
     "wndProc: if(movingandpicked)showHeaderNoticeAscii(\"Workspace server updated; new tabs use that server\",3000,false)",
@@ -253,6 +258,10 @@
     "wndProc: showHeaderNoticeAscii(notice,2800,false)",
     "wndProc: showHeaderNoticeAscii(notice,if(queued==0)3000else5000,false)",
     "wndProc: showHeaderNoticeAscii(vsp_notice,1800,false)"
+  ],
+  "plus_menu.zig": [
+    "dispatch: if(!@import(\"chat_send.zig\").chatModeSelect(mode))@import(\"console.zig\").showHeaderNoticeAscii(\"Could not change permission mode; try again\",4000,true)",
+    "dispatch: if(@import(\"chat_send.zig\").chatSetLiveSetting(setting))@import(\"chat_send.zig\").chatSettingNotice(setting)else@import(\"console.zig\").showHeaderNoticeAscii(\"Could not change chat settings\",4000,true)"
   ],
   "reminders.zig": [
     "bringBackAllSessions: showHeaderNoticeAscii(\"Bring Back needs single-window mode\",4000,true)",

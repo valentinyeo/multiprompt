@@ -1,0 +1,58 @@
+{
+  "version": "0.28.1985",
+  "releases": [
+    {
+      "version": "0.28.1985",
+      "changes": [
+        "MUBO-243 Poteto tab points at its chat from before a clear"
+      ],
+      "tickets": [
+        "https://app.hypertask.ai/detail/project-13734/243"
+      ]
+    },
+    {
+      "version": "0.28.1984",
+      "changes": [
+        "IGSH-3050 Switch a chat to Antigravity and back"
+      ],
+      "tickets": [
+        "https://app.hypertask.ai/detail/project-2060/3050"
+      ]
+    },
+    {
+      "version": "0.28.1983",
+      "changes": [
+        "MUBO-565 Own-profile browser pane does not reconnect after restart"
+      ],
+      "tickets": [
+        "https://app.hypertask.ai/detail/project-13734/565"
+      ]
+    },
+    {
+      "version": "0.28.1982",
+      "changes": [
+        "MUBO-17 Multi Bot uses less processor and writes less log while a reply streams",
+        "MUBO-566 New chats from the command line show no tab"
+      ],
+      "tickets": [
+        "https://app.hypertask.ai/detail/project-13734/17",
+        "https://app.hypertask.ai/detail/project-13734/566"
+      ]
+    },
+    {
+      "version": "0.28.1961",
+      "changes": [
+        "MUBO-194 Chats can list and message other chats in their workspace",
+        "MUBO-291 Switching chats stops dictation",
+        "MUBO-292 Update card shows a time estimate",
+        "MUBO-57 Wishes from any chat reach the Multi Bot board"
+      ],
+      "tickets": [
+        "https://app.hypertask.ai/detail/project-13734/194",
+        "https://app.hypertask.ai/detail/project-13734/291",
+        "https://app.hypertask.ai/detail/project-13734/292",
+        "https://app.hypertask.ai/detail/project-13734/57"
+      ]
+    }
+  ]
+}

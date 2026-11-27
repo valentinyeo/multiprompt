@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       feature:
-        description: Feature map file stem in .claude/skills/verify-multiprompt/features, or all for the full matrix
+        description: Feature map file stem in .claude/skills/verify-multiprompt/features, including rooms, or all for the full matrix
         required: true
         default: appearance
         type: string
@@ -256,9 +256,10 @@ jobs:
           node - <<'NODE' >> "$GITHUB_OUTPUT"
           const { discoverFeatures, journeyMatrix } = require('./tools/verify-features.cjs');
           const { available, pr } = discoverFeatures();
-          const selected = process.env.FEATURES ? JSON.parse(process.env.FEATURES) : process.env.FEATURE && process.env.FEATURE !== 'all' ? [process.env.FEATURE] : process.env.EVENT === 'pull_request' && process.env.FEATURE !== 'all' ? pr : available;
+          const automatic = available.filter(feature => feature !== 'rooms' || process.env.EVENT === 'workflow_dispatch');
+          const selected = process.env.FEATURES ? JSON.parse(process.env.FEATURES) : process.env.FEATURE && process.env.FEATURE !== 'all' ? [process.env.FEATURE] : process.env.EVENT === 'pull_request' && process.env.FEATURE !== 'all' ? pr : automatic;
           if (!Array.isArray(selected) || !selected.length || selected.some(feature => !available.includes(feature)) || new Set(selected).size !== selected.length) throw new Error('Expected unique supported desktop journeys');
-          console.log(`builds=${JSON.stringify([...new Set(selected.map(feature => feature === 'chat-still' ? 'chat-still' : 'normal'))])}`);
+          console.log(`builds=${JSON.stringify([...new Set(selected.map(feature => feature === 'chat-still' ? 'chat-still' : feature === 'rooms' ? 'rooms' : 'normal'))])}`);
           console.log(`selected=${JSON.stringify(selected)}`);
           console.log(`matrix=${JSON.stringify(journeyMatrix(selected, process.env.APP_REVISION))}`);
           NODE
@@ -330,11 +331,11 @@ jobs:
         run: python ${{ inputs.app_revision && 'probe-source/' || '' }}tools/chat-still/instrument.py . zig-out/bin/chat-still-instrumentation.json
       - name: Build the Windows app once for this push
         if: inputs.tag == ''
-        run: zig build -Drelease=false -Dcpu=x86_64_v3 -Dtarget=x86_64-windows-gnu -Dversion="${{ env.VERIFY_VERSION }}" -Drevision="${{ env.VERIFY_REVISION }}"
+        run: zig build -Drelease=false ${{ matrix.profile == 'rooms' && '-Drooms-preview=true' || '' }} -Dcpu=x86_64_v3 -Dtarget=x86_64-windows-gnu -Dversion="${{ env.VERIFY_VERSION }}" -Drevision="${{ env.VERIFY_REVISION }}"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: inputs.tag == ''
         with:
-          name: verify-app${{ matrix.profile == 'chat-still' && '-chat-still' || '' }}${{ inputs.app_revision && '-compare' || '' }}
+          name: verify-app${{ matrix.profile == 'chat-still' && '-chat-still' || matrix.profile == 'rooms' && '-rooms' || '' }}${{ inputs.app_revision && '-compare' || '' }}
           path: zig-out/bin/
           retention-days: 1
           if-no-files-found: error
@@ -515,7 +516,7 @@ jobs:
         continue-on-error: true
         run: node tools/check-workspace-focus.mjs
       - name: Install runner-owned Linux server
-        if: env.FEATURE == 'server-chat'
+        if: env.FEATURE == 'server-chat' || env.FEATURE == 'rooms'
         uses: Vampire/setup-wsl@887f39deb6c0976365e546926fe66f41b77d65ff
         with:
           distribution: Ubuntu-24.04
@@ -525,6 +526,41 @@ jobs:
         uses: ./.github/actions/install-ffmpeg
         with:
           version: '7.1.1'
+      - name: Prepare Rooms screenshot reader and disposable account Worker
+        if: env.FEATURE == 'rooms'
+        timeout-minutes: 10
+        shell: pwsh
+        env:
+          TESSERACT_VERSION: '5.4.0.20240606'
+          TESSERACT_SHA256: 'c885fff6998e0608ba4bb8ab51436e1c6775c2bafc2559a19b423e18678b60c9'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $ProgressPreference = 'SilentlyContinue'
+          $pinned = $env:TESSERACT_VERSION
+          $ocr = 'C:\Program Files\Tesseract-OCR\tesseract.exe'
+          if (-not (Test-Path $ocr)) {
+            choco install tesseract --version=$pinned -y --no-progress --limit-output
+          }
+          if (-not (Test-Path $ocr)) {
+            Write-Host "The package feed did not install Tesseract $pinned; installing the pinned release installer"
+            $setup = Join-Path $env:RUNNER_TEMP "tesseract-$pinned-setup.exe"
+            Invoke-WebRequest -Uri "https://github.com/UB-Mannheim/tesseract/releases/download/v$pinned/tesseract-ocr-w64-setup-$pinned.exe" -OutFile $setup -UseBasicParsing
+            $actual = (Get-FileHash -Path $setup -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actual -ne $env:TESSERACT_SHA256) { throw "Tesseract installer hash $actual does not match the pinned $env:TESSERACT_SHA256" }
+            $install = Start-Process -FilePath $setup -ArgumentList '/S' -Wait -PassThru
+            if ($install.ExitCode -ne 0) { throw "Tesseract installer exited $($install.ExitCode)" }
+          }
+          . ./tools/probe-native-version.ps1
+          $probe = Invoke-NativeVersionProbe -FilePath $ocr -Arguments '--version' -Evidence $env:RUNNER_TEMP
+          if ($probe.ExitCode -ne 0) { throw "Tesseract from $ocr exited $($probe.ExitCode): $($probe.ErrorText)" }
+          if (-not $probe.Line) { throw "Tesseract from $ocr printed no version line: $($probe.ErrorText)" }
+          Write-Host "Tesseract ready: $($probe.Line)"
+          Set-Location service
+          npm ci --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw 'Account Worker dependencies failed' }
+          npx wrangler deploy --dry-run --outdir .build
+          if ($LASTEXITCODE -ne 0) { throw 'Account Worker bundle failed' }
       - name: Check browser recovery journey contract
         continue-on-error: true
         run: node tools/check-browser-pane-stuck.mjs
@@ -586,7 +622,7 @@ jobs:
           path: ${{ runner.temp }}/zig-x86_64-windows-0.16.0
           key: ${{ runner.os }}-zig-toolchain-0.16.0
       - name: Install Zig 0.16.0
-        if: env.RELEASE_TAG == '' || env.FEATURE == 'session-actions' || env.FEATURE == 'chat-delivery' || env.FEATURE == 'chat-fresh-start' || env.FEATURE == 'chat-startup-failure' || env.FEATURE == 'composer-buttons' || env.FEATURE == 'chat-working' || env.FEATURE == 'chat-view' || env.FEATURE == 'chat-messages-only' || env.FEATURE == 'chat-full-history' || env.FEATURE == 'chat-newest' || env.FEATURE == 'tmux-binding' || env.CHAT_SHAPE_PROOF == '1' || env.FEATURE == 'chat-options' || env.FEATURE == 'chat-slash' || env.FEATURE == 'permission-rows' || env.USAGE_PACE_PROOF == '1'
+        if: env.RELEASE_TAG == '' || env.FEATURE == 'session-actions' || env.FEATURE == 'chat-delivery' || env.FEATURE == 'chat-fresh-start' || env.FEATURE == 'chat-startup-failure' || env.FEATURE == 'composer-buttons' || env.FEATURE == 'chat-working' || env.FEATURE == 'chat-view' || env.FEATURE == 'chat-messages-only' || env.FEATURE == 'chat-full-history' || env.FEATURE == 'chat-newest' || env.FEATURE == 'tmux-binding' || env.CHAT_SHAPE_PROOF == '1' || env.FEATURE == 'chat-options' || env.FEATURE == 'chat-slash' || env.FEATURE == 'permission-rows' || env.FEATURE == 'antigravity-chats' || env.FEATURE == 'chat-switch-speed' || env.FEATURE == 'chat-still' || env.FEATURE == 'server-shell-input' || env.CHAT_SKILLS_PROOF == '1' || env.USAGE_PACE_PROOF == '1'
         uses: ./.github/actions/setup-zig
       - name: Test maximized startup decision
         if: env.FEATURE == 'appearance' && env.RELEASE_TAG == ''
@@ -624,7 +660,7 @@ jobs:
         if: inputs.candidate_artifact == '' && env.RELEASE_TAG == '' && env.FEATURE != 'safe-updates' && env.CHAT_SHAPE_PROOF != '1' && env.CHAT_SWITCH_PROFILE != '1'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: verify-app${{ env.FEATURE == 'chat-still' && '-chat-still' || '' }}${{ inputs.app_revision && '-compare' || '' }}
+          name: verify-app${{ env.FEATURE == 'chat-still' && '-chat-still' || env.FEATURE == 'rooms' && '-rooms' || '' }}${{ inputs.app_revision && '-compare' || '' }}
           path: zig-out/bin
       - name: Build branch executable
         if: inputs.candidate_artifact == '' && env.RELEASE_TAG == '' && (env.FEATURE == 'safe-updates' || env.CHAT_SHAPE_PROOF == '1' || env.CHAT_SWITCH_PROFILE == '1')

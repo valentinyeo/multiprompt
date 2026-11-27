@@ -68,6 +68,9 @@ jobs:
       base_ref: ${{ steps.pr.outputs.base_ref }}
       base_tip_sha: ${{ steps.pr.outputs.base_tip_sha }}
       engine: ${{ steps.pr.outputs.engine }}
+      exclude_families: ${{ steps.pr.outputs.exclude_families }}
+      exclude_openai: ${{ steps.pr.outputs.exclude_openai }}
+      exclude_anthropic: ${{ steps.pr.outputs.exclude_anthropic }}
       author_model_problem: ${{ steps.pr.outputs.author_model_problem }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -221,6 +224,7 @@ jobs:
         with:
           request-file: verifier-out/ladder-request.json
           purpose: pr-verifier
+          exclude-families: ${{ needs.resolve.outputs.exclude_families }}
       - name: Record the ladder verdict
         id: ladder
         if: steps.evidence.outcome == 'success' && (needs.tests.result == 'success' || (inputs.inspect_failed_tests && needs.tests.outputs.result == 'FAIL')) && steps.ladder_call.outcome == 'success'
@@ -230,13 +234,13 @@ jobs:
           LADDER_LANE: ${{ steps.ladder_call.outputs.lane }}
         run: node verifier-tools/tools/pr-verifier.cjs parse-ladder-answer verifier-out
       - name: Install pinned Codex client
-        if: steps.evidence.outcome == 'success' && (needs.tests.result == 'success' || (inputs.inspect_failed_tests && needs.tests.outputs.result == 'FAIL')) && steps.ladder.outcome != 'success'
+        if: steps.evidence.outcome == 'success' && (needs.tests.result == 'success' || (inputs.inspect_failed_tests && needs.tests.outputs.result == 'FAIL')) && steps.ladder.outcome != 'success' && needs.resolve.outputs.exclude_openai != 'true'
         env:
           CLIENTS: ${{ runner.temp }}/clients
         run: npm install --prefix "$CLIENTS" --no-audit --no-fund @openai/codex@0.169.0
       - name: Judge the evidence with OpenAI Codex
         id: openai
-        if: steps.evidence.outcome == 'success' && (needs.tests.result == 'success' || (inputs.inspect_failed_tests && needs.tests.outputs.result == 'FAIL')) && steps.ladder.outcome != 'success'
+        if: steps.evidence.outcome == 'success' && (needs.tests.result == 'success' || (inputs.inspect_failed_tests && needs.tests.outputs.result == 'FAIL')) && steps.ladder.outcome != 'success' && needs.resolve.outputs.exclude_openai != 'true'
         continue-on-error: true
         env:
           CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
@@ -247,7 +251,7 @@ jobs:
         run: node verifier-tools/tools/pr-verifier.cjs judge-openai verifier-out
       - name: Judge the evidence against the Done-when lines
         id: claude
-        if: steps.evidence.outcome == 'success' && (needs.tests.result == 'success' || (inputs.inspect_failed_tests && needs.tests.outputs.result == 'FAIL')) && steps.ladder.outcome != 'success' && steps.openai.outcome != 'success'
+        if: steps.evidence.outcome == 'success' && (needs.tests.result == 'success' || (inputs.inspect_failed_tests && needs.tests.outputs.result == 'FAIL')) && steps.ladder.outcome != 'success' && steps.openai.outcome != 'success' && needs.resolve.outputs.exclude_anthropic != 'true'
         continue-on-error: true
         uses: anthropics/claude-code-action@f3b070c88125d33dbae5653df5f143101d4ea9dc
         with:

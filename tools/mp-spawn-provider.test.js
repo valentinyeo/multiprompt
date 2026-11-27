@@ -14,7 +14,7 @@ async function spawn(extra) {
   homes.push(home);
   let layout = { workspaces: [{ name: 'Work' }], tabs: [] };
   let revision = 0, marker, parked = false;
-  const calls = [], submitted = [];
+  const calls = [], submitted = [], errors = [];
   const out = [];
   const code = await run(['spawn', '--name', 'MP Runner 1', '--folder', 'work', '--workspace', 'Work', '--host', '0', '--group', 'Runners', ...extra], {
     env: { HOME: home, MULTIPROMPT_KEY: 'private-key' },
@@ -39,9 +39,9 @@ async function spawn(extra) {
       submitted.push(submit);
       return { status: 0, stdout: JSON.stringify({ id: submit.id, result: { message: { id: submit.message_id, text: submit.text, state: 'queued' } } }) + '\n' + JSON.stringify({ id: dispatch.id, result: {} }) };
     },
-    out: x => out.push(x), err: () => {}
+    out: x => out.push(x), err: x => errors.push(x)
   });
-  return { code, out: out.join(''), calls, submitted };
+  return { code, out: out.join(''), errors: errors.join('\n'), calls, submitted };
 }
 
 test('spawn starts a hax live chat when asked for provider hax', async () => {
@@ -61,6 +61,34 @@ test('spawn keeps claude as the default provider', async () => {
   assert.ok(r.calls.find(a => a[1] === 'enable').includes('bypassPermissions'));
 });
 
-test('spawn refuses an unknown provider', async () => {
-  assert.equal((await spawn(['--provider', 'other'])).code, 1);
+for (const provider of ['codex', 'pi', 'antigravity']) {
+  test(`spawn starts a ${provider} live chat when asked for provider ${provider}`, async () => {
+    const r = await spawn(['--provider', provider, '--task', 'take a ticket']);
+    assert.equal(r.code, 0, r.errors);
+    const enable = r.calls.find(a => a[1] === 'enable');
+    assert.deepEqual(enable.slice(0, 3), ['host', 'enable', provider]);
+    assert.equal(enable[enable.indexOf('--permission-mode') + 1], 'bypassPermissions', `${provider} starts with full permissions`);
+    assert.deepEqual(r.calls.find(a => a[1] === 'start').slice(0, 3), ['host', 'start', provider]);
+    assert.equal(r.submitted[0].provider, provider);
+    assert.equal(JSON.parse(r.out).provider, provider);
+  });
+}
+
+test('open --kind chat reaches the same providers spawn does', async () => {
+  const { run } = await import('./mp-layout.mjs');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'mp-open-provider-'));
+  homes.push(home);
+  const errors = [];
+  const code = await run(['open', '--kind', 'chat', '--name', 'Chat', '--folder', 'work', '--workspace', 'Work', '--host', '0', '--provider', 'other'], {
+    env: { HOME: home, MULTIPROMPT_KEY: 'private-key' },
+    out: () => {}, err: line => errors.push(line)
+  });
+  assert.equal(code, 1);
+  assert.match(errors.join('\n'), /provider must be one of: claude, codex, pi, antigravity, hax/);
+});
+
+test('spawn refuses an unknown provider and names the ones it takes', async () => {
+  const r = await spawn(['--provider', 'other']);
+  assert.equal(r.code, 1);
+  assert.equal(r.errors, JSON.stringify({ ok: false, error: 'provider must be one of: claude, codex, pi, antigravity, hax' }));
 });

@@ -11,7 +11,7 @@ Release paths: src/chat*, src/agent*.zig, src/live*.zig, src/terminal*, src/skil
 - `view-focus` switches supported terminal views and restores typing focus.
 
 ## How to get to it (user POV)
-- Select a chat; type in its message box; Enter sends and Shift+Enter adds a line; Ctrl+F finds; Ctrl+D dictates; plus/paste/drop attaches; right-click replies/reacts; Alt+C switches terminal views.
+- Select a chat; type in its message box; Enter sends and Shift+Enter adds a line; Ctrl+F finds; Ctrl+D dictates; Ctrl+K Attach File/paste/drop attaches; plus opens AI settings; right-click replies/reacts; Alt+C switches terminal views.
 
 ## Driving it with drive.ps1
 Preconditions: fresh hosted Windows desktop, matching executable/hash/version, isolated app data, and the selected legacy recipe’s prerequisites.
@@ -76,7 +76,7 @@ UNREACHABLE until Part B exposes a real upload receiver, image link endpoint and
 
 ### skills: Commands, skills, model and permissions
 
-Open slash suggestions, Ctrl+/ and Skills from Ctrl+K; choose a known skill, cancel another, and try an unknown command. In Codex also use dollar-prefixed skills. In a live chat use the Plus menu to choose model/effort and Plan/Ask/Accept edits/Bypass. For Pi, list models and choose a provider-qualified model; invoke /login separately. Answer real permission cards with 1/2/3 and Alt+Y/O/D.
+Open slash suggestions, Ctrl+/ and Skills from Ctrl+K; choose a known skill, cancel another, and try an unknown command. In Codex also use dollar-prefixed skills. In a live chat use the four-row Plus menu for AI, Model, Effort and Permission level. Claude offers Default/Auto/Bypass; Codex shows approval/sandbox pairs; Pi and Antigravity show fixed full access. For Pi, list models and choose a provider-qualified model; invoke /login separately. Answer real permission cards with 1/2/3 and Alt+Y/O/D.
 
 Observable proof: The selected session receives the exact command once. Unsupported commands remain editable and never enter the outbox. Model/provider/effort and permission receipts match the menu, preserving draft/history. Each permission reply targets only its pending request.
 
@@ -150,3 +150,7 @@ The script starts a throwaway hosted chat, sends a marker, switches Claude→Cod
 
 ## Gotchas
 - Live chats have no shell toggle. Sending, attachments, provider login, and real delivery need their own live prerequisites; focus proof does not cover them.
+
+### Every AI chat menu (MUBO-575)
+
+The hosted [chat-model](chat-model.md) journey owns the four-row menu and setting submenus, their native clicks, retained draft/history and active choices. The matching Ctrl+K entries are `SEARCH_CHAT_AI_MENU_OFFSET`, `SEARCH_CHAT_MODEL_MENU_OFFSET`, `SEARCH_CHAT_EFFORT_MENU_OFFSET` and `SEARCH_CHAT_PERMISSION_MENU_OFFSET`. Command-line setters are `mb ai`, `mb model`, `mb effort` and `mb permission`; repeat each setting to require the same result. See that map for server slots, fixed permissions and the explicit boundary between unit coverage and real-provider proof.

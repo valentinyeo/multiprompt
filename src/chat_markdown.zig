@@ -431,9 +431,7 @@ fn inlineAtom(text: []const u16, pos: usize, scan: *InlineScan) ?InlineAtom {
             if (label_end + 1 < text.len and text[label_end + 1] == '(') {
                 if (scan.closing(text, label_end + 2, ')')) |url_end| {
                     const url = text[label_end + 2 .. url_end];
-                    const http = std.unicode.utf8ToUtf16LeStringLiteral("http://");
-                    const https = std.unicode.utf8ToUtf16LeStringLiteral("https://");
-                    if (std.mem.startsWith(u16, url, http) or std.mem.startsWith(u16, url, https)) {
+                    if (link_detect.address(url)) {
                         return .{ .span = .{ .text = .{ .start = pos + 1, .end = label_end }, .target = .{ .start = label_end + 2, .end = url_end } }, .end = url_end + 1 };
                     }
                 }
@@ -1022,6 +1020,31 @@ test "blank lines keep paragraphs separate and unsupported links literal" {
     var spans: [8]Span = undefined;
     const bad = std.unicode.utf8ToUtf16LeStringLiteral("[run](javascript:alert)");
     const n = inlineSpans(bad, &spans);
+    for (spans[0..n]) |span| try std.testing.expect(span.target == null);
+}
+
+test "MUBO-593 labelled links cover web and file targets without leaking their brackets" {
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    const cases = [_]struct { text: []const u16, label: []const u16, target: []const u16 }{
+        .{ .text = w("see [docs](https://example.test/a) now"), .label = w("docs"), .target = w("https://example.test/a") },
+        .{ .text = w("[spec](http://example.test/b)"), .label = w("spec"), .target = w("http://example.test/b") },
+        .{ .text = w("[notes](file:///C:/Users/me/notes.md)"), .label = w("notes"), .target = w("file:///C:/Users/me/notes.md") },
+    };
+    var out: [8]Span = undefined;
+    for (cases) |case| {
+        const n = inlineSpans(case.text, &out);
+        var links: usize = 0;
+        for (out[0..n]) |span| {
+            const target = span.target orelse continue;
+            links += 1;
+            try std.testing.expectEqualSlices(u16, case.label, case.text[span.text.start..span.text.end]);
+            try std.testing.expectEqualSlices(u16, case.target, case.text[target.start..target.end]);
+        }
+        try std.testing.expectEqual(@as(usize, 1), links);
+    }
+    var spans: [8]Span = undefined;
+    const script = w("[run](javascript:alert)");
+    const n = inlineSpans(script, &spans);
     for (spans[0..n]) |span| try std.testing.expect(span.target == null);
 }
 

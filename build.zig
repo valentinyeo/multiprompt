@@ -235,6 +235,14 @@ pub fn build(b: *std.Build) void {
     run_smooth_shape_tests.has_side_effects = true;
     b.step("test-smooth-shapes", "Run native fractional avatar pixel proof").dependOn(&run_smooth_shape_tests.step);
 
+    const provider_badge_tests = b.addTest(.{
+        .root_module = exe.root_module,
+        .filters = &.{"MUBO-568"},
+    });
+    const run_provider_badge_tests = b.addRunArtifact(provider_badge_tests);
+    run_provider_badge_tests.has_side_effects = true;
+    b.step("test-provider-badges", "Run provider badge identity and geometry proofs").dependOn(&run_provider_badge_tests.step);
+
     const live_working_tests = b.addTest(.{
         .root_module = exe.root_module,
         .filters = &.{"IGSH-1668 hosted live events"},
@@ -700,7 +708,7 @@ pub fn build(b: *std.Build) void {
     chat_skill_tab_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&chat_skill_tab_tests.step);
     vps_test_step.dependOn(&chat_skill_tab_tests.step);
-    const room_reply_tests = b.addSystemCommand(&.{ "node", "--test", "tools/room-reply-grouping.test.js", "tools/room-creation-focus.test.js" });
+    const room_reply_tests = b.addSystemCommand(&.{ "node", "--test", "tools/room-reply-grouping.test.js", "tools/room-creation-focus.test.js", "tools/room-reliability.test.js" });
     room_reply_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&room_reply_tests.step);
     vps_test_step.dependOn(&room_reply_tests.step);

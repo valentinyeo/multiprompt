@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict');
+const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
@@ -61,6 +62,41 @@ test('SOFT-3048 the journey proves copy, interrupt and wheel scrollback on the n
   assert.match(journey, /Snapshot 'after'/, 'the harness requires an after snapshot before it reports passed');
 });
 
+test('MUBO-597 the desktop boundary accepts persistent shell creation and reattach', () => {
+  const script = String.raw`
+import ast, json, os, pathlib, re, sys, tempfile, time
+source = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8')
+names = {'state', 'record', 'session_names', 'terminal_session'}
+functions = [node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef) and node.name in names]
+with tempfile.TemporaryDirectory() as folder:
+    root = pathlib.Path(folder)
+    initial = dict(name='server-shell-input', sessions=['server-shell'], mode='idle', fake=False)
+    (root / 'state.json').write_text(json.dumps(initial), encoding='utf-8')
+    namespace = dict(ROOT=root, json=json, os=os, re=re, time=time)
+    exec(compile(ast.Module(body=functions, type_ignores=[]), '<terminal-boundary>', 'exec'), namespace)
+    terminal = namespace['terminal_session']
+    session = 'term-f098f222be05052470db859fab89c2d3'
+    attach = "export ZSB_SESSION=zss-1; tmux attach -t '=" + session + "'"
+    assert terminal(attach) == (None, None), 'attach must not create a missing session'
+    for cwd in ['cd; ', 'cd -- "$HOME"/\'projects/example\' 2>/dev/null || cd; ', "cd -- '/missing workspace' 2>/dev/null || cd; "]:
+        command = "export ZSB_SESSION=zss-1; " + cwd + "tmux new-session -A -s '" + session + "' -c \"$PWD\""
+        assert terminal(command) == (session, None), command
+        assert terminal(attach) == (session, None), 'reconnect must find the created session'
+    saved = json.loads((root / 'state.json').read_text(encoding='utf-8'))
+    assert saved['sessions'] == ['server-shell', session], saved
+    assert saved['mode'] == initial['mode'] and saved['fake'] == initial['fake'], saved
+    assert terminal('export ZSB_SESSION=zss-1; exec $' + '{SHELL:-bash} -l') == ('server-shell', None)
+    assert terminal('tmux new-session -A -s unrelated') == (None, None)
+    initial['name'] = 'another-journey'
+    (root / 'state.json').write_text(json.dumps(initial), encoding='utf-8')
+    assert terminal(command) == (None, None), 'shell fixture must not change other journeys'
+    records = [json.loads(line) for line in (root / 'invocations.jsonl').read_text(encoding='utf-8').splitlines()]
+    assert [row['kind'] for row in records] == ['create', 'attach'] * 3 + ['login'], records
+`;
+  const result = spawnSync('python3', ['-I', '-c', script, root('tools/verify-chat-delivery/boundary.py')], { encoding: 'utf8', timeout: 10000 });
+  assert.equal(result.status, 0, result.stdout + result.stderr + (result.error?.message || ''));
+});
+
 test('MUBO-209 paste leaves the window as one write with intact markers', () => {
   const paste = body(read('terminal_window.c'), 'void mp_terminal_window_paste(HWND hwnd)');
   assert.match(paste, /mp_terminal_paste_text\(/, 'the whole paste must leave as one terminal write');
@@ -106,4 +142,41 @@ test('MUBO-209 a tmux attach tab keeps scrollback so the wheel moves', () => {
   assert.doesNotMatch(history, /alternate/, 'the alternate screen history must count for the wheel');
   const cell = body(read('terminal_model.c'), 'int mp_terminal_cell(');
   assert.doesNotMatch(cell, /alternate\) scroll = 0/, 'the wheel must scroll the alternate screen history too');
+});
+
+function auditClipboardChords(chars) {
+  assert.match(chars, /int plain = !shift && \(mod & \(VTERM_MOD_CTRL \| VTERM_MOD_ALT\)\) == VTERM_MOD_CTRL;/, 'the chords are Ctrl without Shift and without Alt, so AltGr keeps typing');
+  const paste = chars.indexOf('if (plain && wp == 22) { mp_terminal_window_paste(hwnd); return 0; }');
+  const copy = chars.indexOf('if (plain && wp == 3 && t->selected) { mp_terminal_window_copy(hwnd); return 0; }');
+  const typed = chars.indexOf('character(t, (WCHAR)wp, mod)');
+  assert.ok(typed >= 0, 'every other character still reaches the shell');
+  assert.ok(paste >= 0, 'plain Ctrl+V must paste instead of typing ^V');
+  assert.ok(copy >= 0, 'plain Ctrl+C with a selection must copy it');
+  assert.ok(typed > paste && typed > copy, 'a copied or pasted chord must return before any byte reaches the shell');
+}
+
+test('MUBO-225 plain Ctrl+C copies a selection and plain Ctrl+V pastes in a shell or tmux tab', () => {
+  const source = read('terminal_window.c');
+  const chars = body(source, 'case WM_CHAR: case WM_SYSCHAR: {');
+  auditClipboardChords(chars);
+  const mutations = [
+    ['if (plain && wp == 3 && t->selected) { mp_terminal_window_copy(hwnd); return 0; }', 'if (plain && wp == 3) { mp_terminal_window_copy(hwnd); return 0; }'],
+    ['if (plain && wp == 22) { mp_terminal_window_paste(hwnd); return 0; }', ''],
+    ['int plain = !shift && (mod & (VTERM_MOD_CTRL | VTERM_MOD_ALT)) == VTERM_MOD_CTRL;', 'int plain = (mod & VTERM_MOD_CTRL) == VTERM_MOD_CTRL;'],
+  ];
+  for (const [before, after] of mutations) {
+    assert.ok(source.includes(before), before);
+    assert.throws(
+      () => auditClipboardChords(body(source.replace(before, after), 'case WM_CHAR: case WM_SYSCHAR: {')),
+      `mutation must fail: ${before}`,
+    );
+  }
+});
+
+test('MUBO-225 Ctrl+Shift+C and Ctrl+Shift+V keep their own handler', () => {
+  const keys = body(read('terminal_window.c'), 'case WM_KEYDOWN: case WM_SYSKEYDOWN: {');
+  assert.match(keys, /\(mod & \(VTERM_MOD_CTRL \| VTERM_MOD_SHIFT\)\) == \(VTERM_MOD_CTRL \| VTERM_MOD_SHIFT\) && \(wp == 'C' \|\| wp == 'V'\)/);
+  assert.match(keys, /if \(wp == 'C'\) mp_terminal_window_copy\(hwnd\); else mp_terminal_window_paste\(hwnd\);/);
+  const chars = body(read('terminal_window.c'), 'case WM_CHAR: case WM_SYSCHAR: {');
+  assert.match(chars, /if \(shift && \(mod & VTERM_MOD_CTRL\) && \(wp == 3 \|\| wp == 22\)\) return 0;/, 'the character left behind by Ctrl+Shift must not reach the shell');
 });

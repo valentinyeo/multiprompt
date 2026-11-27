@@ -30,6 +30,10 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
+      - name: Test chat menu controls and full-permission launch defaults
+        run: timeout 180s node --test tools/chat-menu-controls.test.js tools/mb-chat-controls.test.mjs tools/chat-plus-menu.test.js tools/chat-plus-menu-active.test.js tools/chat-model-picker.test.js tools/chat-host-model-settings.test.js tools/chat-slash-proof.test.js tools/mp-spawn-provider.test.js tools/agent-host.test.js tools/chat-fable-model.test.js
+      - name: Test room driver readiness, reply roles and failed-member retry
+        run: timeout 120s pwsh -NoProfile -File tools/rooms-driver.test.ps1
       - name: Test the squash merge helper builds its own title
         run: node --test tools/automerge-admit-run.test.js
       - name: Test commit identity enforcement
@@ -255,6 +259,10 @@ jobs:
       - name: Test installer prune
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 3
         run: node --test tools/install-prune.test.js
+      - name: Check the version probe reads the real process exit code
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 3
+        shell: pwsh
+        run: ./tools/probe-native-version.test.ps1
       - name: Check local listener accounts
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1
         shell: pwsh

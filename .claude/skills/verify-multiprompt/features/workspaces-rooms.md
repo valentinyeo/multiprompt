@@ -7,16 +7,17 @@ Release paths: src/workspace*.zig, src/room*, src/groups*.zig, src/main.zig, bui
 
 ## Sub-features
 - `workspace` creates, switches, aggregates favorite sessions in Starred, snoozes, and archives session collections.
+- `switch-ai` moves every live chat in one workspace to Antigravity, Codex or Claude, and leaves each chat's name, picture, place and readable history in place.
 - `restore` brings archived workspaces and their sessions back.
 - `room` creates, opens, and edits a shared multi-agent conversation.
 
 ## How to get to it (user POV)
-- Click the workspace name/card; Ctrl+N or Alt+N creates; Alt+1 opens Starred; Alt+2…9 selects stored workspaces; Alt+Left/Right cycles; Ctrl+Shift+N or Ctrl+K New room creates a Room; search its name or Edit room.
+- Click the workspace name/card; Ctrl+N or Alt+N creates; Alt+1 opens Starred; Alt+2…9 selects stored workspaces; Alt+Left/Right cycles; Ctrl+Shift+N or Ctrl+K New room creates a Room; search its name or Edit room. Ctrl+K **Workspace: Switch every chat to Antigravity** (or Codex, Claude) switches the whole workspace, and `mb workspace switch-ai <workspace> <target>` does the same from the command line.
 
 ## Driving it with drive.ps1
 Preconditions: single-window mode, fresh hosted Windows desktop, matching executable/hash/version, isolated app data, and the selected legacy recipe’s prerequisites.
 - The shared wrapper accepts these Journeys; automatic workflow migration remains partial. Run `gh workflow run verify.yml --ref <branch> -f feature=workspaces`. [Workspaces](workspaces.md) drives creation, switching, archive/restore and deletion; [workspace focus](workspace-focus.md) checks typing after returning.
-- Require stable saved workspace IDs and session membership, card screenshots, and restored typing. Rooms require visible member replies in a separately authenticated live pass. Only the selected journey is covered. Download `verify-workspaces` after cleanup. This legacy workflow route does not yet use the video driver; see [inventory](../inventory.md).
+- Require stable saved workspace IDs and session membership, card screenshots, and restored typing. The [rooms journey](rooms.md) supplies a runner-owned authenticated account and two deterministic live member agents. Only the selected journey is covered. Download `verify-workspaces` after cleanup. This legacy workflow route does not yet use the video driver; see [inventory](../inventory.md).
 
 The recipes distinguish existing focused journeys from unreachable complete paths. UNREACHABLE names the missing data, endpoint, build mode or driver action; it never means the product passed.
 
@@ -52,14 +53,27 @@ Journey: workspaces, workspace-focus, sessions. UNREACHABLE for cross-device fol
 | `SEARCH_WSMOVE_OFFSET` | Choose **Move to workspace**, then select its destination name. Follow `workspace` above. |
 | `SEARCH_WSSORT_MENU_OFFSET` | Ctrl+K, search for **sort workspaces**. Follow `workspace` above. |
 | `SEARCH_WSSORT_OFFSET` | Open **Sort workspaces**, then choose the displayed sort mode. Follow `workspace` above. |
+| `SEARCH_WS_SWITCH_CLAUDE_OFFSET` | Ctrl+K, type **switch all chats claude**, then choose the workspace row. Follow `switch-ai` below. |
+| `SEARCH_WS_SWITCH_CODEX_OFFSET` | Ctrl+K, type **switch all chats codex**, then choose the workspace row. Follow `switch-ai` below. |
+| `SEARCH_WS_SWITCH_ANTIGRAVITY_OFFSET` | Ctrl+K, type **switch all chats antigravity**, then choose the workspace row. Follow `switch-ai` below. |
+
+### switch-ai: Switch every chat in a workspace
+
+Open Ctrl+K in the workspace that owns the chats, search **switch all chats**, pick the target AI (Claude, Codex or Antigravity) and confirm. Every live chat in that workspace moves to the target: each keeps its sidebar name, picture, place and readable history, and each one's transcript gains the same Switch AI divider a single chat switch leaves. A chat that is still writing its reply is skipped in that pass and listed in the summary; it switches once its reply ends. Chats already on the target are counted once and report `status=already`. The same bulk switch runs headless as `mb workspace switch-ai <workspace> <claude|codex|antigravity> [--json] [--timeout SECONDS]`, which prints one line per switched, skipped or refused chat.
+
+Observable proof: `mb workspace switch-ai` output lists every chat with `switched`, `already`, `busy` or `refused` plus a reason, and a repeat run reports the same chats as `already`. In the app, each switched chat keeps its row name and picture, shows its earlier messages above the divider, and the next message is answered by the new provider. A chat on a provider the host cannot start yet is refused with the host reason and stays on its current AI.
+
+Journey: none yet. MUBO-564 owns the real bulk-switching journey video; until it lands this recipe is documented and not covered by a recorded run.
+
+Source files: src/workspace_switch_ai.zig, src/command_palette.zig, src/sidebar.zig, src/shortcuts.zig, src/browser_bridge.zig, src/mp_zsb.sh, tools/mb.mjs, tools/mb-workspace-switch-ai.test.js
 
 ### room: Rooms
 
-In a Rooms preview build, use Ctrl+Shift+N or Ctrl+K New room. Choose members, create and open the room by name, send a message, then Edit room to rename and change members. Reopen and inspect both agents' replies.
+In a release or Rooms-enabled verification build, use Ctrl+Shift+N or Ctrl+K New room. Choose members, create and open the room by name, send a message, then Edit room to rename and change members. Reopen and inspect both agents' replies.
 
 Observable proof: The room keeps one ID and the selected members; replies are attributed once to the right agent. Editing preserves earlier history and prevents private per-chat actions from leaking into a room.
 
-UNREACHABLE in the ordinary build: src/room_frontend.zig enables Rooms only with ROOMS_PREVIEW. A preview executable, authenticated disposable account, two available member agents and a room-driving desktop recipe are required. The room-reply-grouping diagnostic is not desktop proof.
+Run `feature=rooms` for the desktop gate in [Rooms](rooms.md), including fresh creation, closed-chat membership and away/restart recovery. Release builds enable Rooms; non-release verification builds need `-Drooms-preview=true`. The room-reply-grouping diagnostic alone is not desktop proof.
 
 | Palette row or dynamic family | User reaches it |
 | --- | --- |
@@ -68,4 +82,6 @@ UNREACHABLE in the ordinary build: src/room_frontend.zig enables Rooms only with
 | `room.new_room_target` | In the Rooms preview build, Ctrl+K, choose **New room**. Follow `room` above. |
 
 ## Gotchas
+- The member catalog comes from the host, including unopened chats. Account names override server session names by host and tmux identity; closing a tab keeps its known name for the current account. The create path logs dialog opening, deferred discovery, each request kind, bridge spawn, reply counts and failures to `debug.log`. A missing failure line alone does not prove that the bridge never ran.
 - Offline CMD workspace proof does not cover Rooms, sync, or remote agents. Room reply checks are [diagnostic](../diagnostics/room-reply-grouping.md), not a completed desktop journey.
+- A chat that was already running when the app published its room helper loads that helper from the published runtime, so a send does not need the chat restarted. A host that still reports no room features is running an older helper; restart that chat.

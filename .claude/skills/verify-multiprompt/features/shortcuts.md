@@ -66,6 +66,7 @@ Headers are verified in F1. Action rows link to the owning user-operation recipe
 | Workspaces (single-window) | Ctrl+Shift+Y | Snooze this workspace until a chosen time | [snooze](notifications-inbox.md#snooze-reminders-and-workspace-snooze) |
 | Workspaces (single-window) | Ctrl+K -&gt; Workspace: Wake &lt;name&gt; | Wake a snoozed workspace now and switch to it | [snooze](notifications-inbox.md#snooze-reminders-and-workspace-snooze) |
 | Workspaces (single-window) | Ctrl+K -&gt; Workspace: Bring Back All Sessions | Reopen every recorded tmux session of this workspace | [snooze](notifications-inbox.md#snooze-reminders-and-workspace-snooze) |
+| Workspaces (single-window) | Ctrl+K -&gt; Workspace: Switch every chat to Antigravity (Codex, Claude) | Move every live chat in this workspace to another AI, keeping each chat's name, picture, place and readable history | [switch-ai](workspaces-rooms.md#switch-ai-switch-every-chat-in-a-workspace) |
 | Workspaces (single-window) | Alt+Left / Alt+Right | Cycle prev / next workspace | [workspace](workspaces-rooms.md#workspace-workspace-lifecycle) |
 | Workspaces (single-window) | Ctrl+N / Alt+N pill | New workspace | [workspace](workspaces-rooms.md#workspace-workspace-lifecycle) |
 | Inbox (Alt+I) | Inbox (Alt+I) | F1 section heading | [shortcuts](shortcuts.md#shortcuts-shortcut-reference-and-routing) |

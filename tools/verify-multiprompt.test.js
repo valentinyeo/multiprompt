@@ -186,7 +186,13 @@ test('IGSH-1028 reusable PR journeys select their requested feature and cannot c
   };
   for (const feature of ['pane-layout', 'browser-pane-stuck']) assert.deepEqual(run(feature).selected, [feature]);
   assert.deepEqual(run('').selected, featureMatrix(workflow).pr);
-  assert.deepEqual(run('all').selected, featureMatrix(workflow).available);
+  const ordinary = featureMatrix(workflow).available.filter(feature => feature !== 'rooms');
+  assert.deepEqual(run('all').selected, ordinary);
+  assert.deepEqual(run('all', '', 'schedule').selected, ordinary);
+  assert.deepEqual(run('all', '', 'workflow_dispatch').selected, featureMatrix(workflow).available);
+  assert.ok(!run('').selected.includes('rooms'));
+  assert.deepEqual(run('', '["rooms"]').selected, ['rooms']);
+  assert.deepEqual(run('rooms', '', 'workflow_dispatch').builds, ['rooms']);
   assert.deepEqual(run('', '["chat-newest","title-bar"]').selected, ['chat-newest', 'title-bar']);
   assert.equal(run('', '["title-bar"]').matrix.length, 6);
 });
@@ -2218,7 +2224,9 @@ test('IGSH-900 relaunch-saved-sessions journey seeds saved sessions, relaunches 
   for (const required of ['seeded-state', 'occupied-ports', 'selection-kept', 'IGSH-890', 'auto-release-admit.sh']) assert.ok(map.includes(required), required);
   assert.match(read(skill + 'features/README.md'), /\[Relaunch saved sessions\]\(relaunch-saved-sessions.md\)/);
   assert.match(read(skill + 'SKILL.md'), /`relaunch-saved-sessions`/);
-  assert.throws(() => assert.match(control.replace("'relaunch-saved-sessions')][string]$Feature", "')][string]$Feature"), /ValidateSet\([^\n)]*'relaunch-saved-sessions'/));
+  const dropped = "'session-tabs', 'relaunch-saved-sessions'";
+  assert.ok(control.includes(dropped), 'the ValidateSet still lists relaunch-saved-sessions after session-tabs');
+  assert.throws(() => assert.match(control.replace(dropped, "'session-tabs'"), /ValidateSet\([^\n)]*'relaunch-saved-sessions'/));
 });
 
 test('IGSH-925 chat-first-paint journey relaunches a saved chat with a docked browser and rejects any moved chat rectangle', () => {
