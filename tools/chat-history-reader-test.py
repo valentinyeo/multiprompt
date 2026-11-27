@@ -5127,15 +5127,6 @@ class MUBO_601_UnacknowledgedSendTest(MUBO_594_QueuedMessageActionsTest):
         self.assertEqual(self.text('message_mubo601_0002')['state'], 'queued')
 
 
-class MUBO_611_LegacyHostQueueFallbackTest(MUBO_601_UnacknowledgedSendTest):
-    def host_request(self, provider, sid, request, **kwargs):
-        op = request.get('op')
-        if op in ('prepare_send_now', 'recover_send'):
-            return dict(status='error', reason='invalid_op')
-        if op == 'recall':
-            return dict(status='refused', reason='recall_unavailable')
-        return reader.host_handle_request(provider, sid, self.base['tmux'], self.session, request)
-
     def watch_stop(self):
         return patch.object(reader, 'host_stop', side_effect=reader.host_stop).start()
 
@@ -5150,7 +5141,21 @@ class MUBO_611_LegacyHostQueueFallbackTest(MUBO_601_UnacknowledgedSendTest):
         reader.host_written(state)[token] = dict(accepted=True)
         reader.host_state_write('antigravity', 'sid', state)
 
+    def legacy_host(self):
+        plain = self.host_request
+
+        def legacy_request(provider, sid, request, **kwargs):
+            op = request.get('op')
+            if op in ('prepare_send_now', 'recover_send'):
+                return dict(status='error', reason='invalid_op')
+            if op == 'recall':
+                return dict(status='refused', reason='recall_unavailable')
+            return plain(provider, sid, request, **kwargs)
+
+        patch.object(reader, 'host_request', side_effect=legacy_request).start()
+
     def test_send_now_on_a_legacy_host_stops_it_requeues_and_redispatches(self):
+        self.legacy_host()
         stopped = self.watch_stop()
         original = self.send()
         result = self.request('send_now', message_id=original['id'])
@@ -5165,6 +5170,7 @@ class MUBO_611_LegacyHostQueueFallbackTest(MUBO_601_UnacknowledgedSendTest):
         self.assertEqual(self.text()['state'], 'sent')
 
     def test_retry_on_a_legacy_host_stops_it_and_requeues_when_unaccepted(self):
+        self.legacy_host()
         stopped = self.watch_stop()
         original = self.send()
         reply = self.request('retry', message_id=original['id'], retry_id='retry_mubo611_0001')['message']
@@ -5173,6 +5179,7 @@ class MUBO_611_LegacyHostQueueFallbackTest(MUBO_601_UnacknowledgedSendTest):
         self.assertNotEqual(reply['attempt'], original['attempt'])
 
     def test_retry_refuses_an_accepted_message_on_a_legacy_host_without_stopping(self):
+        self.legacy_host()
         original = self.send()
         self.accept_on_host_only(original['id'])
         stopped = self.watch_stop()
@@ -5182,6 +5189,7 @@ class MUBO_611_LegacyHostQueueFallbackTest(MUBO_601_UnacknowledgedSendTest):
         self.assertEqual(self.text()['state'], 'sent')
 
     def test_delete_and_edit_on_a_legacy_host_stop_it_and_cancel_when_unaccepted(self):
+        self.legacy_host()
         stopped = self.watch_stop()
         first = self.send()
         reply = self.request('dismiss', message_id=first['id'])['message']
@@ -5196,6 +5204,7 @@ class MUBO_611_LegacyHostQueueFallbackTest(MUBO_601_UnacknowledgedSendTest):
         self.assertEqual((edited['text'], edited['state']), ('second prompt', 'cancelled'))
 
     def test_delete_and_edit_refuse_an_accepted_message_on_a_legacy_host(self):
+        self.legacy_host()
         original = self.send()
         self.accept_on_host_only(original['id'])
         stopped = self.watch_stop()
