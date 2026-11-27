@@ -463,7 +463,7 @@ test('long-running command defaults and CI wiring are explicit', () => {
   assert.deepEqual(defaults, {
     status: 5, version: 5, doctor: 20,
     text: 30, 'get-text': 30, snapshot: 30, cdp: 30, eval: 30, script: 30,
-    screenshot: 60, shoturl: 60,
+    screenshot: 60, shoturl: 60, 'session-switch-ai': 60,
   });
   assert.match(source, /os\.environ\.get\("ZSB_TIMEOUT", "180"\)/);
   const build = fs.readFileSync(path.join(__dirname, '..', 'build.zig'), 'utf8');

@@ -781,6 +781,11 @@
       "owner": "chat",
       "trigger": "refresh",
       "reason": "Requests the active chat history before the block cache is rebuilt; runs on the refresh tick and on view changes."
+    },
+    "workspace_switch_ai.zig:adoptChatOnUiWithPersist": {
+      "owner": "chat",
+      "trigger": "user",
+      "reason": "Reloads the adopted chat history once the workspace switch moves it to the new AI, and only when it is the active tab."
     }
   }
 }

@@ -1320,7 +1320,7 @@ fn zsbWorkerThread(ctx_ptr: usize) void {
         "reset",            "resolve-window", "routing-audit",  "screenshot",
         "script",           "session-archive", "session-close", "session-move",
         "session-open",     "session-pin",     "session-rebind", "session-rename",
-        "session-status",   "session-unarchive", "session-unpin", "session-wait",
+        "session-status",   "session-switch-ai", "session-unarchive", "session-unpin", "session-wait",
         "shell-open",       "shoturl",
         "sidebar",          "snapshot",       "status",         "tab",
         "tabs",             "text",           "type",           "url",
@@ -1348,6 +1348,10 @@ fn zsbWorkerThread(ctx_ptr: usize) void {
         }
     }
 
+    if (std.mem.eql(u8, argv[0], "session-switch-ai")) {
+        sendZsbSwitchAiResponse(client, argv[0..argc]);
+        return;
+    }
     if (std.mem.eql(u8, argv[0], "workspace-list") or std.mem.eql(u8, argv[0], "session-open") or std.mem.eql(u8, argv[0], "session-status") or std.mem.eql(u8, argv[0], "shell-open") or zsbIsTabVerb(argv[0])) {
         sendZsbWorkspaceResponse(client, argv[0..argc]);
         return;
@@ -2117,6 +2121,15 @@ fn zsbWorkspaceTabs(out: []u8, pos: *usize, workspace: u8, group: u32, sidebar_t
         } else if (!appendAsciiBuf(out, pos, "null")) return false;
         if (!diagJsonBoolField(out, pos, &first, "active", i == app_state.active_shell)) return false;
         if (!diagJsonBoolField(out, pos, &first, "cv", shell.chat_view_on)) return false;
+        const ws_switch = @import("workspace_switch_ai.zig");
+        const is_chat = ws_switch.isLiveChatShell(&shell);
+        if (!diagJsonBoolField(out, pos, &first, "chat", is_chat)) return false;
+        if (!diagJsonFieldPrefix(out, pos, &first, "provider")) return false;
+        if (is_chat) {
+            if (ws_switch.agentProviderName(shell.ai_agent)) |provider| {
+                if (!zsbAppendJsonString(out, pos, provider)) return false;
+            } else if (!appendAsciiBuf(out, pos, "null")) return false;
+        } else if (!appendAsciiBuf(out, pos, "null")) return false;
         const hidden_reason = zsbSidebarHiddenReason(i, sidebar_tabs[i]);
         if (!diagJsonBoolField(out, pos, &first, "visible", hidden_reason == null)) return false;
         if (!diagJsonBoolField(out, pos, &first, "waiting", shell.inbox_archived and !shell.needs_attention)) return false;
@@ -2745,6 +2758,112 @@ fn zsbTabCommand(args: []const []const u8, out: []u8, comptime ops: type) usize 
     if (std.mem.eql(u8, args[0], "session-pin")) return zsbTabPin(args, out, ops, true);
     if (std.mem.eql(u8, args[0], "session-unpin")) return zsbTabPin(args, out, ops, false);
     return zsbTabMove(args, out, ops);
+}
+
+const ZsbSwitchAiArgs = struct {
+    tab: u32,
+    target: u8,
+};
+
+fn parseZsbSwitchAiArgs(argv: []const []const u8) !ZsbSwitchAiArgs {
+    if (argv.len != 5 or !std.mem.eql(u8, argv[0], "session-switch-ai")) return error.BadArgs;
+    var tab_text: ?[]const u8 = null;
+    var to_text: ?[]const u8 = null;
+    var i: usize = 1;
+    while (i < argv.len) : (i += 2) {
+        if (std.mem.eql(u8, argv[i], "--tab")) {
+            if (tab_text != null or argv[i + 1].len == 0) return error.BadArgs;
+            tab_text = argv[i + 1];
+        } else if (std.mem.eql(u8, argv[i], "--to")) {
+            if (to_text != null or argv[i + 1].len == 0) return error.BadArgs;
+            to_text = argv[i + 1];
+        } else return error.BadArgs;
+    }
+    const raw_tab = tab_text orelse return error.BadArgs;
+    const raw_to = to_text orelse return error.BadArgs;
+    for (raw_tab) |c| if (!std.ascii.isDigit(c)) return error.BadArgs;
+    const tab = std.fmt.parseInt(u32, raw_tab, 10) catch return error.BadArgs;
+    if (tab == 0) return error.BadArgs;
+    const target = @import("workspace_switch_ai.zig").targetAgentId(raw_to) orelse return error.InvalidTarget;
+    return .{ .tab = tab, .target = target };
+}
+
+fn zsbSessionSwitchAi(argv: []const []const u8, out: []u8, comptime ops: type) usize {
+    const ws_switch = @import("workspace_switch_ai.zig");
+    const args = parseZsbSwitchAiArgs(argv) catch |err| return zsbWorkspaceError(out, switch (err) {
+        error.InvalidTarget => "invalid_target",
+        else => "bad_args",
+    });
+    const snap = ops.snapshot(args.tab, args.target);
+    switch (snap) {
+        .unknown_tab => return zsbWorkspaceError(out, "unknown_tab"),
+        .not_chat_tab => return zsbWorkspaceError(out, "not_chat_tab"),
+        .failed => |code| return zsbWorkspaceError(out, code),
+        .already => |agent| {
+            const text = std.fmt.bufPrint(out, "{{\"ok\":true,\"status\":\"already\",\"tab\":{d},\"provider\":\"{s}\"}}\n", .{ args.tab, ws_switch.agentProviderName(agent) orelse "" }) catch return 0;
+            return text.len;
+        },
+        .ready => |info| {
+            const current_name = ws_switch.agentProviderName(info.current_agent) orelse "";
+            switch (ops.switchChat(info.identity, args.target)) {
+                .switched => |done| {
+                    if (!ops.adopt(args.tab, done.agent, done.sid[0..done.sid_len])) {
+                        const text = std.fmt.bufPrint(out, "{{\"ok\":true,\"status\":\"failed\",\"reason\":\"adopt failed\",\"tab\":{d},\"provider\":\"{s}\"}}\n", .{ args.tab, current_name }) catch return 0;
+                        return text.len;
+                    }
+                    const provider_name = ws_switch.agentProviderName(done.agent) orelse "";
+                    const text = if (done.model_applied) blk: {
+                        if (ws_switch.targetModelLabel(done.agent)) |model| {
+                            break :blk std.fmt.bufPrint(out, "{{\"ok\":true,\"status\":\"switched\",\"tab\":{d},\"provider\":\"{s}\",\"sid\":\"{s}\",\"model\":\"{s}\"}}\n", .{ args.tab, provider_name, done.sid[0..done.sid_len], model }) catch return 0;
+                        }
+                        break :blk std.fmt.bufPrint(out, "{{\"ok\":true,\"status\":\"switched\",\"tab\":{d},\"provider\":\"{s}\",\"sid\":\"{s}\"}}\n", .{ args.tab, provider_name, done.sid[0..done.sid_len] }) catch return 0;
+                    } else std.fmt.bufPrint(out, "{{\"ok\":true,\"status\":\"switched\",\"tab\":{d},\"provider\":\"{s}\",\"sid\":\"{s}\"}}\n", .{ args.tab, provider_name, done.sid[0..done.sid_len] }) catch return 0;
+                    return text.len;
+                },
+                .already => |agent| {
+                    const text = std.fmt.bufPrint(out, "{{\"ok\":true,\"status\":\"already\",\"tab\":{d},\"provider\":\"{s}\"}}\n", .{ args.tab, ws_switch.agentProviderName(agent) orelse "" }) catch return 0;
+                    return text.len;
+                },
+                .busy => {
+                    const text = std.fmt.bufPrint(out, "{{\"ok\":true,\"status\":\"busy\",\"reason\":\"chat_busy\",\"message\":\"Wait for the current reply first\",\"tab\":{d},\"provider\":\"{s}\"}}\n", .{ args.tab, current_name }) catch return 0;
+                    return text.len;
+                },
+                .refused => |reason| {
+                    const owned = reason;
+                    return zsbSwitchAiOutcome(out, "refused", owned.text(), args.tab, current_name);
+                },
+                .failed => |reason| return zsbSwitchAiOutcome(out, "failed", reason, args.tab, current_name),
+            }
+        },
+    }
+}
+
+fn zsbSwitchAiOutcome(out: []u8, status: []const u8, reason: []const u8, tab: u32, provider: []const u8) usize {
+    var pos: usize = 0;
+    const head = std.fmt.bufPrint(out, "{{\"ok\":true,\"status\":\"{s}\",\"reason\":", .{status}) catch return 0;
+    pos = head.len;
+    if (!zsbAppendJsonString(out, &pos, reason)) return 0;
+    const tail = std.fmt.bufPrint(out[pos..], ",\"tab\":{d},\"provider\":\"{s}\"}}\n", .{ tab, provider }) catch return 0;
+    return pos + tail.len;
+}
+
+const ZsbSwitchAiLiveOps = struct {
+    fn snapshot(tab: u32, target: u8) @import("workspace_switch_ai.zig").SnapshotResult {
+        return @import("workspace_switch_ai.zig").snapshotTabFromWorker(tab, target);
+    }
+    fn switchChat(identity: @import("session_identity.zig").Session, target: u8) @import("workspace_switch_ai.zig").SwitchOutcome {
+        return @import("workspace_switch_ai.zig").switchChatLive(identity, target);
+    }
+    fn adopt(tab: u32, agent: u8, sid: []const u8) bool {
+        return @import("workspace_switch_ai.zig").adoptTabFromWorker(tab, agent, sid);
+    }
+};
+
+fn sendZsbSwitchAiResponse(client: SOCKET, argv: []const []const u8) void {
+    var out: [4096]u8 = undefined;
+    var len = zsbSessionSwitchAi(argv, &out, ZsbSwitchAiLiveOps);
+    if (len == 0) len = zsbWorkspaceError(&out, "response_too_large");
+    socketSendAll(client, out[0..len]);
 }
 
 pub fn handleZsbWorkspaceRequest() void {
@@ -3556,4 +3675,81 @@ test "session-rebind points a tab at another session and refuses duplicates lock
     app_state.g_account_locked = true;
     try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"account_locked\"}\n", zsbTabTestRun(&.{ "session-rebind", "--tab", "43", "--tmux", "runner-10" }, &out));
     try std.testing.expectEqual(active, app_state.active_shell);
+}
+
+test "MUBO-535 session-switch-ai switches live chats adopts state skips already and handles busy and failures" {
+    const saved = try ZsbWorkspaceTest.init();
+    defer saved.deinit();
+    ZsbTabTestOps.reset();
+    var out: [4096]u8 = undefined;
+    try zsbTabTestOpen("live-chat-1", &out);
+    const old_sid = "11111111-1111-4111-8111-111111111111";
+    const new_sid = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+    app_state.shells[1].ai_agent = 1;
+    @memcpy(app_state.shells[1].claude_sid[0..old_sid.len], old_sid);
+    app_state.shells[1].claude_sid_len = old_sid.len;
+
+    const list_len = zsbWorkspaceList(&out);
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, out[0..list_len], .{});
+    defer parsed.deinit();
+    const local_tab = parsed.value.object.get("workspaces").?.array.items[0].object.get("tabs").?.array.items[0];
+    try std.testing.expect(!local_tab.object.get("chat").?.bool);
+    try std.testing.expect(local_tab.object.get("provider").? == .null);
+    const chat_tab = parsed.value.object.get("workspaces").?.array.items[1].object.get("groups").?.array.items[0].object.get("tabs").?.array.items[0];
+    try std.testing.expect(chat_tab.object.get("chat").?.bool);
+    try std.testing.expectEqualStrings("claude", chat_tab.object.get("provider").?.string);
+
+    const FakeSwitchOps = struct {
+        const ws_switch = @import("workspace_switch_ai.zig");
+        var calls: usize = 0;
+        var mode: enum { switched, busy, failed, refused } = .switched;
+        var model_applied: bool = false;
+        fn snapshot(tab: u32, target: u8) ws_switch.SnapshotResult {
+            return ws_switch.snapshotTabOnUi(tab, target);
+        }
+        fn switchChat(_: @import("session_identity.zig").Session, target: u8) ws_switch.SwitchOutcome {
+            calls += 1;
+            return switch (mode) {
+                .switched => blk: {
+                    var sid = std.mem.zeroes([40]u8);
+                    @memcpy(sid[0..new_sid.len], new_sid);
+                    break :blk .{ .switched = .{ .agent = target, .sid = sid, .sid_len = new_sid.len, .model_applied = model_applied } };
+                },
+                .busy => .busy,
+                .refused => .{ .refused = ws_switch.reasonText("unsupported_provider") },
+                .failed => .{ .failed = "the new AI could not start" },
+            };
+        }
+        fn adopt(tab: u32, agent: u8, sid: []const u8) bool {
+            return ws_switch.adoptChatOnUiWithPersist(tab, agent, sid, ZsbTabTestOps.persist);
+        }
+    };
+
+    try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"bad_args\"}\n", out[0..zsbSessionSwitchAi(&.{ "session-switch-ai", "--tab", "42" }, &out, FakeSwitchOps)]);
+    try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"invalid_target\"}\n", out[0..zsbSessionSwitchAi(&.{ "session-switch-ai", "--tab", "42", "--to", "grok" }, &out, FakeSwitchOps)]);
+    try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"unknown_tab\"}\n", out[0..zsbSessionSwitchAi(&.{ "session-switch-ai", "--tab", "99", "--to", "codex" }, &out, FakeSwitchOps)]);
+    try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"not_chat_tab\"}\n", out[0..zsbSessionSwitchAi(&.{ "session-switch-ai", "--tab", "41", "--to", "codex" }, &out, FakeSwitchOps)]);
+    try std.testing.expectEqualStrings("{\"ok\":true,\"status\":\"already\",\"tab\":42,\"provider\":\"claude\"}\n", out[0..zsbSessionSwitchAi(&.{ "session-switch-ai", "--tab", "42", "--to", "claude" }, &out, FakeSwitchOps)]);
+    try std.testing.expectEqual(@as(usize, 0), FakeSwitchOps.calls);
+
+    FakeSwitchOps.mode = .busy;
+    try std.testing.expectEqualStrings("{\"ok\":true,\"status\":\"busy\",\"reason\":\"chat_busy\",\"message\":\"Wait for the current reply first\",\"tab\":42,\"provider\":\"claude\"}\n", out[0..zsbSessionSwitchAi(&.{ "session-switch-ai", "--tab", "42", "--to", "codex" }, &out, FakeSwitchOps)]);
+    try std.testing.expectEqual(@as(u8, 1), app_state.shells[1].ai_agent);
+
+    FakeSwitchOps.mode = .failed;
+    try std.testing.expectEqualStrings("{\"ok\":true,\"status\":\"failed\",\"reason\":\"the new AI could not start\",\"tab\":42,\"provider\":\"claude\"}\n", out[0..zsbSessionSwitchAi(&.{ "session-switch-ai", "--tab", "42", "--to", "codex" }, &out, FakeSwitchOps)]);
+
+    FakeSwitchOps.mode = .refused;
+    try std.testing.expectEqualStrings("{\"ok\":true,\"status\":\"refused\",\"reason\":\"unsupported_provider\",\"tab\":42,\"provider\":\"claude\"}\n", out[0..zsbSessionSwitchAi(&.{ "session-switch-ai", "--tab", "42", "--to", "antigravity" }, &out, FakeSwitchOps)]);
+    try std.testing.expectEqual(@as(u8, 1), app_state.shells[1].ai_agent);
+
+    FakeSwitchOps.mode = .switched;
+    FakeSwitchOps.model_applied = true;
+    try std.testing.expectEqualStrings("{\"ok\":true,\"status\":\"switched\",\"tab\":42,\"provider\":\"codex\",\"sid\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\",\"model\":\"gpt-6.1-sol\"}\n", out[0..zsbSessionSwitchAi(&.{ "session-switch-ai", "--tab", "42", "--to", "codex" }, &out, FakeSwitchOps)]);
+    try std.testing.expectEqual(@as(u8, 2), app_state.shells[1].ai_agent);
+    try std.testing.expectEqualStrings(new_sid, app_state.shells[1].claude_sid[0..app_state.shells[1].claude_sid_len]);
+    try std.testing.expectEqual(@as(usize, 1), ZsbTabTestOps.persisted);
+    const before_repeat = FakeSwitchOps.calls;
+    try std.testing.expectEqualStrings("{\"ok\":true,\"status\":\"already\",\"tab\":42,\"provider\":\"codex\"}\n", out[0..zsbSessionSwitchAi(&.{ "session-switch-ai", "--tab", "42", "--to", "codex" }, &out, FakeSwitchOps)]);
+    try std.testing.expectEqual(before_repeat, FakeSwitchOps.calls);
 }

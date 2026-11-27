@@ -34,7 +34,7 @@ print_help() {
       status|version) deadline=5 ;;
       doctor) deadline=20 ;;
       text|get-text|snapshot|cdp|eval|script) deadline=30 ;;
-      screenshot|shoturl) deadline=60 ;;
+      screenshot|shoturl|session-switch-ai) deadline=60 ;;
       selftest) deadline=180 ;;
     esac
     case "$1" in
@@ -80,6 +80,11 @@ print_help() {
       session-wait) echo 'usage: zsb session-wait --tab <id>'
         echo '  Puts one background terminal tab in Waiting until it needs attention, and changes nothing when it already waits.'
         echo '  The active tab is refused with active_tab; an unknown tab with unknown_tab.'
+        ;;
+      session-switch-ai) echo 'usage: zsb session-switch-ai --tab <id> --to <claude|codex|antigravity>'
+        echo '  Switches one live chat tab to another AI through the host handover, keeping its name, picture, place and history.'
+        echo '  Already on target returns status=already; a busy chat returns status=busy without interrupting it.'
+        echo '  A target the host does not support yet returns status=refused with the host reason.'
         ;;
       session-move) echo 'usage: zsb session-move --tab <id> [--workspace <name>] [--group <name> | --ungrouped]'
         echo '  Moves a background tab to a workspace and/or group by exact name. Moving to another workspace without --group leaves the tab ungrouped.'
@@ -185,6 +190,8 @@ Commands and flags:
   session-unarchive --tmux SESSION [--host HOST]
                                     Reopen one archived session as a tab
   session-wait --tab ID             Put a background tab in Waiting until it needs attention
+  session-switch-ai --tab ID --to AI
+                                    Switch one live chat tab to claude, codex or antigravity
   open <url>                         Open a browser pane for this session
   navigate <url> [--new-tab]         Reuse only untouched agent target; otherwise append; --new-tab always creates
   tabs [--close ID]                  List tabs or close one
@@ -250,7 +257,7 @@ fi
 
 sess=""
 fallback_sess="${ZSB_SESSION:-}"
-if [ "$1" = "workspace-list" ] || [ "$1" = "session-open" ] || [ "$1" = "shell-open" ] || [ "$1" = "session-status" ] || [ "$1" = "session-close" ] || [ "$1" = "session-wait" ] || [ "$1" = "session-rebind" ] || [ "$1" = "session-rename" ] || [ "$1" = "session-move" ] || [ "$1" = "session-pin" ] || [ "$1" = "session-unpin" ] || [ "$1" = "session-archive" ] || [ "$1" = "session-unarchive" ]; then
+if [ "$1" = "workspace-list" ] || [ "$1" = "session-open" ] || [ "$1" = "shell-open" ] || [ "$1" = "session-status" ] || [ "$1" = "session-switch-ai" ] || [ "$1" = "session-close" ] || [ "$1" = "session-wait" ] || [ "$1" = "session-rebind" ] || [ "$1" = "session-rename" ] || [ "$1" = "session-move" ] || [ "$1" = "session-pin" ] || [ "$1" = "session-unpin" ] || [ "$1" = "session-archive" ] || [ "$1" = "session-unarchive" ]; then
   sess="workspace"
 elif [ -n "${TMUX:-}" ]; then
   sess="$(tmux display-message -p '#S' 2>/dev/null || true)"
@@ -536,7 +543,7 @@ def fail(code, message, reply=None, hint=None):
 script_mode = args[0] == "cdp" and len(args) > 1 and args[1] == "--script"
 default_timeout = {"status": 5, "version": 5, "doctor": 20,
                    "text": 30, "get-text": 30, "snapshot": 30, "cdp": 30, "eval": 30, "script": 30,
-                   "screenshot": 60, "shoturl": 60}.get(args[0], 15)
+                   "screenshot": 60, "shoturl": 60, "session-switch-ai": 60}.get(args[0], 15)
 if script_mode:
     default_timeout = 360
 try:
@@ -608,10 +615,11 @@ elif args[0] == "session-open":
     if any(len(value.encode()) > 256 for value in values.values()):
         fail("bad_args", "session-open argument too long")
 
-elif args[0] in {"session-close", "session-wait", "session-rebind", "session-rename", "session-move", "session-pin", "session-unpin", "session-archive"}:
+elif args[0] in {"session-close", "session-wait", "session-switch-ai", "session-rebind", "session-rename", "session-move", "session-pin", "session-unpin", "session-archive"}:
     edit_specs = {
         "session-close": ({"--tab"}, {"--tab"}),
         "session-wait": ({"--tab"}, {"--tab"}),
+        "session-switch-ai": ({"--tab", "--to"}, {"--tab", "--to"}),
         "session-rename": ({"--tab", "--name"}, {"--tab", "--name"}),
         "session-rebind": ({"--tab", "--host", "--tmux"}, {"--tab", "--tmux"}),
         "session-move": ({"--tab", "--workspace", "--group"}, {"--tab"}),
@@ -652,6 +660,8 @@ elif args[0] in {"session-close", "session-wait", "session-rebind", "session-ren
             raise ValueError()
     except ValueError:
         fail("bad_args", f"{args[0]} --tab must be a positive tab id")
+    if args[0] == "session-switch-ai" and values["--to"] not in {"claude", "codex", "antigravity"}:
+        fail("bad_args", "session-switch-ai --to must be claude, codex or antigravity")
     if args[0] == "session-move":
         if not (values.keys() & {"--workspace", "--group"}) and not ungrouped:
             fail("bad_args", "session-move needs --workspace, --group or --ungrouped")
@@ -936,7 +946,7 @@ if reply.get("pane") == "closed":
     fail("pane_closed", "browser pane closed: open/rebind the browser pane for this exact multiprompt tab.")
 if reply["ok"] is not True:
     message = reply.get("message") or reply.get("error") or "multiprompt command failed"
-    hint = reply.get("hint") or ("Use zsb workspace-list to find workspace, group and host names." if args[0] in {"workspace-list", "session-open", "shell-open", "session-status", "session-close", "session-wait", "session-rebind", "session-rename", "session-move", "session-pin", "session-unpin", "session-archive", "session-unarchive"} else "Reload the multiprompt extension in the browser or reopen/rebind this session's browser pane.")
+    hint = reply.get("hint") or ("Use zsb workspace-list to find workspace, group and host names." if args[0] in {"workspace-list", "session-open", "shell-open", "session-status", "session-switch-ai", "session-close", "session-wait", "session-rebind", "session-rename", "session-move", "session-pin", "session-unpin", "session-archive", "session-unarchive"} else "Reload the multiprompt extension in the browser or reopen/rebind this session's browser pane.")
     fail(reply.get("error", "command_failed"), f"{message}. {hint}", reply)
 result = reply.get("result", {})
 if args[0] == "tabs" and len(args) == 1:

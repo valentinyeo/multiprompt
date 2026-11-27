@@ -7,11 +7,12 @@ Release paths: src/workspace*.zig, src/room*, src/groups*.zig, src/main.zig, bui
 
 ## Sub-features
 - `workspace` creates, switches, aggregates favorite sessions in Starred, snoozes, and archives session collections.
+- `switch-ai` moves every live chat in one workspace to Antigravity, Codex or Claude, and leaves each chat's name, picture, place and readable history in place.
 - `restore` brings archived workspaces and their sessions back.
 - `room` creates, opens, and edits a shared multi-agent conversation.
 
 ## How to get to it (user POV)
-- Click the workspace name/card; Ctrl+N or Alt+N creates; Alt+1 opens Starred; Alt+2…9 selects stored workspaces; Alt+Left/Right cycles; Ctrl+Shift+N or Ctrl+K New room creates a Room; search its name or Edit room.
+- Click the workspace name/card; Ctrl+N or Alt+N creates; Alt+1 opens Starred; Alt+2…9 selects stored workspaces; Alt+Left/Right cycles; Ctrl+Shift+N or Ctrl+K New room creates a Room; search its name or Edit room. Ctrl+K **Workspace: Switch every chat to Antigravity** (or Codex, Claude) switches the whole workspace, and `mb workspace switch-ai <workspace> <target>` does the same from the command line.
 
 ## Driving it with drive.ps1
 Preconditions: single-window mode, fresh hosted Windows desktop, matching executable/hash/version, isolated app data, and the selected legacy recipe’s prerequisites.
@@ -52,6 +53,22 @@ Journey: workspaces, workspace-focus, sessions. UNREACHABLE for cross-device fol
 | `SEARCH_WSMOVE_OFFSET` | Choose **Move to workspace**, then select its destination name. Follow `workspace` above. |
 | `SEARCH_WSSORT_MENU_OFFSET` | Ctrl+K, search for **sort workspaces**. Follow `workspace` above. |
 | `SEARCH_WSSORT_OFFSET` | Open **Sort workspaces**, then choose the displayed sort mode. Follow `workspace` above. |
+
+### switch-ai: Switch every chat in a workspace
+
+Open Ctrl+K in the workspace that owns the chats, search **switch all chats**, pick the target AI (Claude, Codex or Antigravity) and confirm. Every live chat in that workspace moves to the target: each keeps its sidebar name, picture, place and readable history, and each one's transcript gains the same Switch AI divider a single chat switch leaves. A chat that is still writing its reply is skipped in that pass and listed in the summary; it switches once its reply ends. Chats already on the target are counted once and report `status=already`. The same bulk switch runs headless as `mb workspace switch-ai <workspace> <claude|codex|antigravity> [--json] [--timeout SECONDS]`, which prints one line per switched, skipped or refused chat.
+
+Observable proof: `mb workspace switch-ai` output lists every chat with `switched`, `already`, `busy` or `refused` plus a reason, and a repeat run reports the same chats as `already`. In the app, each switched chat keeps its row name and picture, shows its earlier messages above the divider, and the next message is answered by the new provider. A chat on a provider the host cannot start yet is refused with the host reason and stays on its current AI.
+
+Journey: none yet. MUBO-564 owns the real bulk-switching journey video; until it lands this recipe is documented and not covered by a recorded run.
+
+| Palette row or dynamic family | User reaches it |
+| --- | --- |
+| `SEARCH_WS_SWITCH_CLAUDE_OFFSET` | Ctrl+K, type **switch all chats claude**, then choose the workspace row. Follow `switch-ai` above. |
+| `SEARCH_WS_SWITCH_CODEX_OFFSET` | Ctrl+K, type **switch all chats codex**, then choose the workspace row. Follow `switch-ai` above. |
+| `SEARCH_WS_SWITCH_ANTIGRAVITY_OFFSET` | Ctrl+K, type **switch all chats antigravity**, then choose the workspace row. Follow `switch-ai` above. |
+
+Source files: src/workspace_switch_ai.zig, src/command_palette.zig, src/sidebar.zig, src/shortcuts.zig, src/browser_bridge.zig, src/mp_zsb.sh, tools/mb.mjs, tools/mb-workspace-switch-ai.test.js
 
 ### room: Rooms
 
