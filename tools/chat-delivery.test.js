@@ -1199,6 +1199,44 @@ test "delivery: IGSH-1828 Cancel and Delete take back a handed-off waiting messa
     try std.testing.expectEqual(@as(usize, 1), channel_starts);
     try std.testing.expectEqual(@as(usize, 1), g_chat_outbox.items.len);
 }
+test "MUBO-601 Resend retries the same shared message without minting another wire id" {
+    defer clear();
+    try enqueue(std.unicode.utf8ToUtf16LeStringLiteral("retry once"), .not_sent);
+    const entry = &g_chat_outbox.items[0];
+    entry.message_v1 = true;
+    entry.write_started = true;
+    @memcpy(entry.message_phase[0..4], "sent");
+    @memcpy(entry.message_sid[0..1], "s");
+    @memcpy(entry.message_wire_id[0..19], "message_mubo601_0001");
+    const wire = entry.message_wire_id;
+    chatEchoSendAgain(entry.id);
+    try std.testing.expectEqual(@as(usize, 1), channel_starts);
+    try std.testing.expect(g_chat_tmux_send_job.?.retry);
+    try std.testing.expectEqualSlices(u8, &wire, &entry.message_wire_id);
+    try std.testing.expect(entry.retry_nonce != 0);
+    chatEchoSendAgain(entry.id);
+    try std.testing.expectEqual(@as(usize, 1), channel_starts);
+    try std.testing.expectEqual(@as(usize, 1), g_chat_outbox.items.len);
+}
+test "MUBO-601 a failed shared message is deleted locally when cancellation arrives" {
+    defer clear();
+    try enqueue(std.unicode.utf8ToUtf16LeStringLiteral("delete failure"), .not_sent);
+    const entry = &g_chat_outbox.items[0];
+    entry.message_v1 = true;
+    entry.write_started = true;
+    @memcpy(entry.message_phase[0..6], "failed");
+    @memcpy(entry.message_sid[0..1], "s");
+    @memcpy(entry.message_wire_id[0..19], "message_mubo601_0001");
+    chatEchoRemove(entry.id);
+    try std.testing.expectEqual(@as(usize, 1), channel_starts);
+    var parsed = try json_reader.parse(std.heap.page_allocator, "{\\"id\\":\\"message_mubo601_0001\\",\\"state\\":\\"cancelled\\"}");
+    defer parsed.deinit();
+    try std.testing.expect(chatMessageReduce(0, parsed.value));
+    try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
+    try std.testing.expect(saveChatOutbox());
+    try reload();
+    try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
+}
 test "delivery: IGSH-442 Send again never writes a transcript-confirmed message" {
     defer clear();
     const text = std.unicode.utf8ToUtf16LeStringLiteral("already arrived");
@@ -1280,7 +1318,7 @@ test "ISSUE-501 reattach flushes FIFO exactly once through confirmed outbox stat
     try std.testing.expectEqual(@as(usize, 2), writes);
     try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
 }
-test "ISSUE-460 pending Chat View IDs equal the ordered outbox across save and reload" {
+test "MUBO-601 queued messages stay out of the transcript across save and reload" {
     defer clear();
     for ([_]ChatEchoState{ .queued, .delivered, .not_sent }) |state| {
         try enqueue(std.unicode.utf8ToUtf16LeStringLiteral("pending request"), state);
@@ -1288,8 +1326,8 @@ test "ISSUE-460 pending Chat View IDs equal the ordered outbox across save and r
     try std.testing.expect(chatOutboxEnqueueInState(&g_chat_outbox, std.heap.page_allocator, "other", std.unicode.utf8ToUtf16LeStringLiteral("other session"), .queued));
     for (0..2) |_| {
         layoutPending();
-        try std.testing.expectEqual(@as(usize, 3), g_chat_echo_layout_count);
-        for (g_chat_outbox.items[0..3], g_chat_echo_layout_ids[0..g_chat_echo_layout_count]) |entry, id| {
+        try std.testing.expectEqual(@as(usize, 2), g_chat_echo_layout_count);
+        for (g_chat_outbox.items[1..3], g_chat_echo_layout_ids[0..g_chat_echo_layout_count]) |entry, id| {
             try std.testing.expectEqual(entry.id, id);
         }
         try std.testing.expectEqual(chat_echo.Label.sending, chat_echo.pendingLabel(.offline_queue, false));

@@ -53,7 +53,7 @@ fn sync() void {
         const key = if (named) chat_send.chatOutboxKeyForShell(app_state.active_shell, &key_buf) else key_buf[0..0];
         if (key.len > 0) {
             for (app_state.g_chat_outbox.items) |entry| {
-                if (entry.state != .queued) continue;
+                if (!@import("chat_echo.zig").shownInQueue(entry.state)) continue;
                 if (!std.mem.eql(u8, entry.key[0..@as(usize, entry.key_len)], key)) continue;
                 next.add(entry.id, entry.text);
             }

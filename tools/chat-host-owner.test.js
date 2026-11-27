@@ -45,7 +45,7 @@ with tempfile.TemporaryDirectory() as directory:
         def __enter__(self): return self
         def __exit__(self, *args): pass
         def register(self, *args): pass
-        def select(self, timeout): return [(SimpleNamespace(data='agent'), None)]
+        def select(self, timeout): return [(SimpleNamespace(data='agent', fileobj=agent.stdout), None)]
     state = {}
     agent = SimpleNamespace(stdin=None, stdout=SimpleNamespace(read1=lambda size: b''))
     with patch.object(selectors, 'DefaultSelector', Selector):
@@ -168,7 +168,7 @@ with tempfile.TemporaryDirectory() as directory:
         def __enter__(self): return self
         def __exit__(self, *args): pass
         def register(self, *args): pass
-        def select(self, timeout): return [(SimpleNamespace(data='agent'), None)]
+        def select(self, timeout): return [(SimpleNamespace(data='agent', fileobj=agent.stdout), None)]
     for local, ready in ((False, False), (False, True), (True, False)):
         sid = 'synthetic-eof-' + str(local) + str(ready)
         r['conversation_owner'] = (lambda value, include_home=False: None) if local else (lambda value, include_home=False: ('synthetic_owner', owner_home))

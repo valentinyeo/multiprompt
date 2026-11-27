@@ -4841,6 +4841,7 @@ class MUBO_594_QueuedMessageActionsTest(unittest.TestCase):
         patch.object(reader, 'CONNECTOR_SOURCES', self.sources, create=True).start()
         patch.object(reader, 'resolve_tmux_agent', return_value=('sid', self.path)).start()
         patch.object(reader, 'send_response_preserve_draft', return_value={'status': 'sent'}).start()
+        patch.object(reader, 'send_now_response', return_value='ok').start()
 
     def request(self, op, **values):
         return reader.message_store_request(dict(self.base, op='message_' + op, **values))
@@ -4919,6 +4920,172 @@ class MUBO_594_QueuedMessageActionsTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             reader.message_store_request(dict(other, op='message_send_now', message_id='message_mubo594_0001'))
         self.assertEqual((self.text()['text'], self.text()['state']), ('queued prompt', 'queued'))
+
+
+class MUBO_601_UnacknowledgedSendTest(MUBO_594_QueuedMessageActionsTest):
+    def setUp(self):
+        super().setUp()
+        self.base.update(provider='antigravity')
+        self.session = dict(state=dict(native_session='native-conversation-601'))
+        self.agent = types.SimpleNamespace(stdin=io.BytesIO(), stdout=io.BytesIO(), pid=601)
+        reader.host_session_reset(self.session, self.agent)
+        self.session['ready'] = True
+        reader.host_write(reader.host_paths('antigravity', 'sid')['config'],
+                          dict(enabled=True, tmux='fixture', cwd=str(self.home), command=['agy']))
+        reader.host_state_write('antigravity', 'sid', self.session['state'])
+        patch.object(reader, 'host_dispatch_start', return_value=dict(status='owned')).start()
+        patch.object(reader, 'host_owned', return_value=True).start()
+        patch.object(reader, 'host_request', side_effect=self.host_request).start()
+        patch.object(reader, 'host_deliver', side_effect=self.deliver).start()
+        self.stop_agent = patch.object(reader, 'host_agent_stop').start()
+        self.start_agent = patch.object(reader, 'host_agent_start', side_effect=self.new_agent).start()
+
+    def new_agent(self, *args):
+        self.agent = types.SimpleNamespace(stdin=io.BytesIO(), stdout=io.BytesIO(), pid=602)
+        return self.agent
+
+    def host_request(self, provider, sid, request, **kwargs):
+        return reader.host_handle_request(provider, sid, self.base['tmux'], self.session, request)
+
+    def deliver(self, provider, sid, token, attempt, epoch, text, **kwargs):
+        return self.host_request(provider, sid, dict(op='deliver', id=token, attempt=attempt, epoch=epoch, text=text))
+
+    def send(self):
+        row = self.submit()
+        self.request('dispatch')
+        self.assertEqual(self.text()['state'], 'sent')
+        self.assertIsNone(self.text()['receipt'])
+        return row
+
+    def watchdog(self, progress=False):
+        sent = self.session['sends'][0]['at']
+        now = sent + reader.HOST_ACK_TIMEOUT + 1
+        self.session['stdout_at'] = now if progress else sent
+        reader.host_ack_watchdog('antigravity', 'sid', 'fixture', self.session, now)
+
+    def test_stalled_send_fails_and_reopens_the_same_native_conversation(self):
+        self.send()
+        self.watchdog()
+        self.assertEqual(self.text()['state'], 'failed')
+        self.assertIsNone(self.session['inflight'])
+        self.stop_agent.assert_called_once()
+        self.start_agent.assert_called_once()
+        argv = reader.host_antigravity_argv('antigravity', 'sid', ['agy'])
+        self.assertEqual(argv[-2:], ['--conversation', 'native-conversation-601'])
+
+    def test_ack_timeout_is_bounded_even_while_stdout_progresses(self):
+        self.send()
+        self.watchdog(progress=True)
+        self.assertEqual(self.text()['state'], 'failed')
+        self.start_agent.assert_not_called()
+        self.assertTrue(self.session['sends'][0]['ack_timed_out'])
+        reader.host_accept('antigravity', 'sid', 'fixture', self.session, dict(event='step_update'))
+        self.assertEqual(self.text()['state'], 'accepted')
+
+    def test_no_timeout_before_the_ack_boundary(self):
+        self.send()
+        sent = self.session['sends'][0]['at']
+        reader.host_ack_watchdog('antigravity', 'sid', 'fixture', self.session, sent + reader.HOST_ACK_TIMEOUT - 1)
+        self.assertEqual(self.text()['state'], 'sent')
+        self.stop_agent.assert_not_called()
+
+    def test_accepted_background_turn_is_not_restarted_without_an_unacked_send(self):
+        self.send()
+        reader.host_accept('antigravity', 'sid', 'fixture', self.session, dict(event='step_update'))
+        self.watchdog()
+        self.assertEqual(self.text()['state'], 'accepted')
+        self.stop_agent.assert_not_called()
+
+    def test_a_parked_approval_is_not_a_wedged_host(self):
+        self.send()
+        self.session['parked']['approval'] = dict(kind='approval')
+        self.watchdog()
+        self.assertEqual(self.text()['state'], 'sent')
+        self.stop_agent.assert_not_called()
+
+    def test_retry_of_sent_unacknowledged_keeps_id_and_changes_attempt_once(self):
+        original = self.send()
+        reply = self.request('retry', message_id=original['id'], retry_id='retry_mubo601_0001')['message']
+        self.assertEqual(reply['id'], original['id'])
+        self.assertEqual(reply['state'], 'queued')
+        self.assertNotEqual(reply['attempt'], original['attempt'])
+        self.assertIsNone(reply['receipt'])
+        again = self.request('retry', message_id=original['id'], retry_id='retry_mubo601_0001')['message']
+        self.assertEqual(again['attempt'], reply['attempt'])
+        self.assertEqual(len(self.queued()), 1)
+        self.start_agent.assert_called_once()
+        self.session['ready'] = True
+        self.request('dispatch')
+        self.assertEqual(len(self.agent.stdin.getvalue().splitlines()), 1)
+
+    def test_retry_after_watchdog_does_not_restart_twice(self):
+        original = self.send()
+        self.watchdog()
+        reply = self.request('retry', message_id=original['id'], retry_id='retry_mubo601_0002')['message']
+        self.assertEqual(reply['state'], 'queued')
+        self.start_agent.assert_called_once()
+
+    def test_retry_failed_but_still_unacknowledged_stops_old_stdin(self):
+        original = self.send()
+        self.watchdog(progress=True)
+        self.assertEqual(self.text()['state'], 'failed')
+        self.assertIn(original['id'], reader.host_held('antigravity', 'sid'))
+        reply = self.request('retry', message_id=original['id'], retry_id='retry_mubo601_held')['message']
+        self.assertEqual(reply['state'], 'queued')
+        self.assertNotEqual(reply['attempt'], original['attempt'])
+        self.stop_agent.assert_called_once()
+        self.start_agent.assert_called_once()
+        self.assertEqual(self.session['sends'], [])
+
+    def test_retry_refuses_an_accepted_message(self):
+        original = self.send()
+        reader.host_accept('antigravity', 'sid', 'fixture', self.session, dict(event='step_update'))
+        with self.assertRaises(ValueError):
+            self.request('retry', message_id=original['id'], retry_id='retry_mubo601_0003')
+        self.stop_agent.assert_not_called()
+
+    def test_delete_sent_unacknowledged_survives_snapshot_and_late_receipt(self):
+        original = self.send()
+        reply = self.request('dismiss', message_id=original['id'])['message']
+        self.assertEqual(reply['state'], 'cancelled')
+        self.assertEqual(self.request('dismiss', message_id=original['id'])['message']['state'], 'cancelled')
+        db = reader.message_store_db('fixture')
+        with db:
+            reader.message_apply_connector(db, 'antigravity', 'sid', 0, dict(state={}, facts=[
+                dict(kind='accepted', sid='sid', id=original['id'], attempt=original['attempt'], event_id='late-601')]))
+        db.close()
+        self.assertEqual(self.queued()[0]['state'], 'cancelled')
+        self.assertEqual(self.session['sends'], [])
+
+    def test_delete_failed_but_still_unacknowledged_stops_old_stdin(self):
+        original = self.send()
+        self.watchdog(progress=True)
+        self.assertEqual(self.request('dismiss', message_id=original['id'])['message']['state'], 'cancelled')
+        self.start_agent.assert_called_once()
+        self.assertEqual(self.queued()[0]['state'], 'cancelled')
+
+    def test_send_now_first_in_queue_dispatches_even_without_a_promotion(self):
+        original = self.submit()
+        result = self.request('send_now', message_id=original['id'])
+        self.assertFalse(result['promoted'])
+        self.assertEqual(result['message']['state'], 'sent')
+        self.assertEqual(len(self.agent.stdin.getvalue().splitlines()), 1)
+        self.request('send_now', message_id=original['id'])
+        self.assertEqual(len(self.agent.stdin.getvalue().splitlines()), 1)
+
+    def test_send_now_interrupts_a_wedged_turn_and_sends_target_before_the_rest(self):
+        self.send()
+        self.submit('message_mubo601_0002', 'wait for later')
+        self.submit('message_mubo601_0003', 'do this now')
+        result = self.request('send_now', message_id='message_mubo601_0003')
+        self.assertTrue(result['promoted'])
+        self.start_agent.assert_called_once()
+        self.assertEqual(self.session['sends'], [])
+        self.session['ready'] = True
+        self.request('dispatch')
+        lines = [json.loads(line) for line in self.agent.stdin.getvalue().splitlines()]
+        self.assertEqual([line['message']['content'] for line in lines], ['do this now'])
+        self.assertEqual(self.text('message_mubo601_0002')['state'], 'queued')
 
 
 class IGSH_1900_MpSendReportTest(unittest.TestCase):
@@ -8531,7 +8698,7 @@ class IGSH_1828_HostRecallTest(HostControlFixture, unittest.TestCase):
     def test_an_unsupported_provider_never_substitutes_an_interrupt(self):
         target = self.deliver('host_fixture_message_01')
         previous = self.writes()
-        for provider in ('codex', 'pi', 'hax', 'cursor', 'antigravity'):
+        for provider in ('codex', 'pi', 'hax'):
             result = reader.host_handle_request(provider, self.sid, self.tmux, self.session,
                                                 dict(op='recall', id=target['id'], attempt='attempt-1'))
             self.assertEqual(result['reason'], 'recall_unavailable')

@@ -797,13 +797,13 @@ test "hidden reaction and its lone reply leave no New divider" {
 });
 
 
-test('IGSH-1624 all pending states have the same plain bubble geometry', () => {
+test('MUBO-601 queued echoes stay out of the transcript and other states keep their geometry', () => {
   const statusArg = source.includes('y: i32, status: bool, projection:') ? ', _: bool' : '';
   const prelude = layout
     .replace('return "";', 'return "k";')
     .replace(`fn chatMeasureEchoRect(_: HANDLE, _: []const u16, _: i32, _: i32${statusArg}) RECT { unreachable; }`, `fn chatMeasureEchoRect(_: HANDLE, _: []const u16, w: i32, y: i32${statusArg}) RECT { return .{ .left = 0, .top = y, .right = w, .bottom = y + 20 }; }`);
   const checks = `
-test "pending geometry is independent of state and clean mode" {
+test "queue-only echoes and pending bubble geometry in both clean modes" {
     g_chat_block_count = 0;
     for ([_]bool{ false, true }) |clean| {
         clean_chat = clean;
@@ -811,8 +811,10 @@ test "pending geometry is independent of state and clean mode" {
             const entries = [_]@TypeOf(g_chat_outbox.items[0]){.{ .key = .{ 'k', 0, 0, 0, 0, 0, 0, 0 }, .key_len = 1, .text = &.{'x'}, .id = 1, .state = state }};
             g_chat_outbox.items = &entries;
             chatRelayout(400);
-            try std.testing.expectEqual(@as(usize, 1), g_chat_echo_layout_count);
-            try std.testing.expectEqual(@as(i32, if (state == .not_sent) 40 else 20), g_chat_echo_layout[0].bottom - g_chat_echo_layout[0].top);
+            try std.testing.expectEqual(@as(usize, if (state == .queued) 0 else 1), g_chat_echo_layout_count);
+            if (state != .queued) {
+                try std.testing.expectEqual(@as(i32, if (state == .not_sent) 40 else 20), g_chat_echo_layout[0].bottom - g_chat_echo_layout[0].top);
+            }
         }
     }
 }
