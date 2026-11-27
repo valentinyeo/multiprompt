@@ -701,7 +701,7 @@ pub fn dispatch(wp: usize) void {
     };
     switch (item) {
         .ai, .models, .efforts, .permissions, .full_access => {},
-        .attach => _ = focus.PostMessageW(app_state.g_main_hwnd, w.WM_APP_CHAT_ATTACH, 0, 0),
+        .attach => _ = focus.PostMessageW(app_state.g_main_hwnd, app_state.WM_APP_CHAT_ATTACH, 0, 0),
         .model_opus, .model_sonnet, .model_haiku, .model_fable, .model_sol, .model_terra, .model_luna, .model_astra, .model_neon, .model_carbon, .model_argon, .model_hydrogen, .model_flash, .model_agy_opus, .model_agy_sonnet, .effort_low, .effort_medium, .effort_high, .effort_xhigh => {
             const setting: @import("chat_live.zig").Setting = switch (item) {
                 .model_opus => .{ .model = .opus },

@@ -131,7 +131,7 @@ test('settings notice literals occur only at the named call sites', () => {
   assert.deepEqual(calls.sort(), [
     'chat_send.zig:sendChatPrompt:Wait for chat settings to update',
     'main.zig:wndProc:Could not change chat settings',
-    'main.zig:wndProc:Could not change chat settings',
+    'plus_menu.zig:dispatch:Could not change chat settings',
   ]);
 });
 

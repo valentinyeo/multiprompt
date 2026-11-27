@@ -7989,7 +7989,7 @@ def host_cli(argv):
         return dict(chats=host_chats())
     if len(argv) == 2 and argv[0] == "connect":
         return host_connect(argv[1])
-    if not argv or argv[0] not in ("start", "stop", "status", "enable", "disable", "handover", "adopt", "terminal", "resume", "send", "restart", "fresh-start", "switch-ai"):
+    if not argv or argv[0] not in ("start", "stop", "status", "enable", "disable", "handover", "adopt", "terminal", "resume", "send", "restart", "fresh-start", "switch-ai", "model", "effort", "permission"):
         return dict(status="error", reason="invalid_command")
     command, rest = argv[0], argv[1:]
     if command == "restart" and rest == ["idle"]:
