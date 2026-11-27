@@ -1,6 +1,6 @@
 # Queued messages tray
 
-Source files: src/chat_queue.zig, src/chat_queue_view.zig, src/chat_echo.zig, src/chat_send.zig, src/chat_render.zig, src/chat_composer.zig, src/chat_history_reader.py, src/app_state.zig, src/main.zig, tools/chat-history-reader-test.py, tools/chat-delivery.test.js, .github/workflows/chat-queued-messages.yml, .claude/skills/verify-multiprompt/features/chat-queued-messages.md
+Source files: src/chat_queue.zig, src/chat_queue_view.zig, src/chat_echo.zig, src/chat_send.zig, src/chat_render.zig, src/chat_composer.zig, src/chat_history_reader.py, src/app_state.zig, tools/chat-history-reader-test.py, tools/chat-delivery.test.js, .github/workflows/chat-queued-messages.yml, .claude/skills/verify-multiprompt/features/chat-queued-messages.md
 
 CI workflow: chat-queued-messages.yml
 
