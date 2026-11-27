@@ -8960,6 +8960,8 @@ def message_worker_lock_path(provider, sid):
 
 
 def message_worker_wake(lock_path):
+    if not hasattr(os, 'O_NONBLOCK'):
+        return
     try:
         fd = os.open(message_worker_wake_path(lock_path), os.O_WRONLY | os.O_NONBLOCK)
     except OSError:
