@@ -357,6 +357,7 @@ fn chatLinkLooksDown(_: u32) bool { return false; }
 fn chatTmuxSendEligible(_: u32) bool { return false; }
 fn chatOutboxTrySendEntry(_: u32, _: usize) bool { return false; }
 fn chatHoldLegacyCodex() bool { return false; }
+fn chatMessageGoesToHost(kind: anytype, ai_agent: u8) bool { return kind == .tmux and (ai_agent == 1 or ai_agent == 2 or ai_agent == 3 or ai_agent == 7 or ai_agent == 8); }
 fn chatMessageSyncFinish() void {}
 fn chatMessageSyncStart(_: u32) void {}
 fn chatOutboxCountForShell(_: u32) usize { return 0; }

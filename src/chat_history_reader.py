@@ -6257,7 +6257,9 @@ def host_ack_watchdog(provider, sid, tmux, session, now=None):
                    provenance=HOST_ADAPTERS[provider]["provenance"])])
         entry["ack_timed_out"] = True
     if expired and now - session.get("stdout_at", min(entry["at"] for entry in expired)) >= HOST_ACK_TIMEOUT:
-        host_recover_agent(provider, sid, tmux, session)
+        inflight = session.get("inflight")
+        if not (isinstance(inflight, dict) and inflight.get("accepted")):
+            host_recover_agent(provider, sid, tmux, session)
 
 
 def host_handle_request(provider, sid, tmux, session, request):
@@ -6394,6 +6396,8 @@ def host_handle_request(provider, sid, tmux, session, request):
         return dict(status="busy", reason="agent_starting")
     if provider == "hax" and (session["turn"] is not None or session["sends"]):
         return dict(status="busy", reason="hax_run_active")
+    if provider == "antigravity" and (session["turn"] is not None or session["sends"]):
+        return dict(status="busy", reason="antigravity_turn_active")
     if provider == "codex" and not isinstance(session.get("native_turn"), str) and "turn" in session["rpc"].values():
         return dict(status="busy", reason="turn_starting")
     binding = dict(v=1, mode=adapter["binding"], host=os.getpid(), session=sid)
@@ -6822,6 +6826,7 @@ def host_turn_end(provider, sid, tmux, session, payload, detail):
         host_fresh_drain_queued(provider, sid, tmux, session)
     if limit is not None:
         host_auto_switch_trigger(provider, sid, tmux, session, inflight, limit)
+    message_worker_wake(message_worker_lock_path(provider, sid))
 
 
 def host_codex_policy(session):
@@ -8921,9 +8926,8 @@ def start_message_worker(q, source):
     if source is None or not message_worker_due(q['provider'], q['sid']):
         return
     import fcntl
-    path = message_store_path()
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    lock_path = path.with_suffix('.' + hashlib.sha256((q['provider'] + ':' + q['sid']).encode()).hexdigest() + '.message-worker')
+    message_store_path().parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    lock_path = message_worker_lock_path(q['provider'], q['sid'])
     lock = lock_path.open('a')
     try:
         try:
@@ -8949,6 +8953,10 @@ def start_message_worker(q, source):
 
 def message_worker_wake_path(lock_path):
     return lock_path.with_suffix('.message-wake')
+
+
+def message_worker_lock_path(provider, sid):
+    return message_store_path().with_suffix('.' + hashlib.sha256((provider + ':' + sid).encode()).hexdigest() + '.message-worker')
 
 
 def message_worker_wake(lock_path):
@@ -9004,8 +9012,7 @@ def message_worker(tmux, provider, sid):
     import fcntl
     import selectors
     from contextlib import closing
-    path = message_store_path()
-    lock_path = path.with_suffix('.' + hashlib.sha256((provider + ':' + sid).encode()).hexdigest() + '.message-worker')
+    lock_path = message_worker_lock_path(provider, sid)
     with message_worker_lock(lock_path) as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)

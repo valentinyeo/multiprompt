@@ -201,7 +201,8 @@ fn chatFileIdentityForShell(_: u32) chat_transcript.Identity {
 }
 fn chatMessageSyncFinish() void {}
 fn chatPendingResetStart(_: u32) void {}
-fn chatMessageSyncStart(_: u32) void {}
+var sync_starts: usize = 0;
+fn chatMessageSyncStart(_: u32) void { sync_starts += 1; }
 const ChatIdentity = chat_transcript.Identity;
 fn chatLogSendPath(_: u32, _: ?*const ChatOutboxEntry, _: ChatSendRoute, _: []const u8) void {}
 const ChatSubmitPatch = struct { write_started: bool, state: ChatEchoState, retryable: bool };
@@ -234,10 +235,10 @@ var composer_text: []const u16 = &.{};
 const g_chat_composer_hwnd: ?*anyopaque = @ptrFromInt(1);
 var g_chat_reply: [1024]u8 = @splat(0);
 var g_chat_reply_len: usize = 0;
-var g_chat_message_wide: [16384]u16 = undefined;
+var g_chat_message_wide: [40000]u16 = undefined;
 var g_chat_skill_name: [256]u8 = @splat(0);
 var g_chat_skill_name_len: usize = 0;
-var g_chat_skill_body: [1024]u8 = @splat(0);
+var g_chat_skill_body: [40000]u8 = @splat(0);
 var g_chat_skill_body_len: usize = 0;
 var g_palette_skills: []skill_model.Skill = &.{};
 var g_voice_mode_active = false;
@@ -388,6 +389,7 @@ fn clear() void {
     question_sends = 0;
     question_send_ok = true;
     question_text = &.{};
+    sync_starts = 0;
     shells[0].activity = .idle;
     shells[0].disconnected = false;
     test_outbox_key = "test";
@@ -565,6 +567,87 @@ test "delivery: IGSH-1679 ordinary composer text still uses the outbox" {
     try std.testing.expectEqualSlices(u16, message, g_chat_outbox.items[0].text);
     try std.testing.expectEqual(@as(usize, 0), composer_text.len);
     try std.testing.expectEqual(@as(usize, 0), rename_calls + save_calls + publish_calls + title_calls);
+}
+test "delivery: MUBO-607 an oversized skill keeps the typed prompt and clears the latch" {
+    defer clear();
+    var big_body: [36000]u8 = undefined;
+    @memset(&big_body, 'x');
+    const skill = skill_model.Skill{ .name = @constCast("poteto-mode"), .description = @constCast(""), .body = &big_body, .source = .multiprompt };
+    g_palette_skills = &.{skill};
+    defer g_palette_skills = &.{};
+    g_chat_skill_name_len = 0;
+    g_chat_skill_body_len = 0;
+    composer_text = std.unicode.utf8ToUtf16LeStringLiteral("please follow /poteto-mode today");
+    sendChatPrompt();
+    try std.testing.expectEqual(@as(usize, 1), g_chat_outbox.items.len);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("please follow /poteto-mode today"), g_chat_outbox.items[0].text);
+    try std.testing.expectEqual(@as(usize, 0), composer_text.len);
+    try std.testing.expectEqual(@as(usize, 0), g_chat_skill_name_len);
+    try std.testing.expectEqual(@as(usize, 0), g_chat_skill_body_len);
+}
+test "delivery: MUBO-607 a failed save still clears an auto-selected skill" {
+    defer clear();
+    var big_body: [36000]u8 = undefined;
+    @memset(&big_body, 'x');
+    const skill = skill_model.Skill{ .name = @constCast("poteto-mode"), .description = @constCast(""), .body = &big_body, .source = .multiprompt };
+    g_palette_skills = &.{skill};
+    defer g_palette_skills = &.{};
+    g_chat_skill_name_len = 0;
+    g_chat_skill_body_len = 0;
+    persist_ok = false;
+    composer_text = std.unicode.utf8ToUtf16LeStringLiteral("please follow /poteto-mode today");
+    sendChatPrompt();
+    try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("please follow /poteto-mode today"), composer_text);
+    try std.testing.expectEqual(@as(usize, 0), g_chat_skill_name_len);
+    try std.testing.expectEqual(@as(usize, 0), g_chat_skill_body_len);
+}
+test "delivery: MUBO-607 a fitting skill still composes the expanded prompt" {
+    defer clear();
+    var small_body: [64]u8 = undefined;
+    @memset(&small_body, 'x');
+    const skill = skill_model.Skill{ .name = @constCast("poteto-mode"), .description = @constCast(""), .body = &small_body, .source = .multiprompt };
+    g_palette_skills = &.{skill};
+    defer g_palette_skills = &.{};
+    g_chat_skill_name_len = 0;
+    g_chat_skill_body_len = 0;
+    composer_text = std.unicode.utf8ToUtf16LeStringLiteral("please follow /poteto-mode today");
+    sendChatPrompt();
+    try std.testing.expectEqual(@as(usize, 1), g_chat_outbox.items.len);
+    try std.testing.expect(std.mem.indexOf(u16, g_chat_outbox.items[0].text, std.unicode.utf8ToUtf16LeStringLiteral("<skill name=\\"poteto-mode\\">")) != null);
+    try std.testing.expectEqual(@as(usize, 0), g_chat_skill_name_len);
+    try std.testing.expectEqual(@as(usize, 0), g_chat_skill_body_len);
+}
+test "delivery: MUBO-607 the outbox sync starts for every host agent" {
+    defer clear();
+    shell_count = 2;
+    shells[0].kind = .tmux;
+    shells[1].kind = .tmux;
+    shells[1].ai_agent = 7;
+    active_shell = 0;
+    g_chat_active = true;
+    shells[0].ai_agent = 8;
+    chatOutboxTick();
+    try std.testing.expectEqual(@as(usize, 1), sync_starts);
+    shells[0].ai_agent = 7;
+    chatOutboxTick();
+    try std.testing.expectEqual(@as(usize, 2), sync_starts);
+    shells[0].ai_agent = 1;
+    chatOutboxTick();
+    try std.testing.expectEqual(@as(usize, 3), sync_starts);
+    shells[0].ai_agent = 2;
+    chatOutboxTick();
+    try std.testing.expectEqual(@as(usize, 4), sync_starts);
+    shells[0].ai_agent = 3;
+    chatOutboxTick();
+    try std.testing.expectEqual(@as(usize, 5), sync_starts);
+    shells[0].ai_agent = 0;
+    chatOutboxTick();
+    try std.testing.expectEqual(@as(usize, 5), sync_starts);
+    shells[0].ai_agent = 1;
+    shells[0].kind = .cmd;
+    chatOutboxTick();
+    try std.testing.expectEqual(@as(usize, 5), sync_starts);
 }
 test "delivery: IGSH-1522 live slash commands never enter the ordinary outbox" {
     defer clear();
