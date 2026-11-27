@@ -9059,7 +9059,8 @@ def message_worker(tmux, provider, sid):
                         with closing(message_store_db(tmux)) as db:
                             pending = db.execute("SELECT id FROM shared_messages WHERE provider=? AND sid=? AND state IN ('queued','sent') ORDER BY position LIMIT 1", (provider, sid)).fetchone()
                         held = pending is not None and (pending[0] in host_held(provider, sid)
-                                                        or host_fresh_pending(provider, sid))
+                                                        or host_fresh_pending(provider, sid)
+                                                        or (provider in ('antigravity', 'hax') and host_turn_busy(provider, sid)))
                         if pending != head or held:
                             head = pending
                             stalled_at = time.monotonic()

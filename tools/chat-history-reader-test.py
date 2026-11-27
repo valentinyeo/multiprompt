@@ -5233,6 +5233,35 @@ class MUBO_607_AntigravityTurnQueueTest(unittest.TestCase):
         self.assertEqual(self.agent.pid, 607)
         self.assertIsNotNone(self.session['turn'])
 
+    def test_the_message_worker_spares_a_queued_follow_up_while_a_turn_runs(self):
+        self.send()
+        self.accept()
+        self.assertEqual(self.text()['state'], 'accepted')
+        row = self.submit('message_mubo607_0002', 'follow up prompt')
+        self.request('dispatch')
+        self.assertEqual(self.text('message_mubo607_0002')['state'], 'queued')
+        written = time.monotonic()
+
+        def host_state(provider, sid):
+            if time.monotonic() - written < 3.0:
+                return dict(inflight=dict(id='message_mubo607_0001'), sends=['message_mubo607_0001'])
+            accepted = reader.message_store_db('fixture')
+            with accepted:
+                accepted.execute("UPDATE shared_messages SET state='accepted',deadline=NULL WHERE id=?", (row['id'],))
+            accepted.close()
+            return dict()
+
+        with patch.object(reader, 'MESSAGE_WORKER_STALL_SECONDS', 1.5), \
+                patch.object(reader, 'MESSAGE_WORKER_IDLE_SECONDS', 0.2), \
+                patch.object(reader, 'host_session_state', side_effect=host_state), \
+                patch.object(reader, 'message_poll'), \
+                patch.object(reader, 'message_store_request'), \
+                patch.object(reader, 'host_log') as log:
+            reader.message_worker('fixture', 'antigravity', 'sid')
+        self.assertEqual(self.text('message_mubo607_0002')['state'], 'accepted',
+                         'a queued follow-up was marked failed while the Antigravity turn ran')
+        self.assertNotIn('worker_watchdog', [call.args[2] for call in log.call_args_list])
+
 
 class IGSH_1900_MpSendReportTest(unittest.TestCase):
     def module(self):

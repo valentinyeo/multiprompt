@@ -876,12 +876,16 @@ pub fn sendChatPrompt() void {
         if (composed_utf8) |bytes| std.heap.page_allocator.free(bytes);
         composed_utf8 = composed;
         const composed_room = app_state.g_chat_message_wide.len - 1;
-        if (composed.len <= composed_room) {
-            const composed_len = std.unicode.utf8ToUtf16Le(app_state.g_chat_message_wide[0..composed_room], composed) catch {
+        const composed_len = std.unicode.calcUtf16LeLen(composed) catch {
+            showHeaderNoticeAscii("The selected skill contains invalid text", 3500, true);
+            return;
+        };
+        if (composed_len <= composed_room and composed_len <= CHAT_OUTBOX_MSG_CAP and send_text.len <= CHAT_OUTBOX_MSG_CAP) {
+            const written = std.unicode.utf8ToUtf16Le(app_state.g_chat_message_wide[0..composed_room], composed) catch {
                 showHeaderNoticeAscii("The selected skill contains invalid text", 3500, true);
                 return;
             };
-            if (composed_len <= CHAT_OUTBOX_MSG_CAP and send_text.len <= CHAT_OUTBOX_MSG_CAP) send_text = app_state.g_chat_message_wide[0..composed_len];
+            send_text = app_state.g_chat_message_wide[0..written];
         }
     }
     if (chat_complete.endsInTriggerToken(send_text, chatAcAgent()) and send_text.len + 1 < text_buf.len and composed_utf8 == null) {

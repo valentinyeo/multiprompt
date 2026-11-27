@@ -573,7 +573,8 @@ test "delivery: MUBO-607 an oversized skill keeps the typed prompt and clears th
     var big_body: [36000]u8 = undefined;
     @memset(&big_body, 'x');
     const skill = skill_model.Skill{ .name = @constCast("poteto-mode"), .description = @constCast(""), .body = &big_body, .source = .multiprompt };
-    g_palette_skills = &.{skill};
+    var skills_buf = [_]skill_model.Skill{skill};
+    g_palette_skills = &skills_buf;
     defer g_palette_skills = &.{};
     g_chat_skill_name_len = 0;
     g_chat_skill_body_len = 0;
@@ -590,7 +591,8 @@ test "delivery: MUBO-607 a failed save still clears an auto-selected skill" {
     var big_body: [36000]u8 = undefined;
     @memset(&big_body, 'x');
     const skill = skill_model.Skill{ .name = @constCast("poteto-mode"), .description = @constCast(""), .body = &big_body, .source = .multiprompt };
-    g_palette_skills = &.{skill};
+    var skills_buf = [_]skill_model.Skill{skill};
+    g_palette_skills = &skills_buf;
     defer g_palette_skills = &.{};
     g_chat_skill_name_len = 0;
     g_chat_skill_body_len = 0;
@@ -607,7 +609,8 @@ test "delivery: MUBO-607 a fitting skill still composes the expanded prompt" {
     var small_body: [64]u8 = undefined;
     @memset(&small_body, 'x');
     const skill = skill_model.Skill{ .name = @constCast("poteto-mode"), .description = @constCast(""), .body = &small_body, .source = .multiprompt };
-    g_palette_skills = &.{skill};
+    var skills_buf = [_]skill_model.Skill{skill};
+    g_palette_skills = &skills_buf;
     defer g_palette_skills = &.{};
     g_chat_skill_name_len = 0;
     g_chat_skill_body_len = 0;
@@ -617,6 +620,31 @@ test "delivery: MUBO-607 a fitting skill still composes the expanded prompt" {
     try std.testing.expect(std.mem.indexOf(u16, g_chat_outbox.items[0].text, std.unicode.utf8ToUtf16LeStringLiteral("<skill name=\\"poteto-mode\\">")) != null);
     try std.testing.expectEqual(@as(usize, 0), g_chat_skill_name_len);
     try std.testing.expectEqual(@as(usize, 0), g_chat_skill_body_len);
+}
+test "delivery: MUBO-607 a quoted reply survives a skill that overflows the outbox cap" {
+    defer clear();
+    var big_body: [20000]u8 = undefined;
+    @memset(&big_body, 'x');
+    const name = "poteto-mode";
+    @memcpy(g_chat_skill_name[0..name.len], name);
+    g_chat_skill_name_len = name.len;
+    @memcpy(g_chat_skill_body[0..big_body.len], &big_body);
+    g_chat_skill_body_len = big_body.len;
+    defer {
+        g_chat_skill_name_len = 0;
+        g_chat_skill_body_len = 0;
+    }
+    const quoted = "quoted message";
+    @memcpy(g_chat_reply[0..quoted.len], quoted);
+    g_chat_reply_len = quoted.len;
+    defer clearChatReply();
+    composer_text = std.unicode.utf8ToUtf16LeStringLiteral("/poteto-mode run the checks now");
+    sendChatPrompt();
+    try std.testing.expectEqual(@as(usize, 1), g_chat_outbox.items.len);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("/poteto-mode run the checks now\n> quoted message"), g_chat_outbox.items[0].text);
+    const intact = std.unicode.utf8ToUtf16LeStringLiteral("/poteto-mode run the checks now\n> quoted message");
+    try std.testing.expectEqualSlices(u16, intact, g_chat_message_wide[0..intact.len]);
+    try std.testing.expectEqual(@as(usize, 0), composer_text.len);
 }
 test "delivery: MUBO-607 the outbox sync starts for every host agent" {
     defer clear();
