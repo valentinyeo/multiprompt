@@ -40,6 +40,22 @@
 - Unsafe, corrupt or malformed selections still fail closed.
 - Unsafe files and corrupt readers fail closed.
 
+## Self update
+
+- Every release publishes `multiprompt-runtime.py`, the same bundle the desktop sends over SSH.
+- `tools/build-runtime-bundle.mjs` assembles it before the checksums, so it sits in `SHA256SUMS.txt` and under the same `SHA256SUMS.txt.sig`.
+- A parity test assembles the bundle from `chatReaderBundle` in `src/chat_session.zig` and requires both outputs to be byte for byte identical.
+- A server asks `/releases/latest` for that release itself, with no desktop connection.
+- Only a published release by `github-actions[bot]`, a `vX.Y.Z` tag and the canonical asset URLs are accepted.
+- The manifest signature is checked with the key already embedded in the desktop updater.
+- The bundle checksum and its embedded release version are checked before anything runs.
+- The verified bundle is presented to the same loader a desktop push uses, so selection, tool versions and `active.json` keep their existing rules.
+- A bad checksum, a tampered payload, a missing checksum line or an untrusted release leaves the installed runtime untouched.
+- A release older than the installed bundle never replaces it.
+- The command is `python3 ~/.multiprompt-runtime/reader.py host update-runtime`; add `--check` to report only.
+- A live host starts that check once, a minute after it starts, and no more often than every six hours.
+- `MULTIPROMPT_RUNTIME_UPDATE=0` turns the automatic check off.
+
 ## Requests
 
 - Send this `--serve` request:

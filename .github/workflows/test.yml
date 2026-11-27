@@ -75,6 +75,10 @@ jobs:
         run: node --test tools/check-runtime-generation.test.js
       - name: Test automatic helper bundle versions
         run: python3 tools/runtime-fingerprint.test.py -v
+      - name: Test the server helper release bundle
+        run: timeout 120s node --test tools/build-runtime-bundle.test.mjs
+      - name: Test a server helper installs its own release
+        run: timeout 300s python3 tools/runtime-self-update.test.py -v
       - name: Test double-click thumbs up
         run: node --test tools/soft-2442-double-click-like.test.js
       - name: Test send now in a hosted chat

@@ -19,6 +19,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import uuid
@@ -3238,6 +3239,24 @@ HOST_APPEND_PROMPT = ("You run inside Multibot live chat, not a plain terminal.\
                       "`multibot-feedback \"<what you want>\" --why \"<what it blocks>\"` once, then continue.\n"
                       "Saved locally; without an agent token, the host account files it on the board.")
 HOST_RUNTIME_TOOLS = '.multiprompt-runtime'
+RUNTIME_UPDATE_API = 'https://api.github.com/repos/valentinyeo/multiprompt/releases/latest'
+RUNTIME_UPDATE_ORIGIN = 'https://github.com/valentinyeo/multiprompt/releases/download/'
+RUNTIME_UPDATE_ASSET = 'multiprompt-runtime.py'
+RUNTIME_UPDATE_MANIFEST = 'SHA256SUMS.txt'
+RUNTIME_UPDATE_SIGNATURE = 'SHA256SUMS.txt.sig'
+RUNTIME_UPDATE_AUTHOR = 'github-actions[bot]'
+RUNTIME_UPDATE_DOCUMENT_BYTES = 1024 * 1024
+RUNTIME_UPDATE_MANIFEST_BYTES = 1024 * 1024
+RUNTIME_UPDATE_SIGNATURE_BYTES = 1024
+RUNTIME_UPDATE_BUNDLE_BYTES = 8 * 1024 * 1024
+RUNTIME_UPDATE_INTERVAL = 6 * 60 * 60
+RUNTIME_UPDATE_DELAY = 60
+RELEASE_SIGNING_PUBLIC_KEY = '9jk+GiMNzkprhdTqubjfY8r1paUS+QORd6vM4JohCwM='
+RUNTIME_RELEASE_TAG = re.compile(r'v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z')
+ED25519_P = 2 ** 255 - 19
+ED25519_L = 2 ** 252 + 27742317777372353535851937790883648493
+ED25519_D = -121665 * pow(121666, ED25519_P - 2, ED25519_P) % ED25519_P
+ED25519_I = pow(2, (ED25519_P - 1) // 4, ED25519_P)
 HOST_PI_MODEL = ('--provider', 'opencode-go', '--model', 'deepseek-v4.1-flash')
 HOST_CODEX_SECRETS = ('OPENAI_API_KEY', 'CODEX_API_KEY', 'OPENAI_BASE_URL', 'OPENAI_ORG_ID', 'OPENAI_PROJECT_ID')
 HOST_CODEX_POLICIES = {'bypassPermissions': ('never', 'danger-full-access'), 'dontAsk': ('never', 'danger-full-access'),
@@ -7639,6 +7658,7 @@ def host_loop(provider, sid, tmux, session, server, agent):
         selector.register(agent.stdout, selectors.EVENT_READ, "agent")
         while not session["stop"]:
             host_room_tick(provider, sid, session)
+            host_runtime_update_tick(provider, sid, session)
             fresh = session["state"].get("fresh_start")
             fresh_limit = HOST_FRESH_TIMEOUTS.get(fresh.get("phase") if isinstance(fresh, dict) else None)
             if fresh_limit is not None and time.time() - fresh.get("started", time.time()) > fresh_limit:
@@ -7984,11 +8004,287 @@ def host_status(provider, sid):
                 command=config.get("command") if isinstance(config.get("command"), list) else None)
 
 
+def runtime_version_key(text):
+    parts = text.split('.') if isinstance(text, str) else []
+    if not 1 <= len(parts) <= 4:
+        return None
+    numbers = []
+    for part in parts:
+        if not 1 <= len(part) <= 9 or any(c not in '0123456789' for c in part):
+            return None
+        numbers.append(int(part))
+    return tuple(numbers)
+
+
+def runtime_update_key():
+    try:
+        key = base64.b64decode(RELEASE_SIGNING_PUBLIC_KEY, validate=True)
+    except (ValueError, TypeError):
+        raise ValueError('release public key is not configured')
+    if len(key) != 32 or not any(key):
+        raise ValueError('release public key is not configured')
+    return key
+
+
+def ed25519_add(first, second):
+    x1, y1, z1, t1 = first
+    x2, y2, z2, t2 = second
+    a = (y1 - x1) * (y2 - x2) % ED25519_P
+    b = (y1 + x1) * (y2 + x2) % ED25519_P
+    c = t1 * 2 * ED25519_D * t2 % ED25519_P
+    d = z1 * 2 * z2 % ED25519_P
+    return ((b - a) * (d - c) % ED25519_P, (d + c) * (b + a) % ED25519_P,
+            (d - c) * (d + c) % ED25519_P, (b - a) * (b + a) % ED25519_P)
+
+
+def ed25519_mul(scalar, point):
+    result = (0, 1, 1, 0)
+    while scalar > 0:
+        if scalar & 1:
+            result = ed25519_add(result, point)
+        point = ed25519_add(point, point)
+        scalar >>= 1
+    return result
+
+
+def ed25519_equal(first, second):
+    return ((first[0] * second[2] - second[0] * first[2]) % ED25519_P == 0 and
+            (first[1] * second[2] - second[1] * first[2]) % ED25519_P == 0)
+
+
+def ed25519_recover_x(y, sign):
+    if y >= ED25519_P:
+        return None
+    x2 = (y * y - 1) * pow(ED25519_D * y * y + 1, ED25519_P - 2, ED25519_P) % ED25519_P
+    x = pow(x2, (ED25519_P + 3) // 8, ED25519_P)
+    if (x * x - x2) % ED25519_P != 0:
+        x = x * ED25519_I % ED25519_P
+    if (x * x - x2) % ED25519_P != 0:
+        return None
+    if x == 0 and sign:
+        return None
+    if x & 1 != sign:
+        x = ED25519_P - x
+    return x
+
+
+def ed25519_point(encoded):
+    if len(encoded) != 32:
+        return None
+    y = int.from_bytes(encoded, 'little') & ((1 << 255) - 1)
+    x = ed25519_recover_x(y, encoded[31] >> 7)
+    if x is None:
+        return None
+    return (x, y, 1, x * y % ED25519_P)
+
+
+def ed25519_base():
+    y = 4 * pow(5, ED25519_P - 2, ED25519_P) % ED25519_P
+    x = ed25519_recover_x(y, 0)
+    return (x, y, 1, x * y % ED25519_P)
+
+
+def release_signature_valid(message, signature, public_key):
+    if (not isinstance(signature, bytes) or not isinstance(public_key, bytes) or
+            len(signature) != 64 or len(public_key) != 32):
+        return False
+    point = ed25519_point(public_key)
+    nonce = ed25519_point(signature[:32])
+    scalar = int.from_bytes(signature[32:], 'little')
+    if point is None or nonce is None or scalar >= ED25519_L:
+        return False
+    challenge = int.from_bytes(hashlib.sha512(signature[:32] + public_key + message).digest(), 'little') % ED25519_L
+    return ed25519_equal(ed25519_mul(scalar, ed25519_base()), ed25519_add(nonce, ed25519_mul(challenge, point)))
+
+
+def runtime_update_download(url, limit):
+    import urllib.request
+    request = urllib.request.Request(url, headers={"User-Agent": "multiprompt-updater", "Accept": "application/vnd.github+json"})
+    with urllib.request.urlopen(request, timeout=30) as response:
+        data = response.read(limit + 1)
+    if len(data) > limit:
+        raise ValueError('release asset is too large')
+    return data
+
+
+def runtime_update_release(fetch):
+    document = json.loads(fetch(RUNTIME_UPDATE_API, RUNTIME_UPDATE_DOCUMENT_BYTES).decode('utf-8'))
+    if not isinstance(document, dict) or document.get('draft') or document.get('prerelease'):
+        raise ValueError('untrusted release channel')
+    author = document.get('author')
+    if not isinstance(author, dict) or author.get('login') != RUNTIME_UPDATE_AUTHOR:
+        raise ValueError('untrusted release author')
+    tag = document.get('tag_name')
+    if not isinstance(tag, str) or RUNTIME_RELEASE_TAG.fullmatch(tag) is None:
+        raise ValueError('invalid release version')
+    assets = document.get('assets')
+    if not isinstance(assets, list):
+        raise ValueError('missing release assets')
+    urls = {}
+    for name in (RUNTIME_UPDATE_ASSET, RUNTIME_UPDATE_MANIFEST, RUNTIME_UPDATE_SIGNATURE):
+        matched = [asset for asset in assets if isinstance(asset, dict) and asset.get('name') == name]
+        if len(matched) != 1:
+            raise ValueError('missing or duplicate release asset')
+        expected = RUNTIME_UPDATE_ORIGIN + tag + '/' + name
+        if matched[0].get('browser_download_url') != expected:
+            raise ValueError('untrusted release asset url')
+        urls[name] = expected
+    return dict(tag=tag, version=tag[1:], urls=urls)
+
+
+def runtime_update_checksum(manifest, name):
+    try:
+        text = manifest.decode('utf-8')
+    except UnicodeError:
+        raise ValueError('release manifest is not readable')
+    pattern = re.compile('([0-9a-fA-F]{64}) [ *]' + re.escape(name))
+    found = [match.group(1).lower() for match in map(pattern.fullmatch, text.splitlines()) if match]
+    if len(found) != 1:
+        raise ValueError('missing or duplicate checksum')
+    return found[0]
+
+
+def runtime_update_active(home=None):
+    return read_json((Path.home() if home is None else home) / HOST_RUNTIME_TOOLS / 'active.json')
+
+
+def runtime_update_version(home=None):
+    version = globals().get('MULTIBOT_APP_VERSION')
+    if runtime_version_key(version) is not None:
+        return version
+    record = read_json((Path.home() if home is None else home) / HOST_RUNTIME_TOOLS / 'tools.json')
+    tools = record.get('tools') if isinstance(record, dict) else None
+    versions = [entry.get('version') for entry in tools.values() if isinstance(entry, dict)] if isinstance(tools, dict) else []
+    published = [value for value in versions if runtime_version_key(value) is not None]
+    return max(published, key=runtime_version_key) if published else None
+
+
+def runtime_update_install(data, home):
+    root = home / HOST_RUNTIME_TOOLS
+    if not root.is_dir():
+        raise ValueError('no helper runtime is installed')
+    descriptor, path = tempfile.mkstemp(prefix='.tmp-runtime-', dir=str(root))
+    try:
+        with os.fdopen(descriptor, 'wb') as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chmod(path, 0o600)
+        environment = dict(os.environ, HOME=str(home), PYTHONDONTWRITEBYTECODE='1')
+        request = json.dumps(dict(id=1, op='engine_info'), separators=(',', ':')) + '\n'
+        result = subprocess.run([sys.executable, '-u', path, '--serve'], input=request, text=True,
+                                capture_output=True, env=environment, timeout=180)
+        if result.returncode != 0:
+            raise ValueError('helper bundle did not install')
+        try:
+            document = json.loads(result.stdout.splitlines()[-1])
+        except (ValueError, IndexError):
+            raise ValueError('helper bundle returned no engine info')
+        info = document.get('engine_info') if isinstance(document, dict) else None
+        if not isinstance(info, dict) or not isinstance(info.get('sha256'), str) or len(info['sha256']) != 64:
+            raise ValueError('helper bundle returned no engine info')
+        active = runtime_update_active(home)
+        if not isinstance(active, dict) or active.get('sha256') != info['sha256']:
+            raise ValueError('helper bundle did not select its runtime')
+        return info
+    finally:
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
+
+
+def runtime_update_stamp(home, tag):
+    root = home / HOST_RUNTIME_TOOLS
+    try:
+        root.mkdir(mode=0o700, exist_ok=True)
+        temporary = root / '.tmp-self-update'
+        temporary.write_text(json.dumps(dict(checked=time.time(), tag=tag), separators=(',', ':')), encoding='utf-8')
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, root / 'self-update.json')
+    except OSError:
+        pass
+
+
+def runtime_update_due(home=None, now=None):
+    checked = read_json((Path.home() if home is None else home) / HOST_RUNTIME_TOOLS / 'self-update.json').get('checked')
+    moment = time.time() if now is None else now
+    if isinstance(checked, bool) or not isinstance(checked, (int, float)):
+        return True
+    return moment - checked >= RUNTIME_UPDATE_INTERVAL
+
+
+def runtime_update_run(check=False, fetch=None, home=None, key=None, version=None):
+    home = Path.home() if home is None else home
+    fetch = runtime_update_download if fetch is None else fetch
+    version = runtime_update_version(home) if version is None else version
+    try:
+        key = runtime_update_key() if key is None else key
+        release = runtime_update_release(fetch)
+        offered = runtime_version_key(release['version'])
+        current = runtime_version_key(version)
+        if offered is not None and current is not None and offered <= current:
+            return dict(status='current', tag=release['tag'])
+        if check:
+            return dict(status='available', tag=release['tag'])
+        manifest = fetch(release['urls'][RUNTIME_UPDATE_MANIFEST], RUNTIME_UPDATE_MANIFEST_BYTES)
+        signature = fetch(release['urls'][RUNTIME_UPDATE_SIGNATURE], RUNTIME_UPDATE_SIGNATURE_BYTES)
+        if not release_signature_valid(manifest, signature, key):
+            raise ValueError('release manifest signature mismatch')
+        digest = runtime_update_checksum(manifest, RUNTIME_UPDATE_ASSET)
+        data = fetch(release['urls'][RUNTIME_UPDATE_ASSET], RUNTIME_UPDATE_BUNDLE_BYTES)
+        if hashlib.sha256(data).hexdigest() != digest:
+            raise ValueError('helper bundle checksum mismatch')
+        if ('MULTIBOT_APP_VERSION = ' + repr(release['version']) + '\n').encode('utf-8') not in data:
+            raise ValueError('helper bundle version mismatch')
+        info = runtime_update_install(data, home)
+    except (OSError, ValueError, UnicodeError, TypeError, subprocess.SubprocessError) as error:
+        return dict(status='failed', reason=str(error) or type(error).__name__)
+    runtime_update_stamp(home, release['tag'])
+    return dict(status='updated', tag=release['tag'], sha256=info['sha256'])
+
+
+def runtime_update_command(argv):
+    if [argument for argument in argv if argument != '--check']:
+        return dict(status='error', reason='invalid_command')
+    return runtime_update_run(check='--check' in argv)
+
+
+def host_runtime_update_tick(provider, sid, session):
+    if session.get('runtime_update'):
+        return
+    started = session.get('state', {}).get('started')
+    if isinstance(started, bool) or not isinstance(started, (int, float)) or time.time() - started < RUNTIME_UPDATE_DELAY:
+        return
+    if os.environ.get('MULTIPROMPT_RUNTIME_UPDATE') == '0':
+        session['runtime_update'] = 'off'
+        return
+    reader = HOME / HOST_RUNTIME_TOOLS / 'reader.py'
+    if not reader.is_file():
+        session['runtime_update'] = 'off'
+        return
+    if not runtime_update_due():
+        session['runtime_update'] = 'current'
+        return
+    session['runtime_update'] = 'started'
+    runtime_update_stamp(HOME, '')
+    try:
+        subprocess.Popen([sys.executable, '-u', str(reader), 'host', 'update-runtime'],
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+        host_log(provider, sid, 'runtime_update', dict(state='started'))
+    except (OSError, ValueError):
+        session['runtime_update'] = 'failed'
+        host_log(provider, sid, 'runtime_update', dict(state='failed'))
+
+
 def host_cli(argv):
     if argv == ["list"]:
         return dict(chats=host_chats())
     if len(argv) == 2 and argv[0] == "connect":
         return host_connect(argv[1])
+    if argv[:1] == ["update-runtime"]:
+        return runtime_update_command(argv[1:])
     if not argv or argv[0] not in ("start", "stop", "status", "enable", "disable", "handover", "adopt", "terminal", "resume", "send", "restart", "fresh-start", "switch-ai", "model", "effort", "permission"):
         return dict(status="error", reason="invalid_command")
     command, rest = argv[0], argv[1:]
@@ -10245,7 +10541,7 @@ elif __name__ == "__main__" and sys.argv[1:] == ["host", "list", "--tmux-format"
 elif __name__ == "__main__" and sys.argv[1:2] == ["host"]:
     reply = host_cli(sys.argv[2:])
     print(json.dumps(reply, separators=(",", ":")))
-    if isinstance(reply, dict) and reply.get("status") == "refused":
+    if isinstance(reply, dict) and reply.get("status") in ("refused", "failed"):
         sys.exit(1)
 elif __name__ == "__main__" and sys.argv[1:] == ["--serve"]:
     serve(globals().get("READER_SOURCE"))
