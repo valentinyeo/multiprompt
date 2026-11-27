@@ -1513,3 +1513,15 @@ test "SOFT-3097 a skill message with a quote matches the row the reader renders"
     try std.testing.expectEqual(@as(?usize, 0), chosen[0]);
     try std.testing.expectEqual(@as(?usize, null), chosen[1]);
 }
+
+pub fn shownInQueue(state: OutboxState) bool {
+    return state == .queued;
+}
+
+test "MUBO-601 waiting messages belong only to the queue while failures stay actionable" {
+    for ([_]OutboxState{ .queued, .sending, .delivered, .not_sent, .cancelled }) |state| {
+        try std.testing.expectEqual(state == .queued, shownInQueue(state));
+    }
+    try std.testing.expect(pendingActions(.not_sent).remove);
+    try std.testing.expect(pendingActions(.not_sent).send_again);
+}

@@ -2483,6 +2483,18 @@ pub fn chatEchoSendAgain(id: u64) void {
         const confirmed_entry = &app_state.g_chat_outbox.items[confirmed_index];
         if (!confirmed_entry.message_v1 or confirmed_entry.channel_pending or (!chat_echo.pendingActions(confirmed_entry.state).send_again and !chat_echo.showsNotSent(confirmed_entry.message_v1, confirmed_entry.state, std.mem.sliceTo(&confirmed_entry.message_phase, 0), confirmed_entry.sent_tick_ms, @as(i64, @intCast(GetTickCount64()))))) return;
         const si = chatOutboxShellForKey(confirmed_entry.key[0..confirmed_entry.key_len]) orelse return;
+        const phase = std.mem.sliceTo(&confirmed_entry.message_phase, 0);
+        if (std.mem.eql(u8, phase, "sent") or std.mem.eql(u8, phase, "failed")) {
+            if (confirmed_entry.retry_nonce == 0) {
+                var random_io = std.Io.Threaded.init(std.heap.page_allocator, .{});
+                defer random_io.deinit();
+                while (confirmed_entry.retry_nonce == 0) random_io.io().random(std.mem.asBytes(&confirmed_entry.retry_nonce));
+            }
+            if (!saveChatOutbox() or !chatTmuxSendStart(si, confirmed_entry.text, id, true, false, false)) {
+                showHeaderNoticeAscii("Could not retry yet. Try again", 3500, true);
+            }
+            return;
+        }
         if (failed_send or chat_echo.showsNotSent(confirmed_entry.message_v1, confirmed_entry.state, std.mem.sliceTo(&confirmed_entry.message_phase, 0), confirmed_entry.sent_tick_ms, @as(i64, @intCast(GetTickCount64())))) {
             const previous_wire = confirmed_entry.message_wire_id;
             const previous_nonce = confirmed_entry.message_nonce;
