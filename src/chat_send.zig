@@ -881,10 +881,7 @@ pub fn sendChatPrompt() void {
             return;
         };
         if (composed_len <= composed_room and composed_len <= CHAT_OUTBOX_MSG_CAP and send_text.len <= CHAT_OUTBOX_MSG_CAP) {
-            const written = std.unicode.utf8ToUtf16Le(app_state.g_chat_message_wide[0..composed_room], composed) catch {
-                showHeaderNoticeAscii("The selected skill contains invalid text", 3500, true);
-                return;
-            };
+            const written = std.unicode.utf8ToUtf16Le(app_state.g_chat_message_wide[0..composed_room], composed) catch unreachable;
             send_text = app_state.g_chat_message_wide[0..written];
         }
     }
