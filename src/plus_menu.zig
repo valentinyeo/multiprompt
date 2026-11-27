@@ -456,7 +456,7 @@ fn snapshot(state: *State) void {
     const identity = session.chatFileIdentityForShell(app_state.active_shell);
     const status: []const u16 = if (session.chatHistoryEntry(session.chatFileIdentity())) |entry| entry.history.status.model[0..entry.history.status.model_len] else &.{};
     const eligible = session.chatSettingsEligible();
-    state.* = pageState(g_page, choicesFor(identity.provider(), selected, status, eligible, chat_send.chatModePickerAvailable()), eligible);
+    state.* = pageState(g_page, choicesFor(identity.provider(), selected, status, eligible, chat_send.chatModeSelectable()), eligible);
 }
 
 test "MUBO-575 every AI starts with exactly four menu rows" {
@@ -474,6 +474,20 @@ test "MUBO-575 every AI starts with exactly four menu rows" {
     const fixed = pageState(.permissions, choices, true);
     try std.testing.expect(fixed.shown[@intFromEnum(Item.full_access)] and fixed.disabled[@intFromEnum(Item.full_access)]);
     try std.testing.expect(!fixed.shown[@intFromEnum(Item.mode_auto)]);
+}
+
+test "MUBO-575 a live chat can change permission level from the plus menu" {
+    const claude = choicesFor("claude", .{}, &.{}, true, true);
+    const root = pageState(.root, claude, true);
+    try std.testing.expect(root.shown[@intFromEnum(Item.permissions)]);
+    try std.testing.expect(!root.disabled[@intFromEnum(Item.permissions)]);
+    try std.testing.expect(!root.disabled[@intFromEnum(Item.models)] and !root.disabled[@intFromEnum(Item.efforts)]);
+    const modes = pageState(.permissions, claude, true);
+    for ([_]Item{ .mode_ask, .mode_auto, .mode_bypass }) |item| {
+        try std.testing.expect(modes.shown[@intFromEnum(item)]);
+        try std.testing.expect(!modes.disabled[@intFromEnum(item)]);
+    }
+    for ([_]Item{ .mode_edits, .mode_plan, .full_access }) |item| try std.testing.expect(!modes.shown[@intFromEnum(item)]);
 }
 
 test "IGSH-1861 the model falls back to the transcript name and never guesses" {

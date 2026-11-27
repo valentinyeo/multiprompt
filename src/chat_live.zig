@@ -567,6 +567,14 @@ pub fn settingLine(a: std.mem.Allocator, id: u32, provider: []const u8, sid: []c
     return finish(&out, a);
 }
 
+pub fn modeLine(a: std.mem.Allocator, id: u32, provider: []const u8, sid: []const u8, mode: []const u8) ![]u8 {
+    var out = try openLine(a, id, "set_permission_mode", provider, sid);
+    errdefer out.deinit(a);
+    try out.appendSlice(a, ",\"mode\":");
+    try appendQuoted(&out, a, mode);
+    return finish(&out, a);
+}
+
 pub fn loginLine(a: std.mem.Allocator, id: u32, sid: []const u8, provider_id: []const u8) ![]u8 {
     var out = try openLine(a, id, "login", "pi", sid);
     errdefer out.deinit(a);
@@ -1958,6 +1966,11 @@ test "setting requests and refused replies" {
     try std.testing.expect(std.mem.indexOf(u8, codex, "\"provider\":\"codex\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, codex, "\"model\":\"terra\"") != null);
     try std.testing.expect(settingReplyFailed("{\"id\":4294967295,\"result\":{\"status\":\"refused\"}}").?);
+    const mode = try modeLine(a, SETTING_REQUEST_ID, "claude", "session", "bypassPermissions");
+    defer a.free(mode);
+    try std.testing.expect(std.mem.indexOf(u8, mode, "\"op\":\"set_permission_mode\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, mode, "\"provider\":\"claude\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, mode, "\"mode\":\"bypassPermissions\"") != null);
     try std.testing.expect(settingReplyFailed("{\"id\":4294967295,\"error\":\"failed\"}").?);
     try std.testing.expect(!settingReplyFailed("{\"id\":4294967295,\"result\":{\"status\":\"ok\"}}").?);
     try std.testing.expect(settingReplyFailed("{\"id\":3,\"result\":{\"status\":\"error\"}}") == null);

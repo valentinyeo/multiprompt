@@ -4741,7 +4741,7 @@ pub fn updateSearchResults() void {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_SELECT_ALL_OFFSET;
         app_state.g_search_result_count += 1;
     }
-    if (app_state.g_search_len > 0 and @import("chat_send.zig").chatModePickerAvailable() and (@import("chat_session.zig").chatSettingsCodex() or std.mem.eql(u8, @import("chat_session.zig").chatFileIdentityForShell(app_state.active_shell).provider(), "claude")) and !app_state.g_inbox_active and !app_state.g_all_sessions_active) {
+    if (app_state.g_search_len > 0 and @import("chat_send.zig").chatModeSelectable() and (@import("chat_session.zig").chatSettingsCodex() or std.mem.eql(u8, @import("chat_session.zig").chatFileIdentityForShell(app_state.active_shell).provider(), "claude")) and !app_state.g_inbox_active and !app_state.g_all_sessions_active) {
         const query = app_state.g_search_buf[0..app_state.g_search_len];
         for ([_]struct { target: usize, label: []const u8 }{
             .{ .target = SEARCH_CHAT_MODE_PLAN_OFFSET, .label = "chat permission mode: plan" },
