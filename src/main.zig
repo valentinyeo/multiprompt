@@ -495,7 +495,7 @@ const updateCardInit = @import("update_card.zig").updateCardInit;
 const startUpdateCardWatch = @import("update_card.zig").startUpdateCardWatch;
 const stopUpdateCardWatch = @import("update_card.zig").stopUpdateCardWatch;
 const updateCardHit = @import("update_card.zig").updateCardHit;
-const updateCardToggleNotes = @import("update_card.zig").updateCardToggleNotes;
+const updateCardSeeAll = @import("update_card.zig").updateCardSeeAll;
 const updateCardPoll = @import("update_card.zig").updateCardPoll;
 const updateCardDismiss = @import("update_card.zig").updateCardDismiss;
 const updateCardRelaunch = @import("update_card.zig").updateCardRelaunch;
@@ -2138,7 +2138,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     const upd_hit = updateCardHit(mx, my);
                     if (upd_hit != 0) {
                         app_state.g_shell_focused = false;
-                        if (upd_hit == 1) updateCardRelaunch(hwnd) else if (upd_hit == 2) updateCardDismiss() else if (upd_hit == 4) updateCardToggleNotes();
+                        if (upd_hit == 1) updateCardRelaunch(hwnd) else if (upd_hit == 2) updateCardDismiss() else if (upd_hit == 4) updateCardSeeAll();
                         _ = InvalidateRect(hwnd, null, 0);
                         return 0;
                     }

@@ -30,7 +30,7 @@ for (const [version, broken] of [['1.10.0', false], ['1.11.0', false], ['1.12.0'
     { version: '9.9.0', changes: ['IGSH-2 Middle change'] },
     { version: '10.0.0', changes: ['IGSH-3 Not offered yet'] },
     { version: '0.0.0', changes: ['IGSH-4 Already installed'] },
-    { version, changes: ['IGSH-5 Typing feels faster', 'IGSH-6 Chats keep your place', 'Fix IGSH-123.', 'Fix src/main.zig.'] },
+    { version, changes: ['IGSH-5 Typing feels faster', 'MUBO-77 Chats keep your place', 'Fix IGSH-123.', 'Fix src/main.zig.'] },
   ] : [{ version, changes: version === '9.11.0' ? ['IGSH-1243 Changelog ticket links'] : ['IGSH-5 Typing feels faster'], ...(version === '9.11.0' ? { tickets: ['https://app.hypertask.ai/detail/project-2060/1243'] } : {}) }];
   fs.writeFileSync(path.join(dir, 'release-notes.json'), JSON.stringify({ version, releases }));
   names.push('release-notes.json');

@@ -117,21 +117,21 @@ pub fn updateCardVisible() bool {
 
 var card_notes: @import("update_notes.zig").Notes = .{};
 var card_notes_logged = false;
-var card_expanded = false;
+var see_all_url: [128]u8 = undefined;
 var card_scroll: i32 = 0;
 var measured_width: i32 = 0;
 var measured_font: HANDLE = null;
 var measured_scale: i32 = 0;
 var measured_font_gen: u32 = 0;
 var measured_shown: usize = 0;
-var note_heights: [16]i32 = @splat(0);
+var note_heights: [@import("update_notes.zig").MAX_LINES]i32 = @splat(0);
 var notes_height: i32 = 0;
 var last_notes_rect: RECT = std.mem.zeroes(RECT);
 
 fn measureNotes() void {
     const width = @max(1, @import("browser_pane.zig").SIDEBAR_W() - uiScaled(8) - uiScaled(16) - (uiScaled(8) + uiScaled(28)));
     const font = @import("usage_card.zig").footerFont(3, 12, 400);
-    const shown = card_notes.shown(card_expanded);
+    const shown = card_notes.shown();
     if (measured_width == width and measured_font == font and measured_scale == uiScaled(18) and measured_shown == shown and measured_font_gen == app_state.g_font_gen) return;
     const dc = @import("win32.zig").GetDC(app_state.g_main_hwnd);
     if (dc == null) return;
@@ -155,14 +155,18 @@ fn measureNotes() void {
     card_notes_logged = false;
 }
 
-fn cardHasToggle() bool {
-    return card_notes.total > @import("update_notes.zig").COLLAPSED_LINES;
+fn cardShowsSeeAll() bool {
+    return card_notes.count > 0;
+}
+
+fn seeAllUrl() []const u8 {
+    return @import("update_notes.zig").releaseUrl(&see_all_url, app_state.g_update_ver[0..app_state.g_update_ver_len]);
 }
 
 fn updateCardHeight() i32 {
     measureNotes();
     if (card_notes.count == 0) return uiScaled(88);
-    const toggle_height = if (cardHasToggle()) uiScaled(18) else @as(i32, 0);
+    const toggle_height = if (cardShowsSeeAll()) uiScaled(18) else @as(i32, 0);
     const base = uiScaled(55) + uiScaled(38) + toggle_height;
     const desired = base + notes_height;
     var client: RECT = std.mem.zeroes(RECT);
@@ -171,12 +175,16 @@ fn updateCardHeight() i32 {
     return @min(desired, @max(base + uiScaled(18), available));
 }
 
-pub fn updateCardToggleNotes() void {
-    if (!cardHasToggle()) return;
-    card_expanded = !card_expanded;
-    card_scroll = 0;
-    card_notes_logged = false;
-    if (app_state.g_main_hwnd != null) clampSidebarScroll();
+pub fn updateCardSeeAll() void {
+    if (!cardShowsSeeAll()) return;
+    const url = seeAllUrl();
+    if (url.len == 0) return;
+    var wide: [128]u16 = undefined;
+    const length = std.unicode.utf8ToUtf16Le(&wide, url) catch return;
+    wide[length] = 0;
+    const opened = @import("win32.zig").ShellExecuteW(null, @import("startup.zig").L("open"), @ptrCast(&wide), null, null, @import("win32.zig").SW_SHOW);
+    var log_buf: [96]u8 = undefined;
+    debugLog(std.fmt.bufPrint(&log_buf, "[update] card see all opened={d}", .{if (opened) |handle| @intFromPtr(handle) else @as(usize, 0)}) catch "[update] card see all open failed");
 }
 
 pub fn updateCardSpan() i32 {
@@ -205,7 +213,7 @@ fn updateCardMoreRect(card: RECT) RECT {
 }
 
 fn updateCardNotesRect(card: RECT) RECT {
-    return .{ .left = card.left + uiScaled(16), .top = card.top + uiScaled(55), .right = card.right - uiScaled(16), .bottom = if (cardHasToggle()) updateCardMoreRect(card).top else card.bottom - uiScaled(38) };
+    return .{ .left = card.left + uiScaled(16), .top = card.top + uiScaled(55), .right = card.right - uiScaled(16), .bottom = if (cardShowsSeeAll()) updateCardMoreRect(card).top else card.bottom - uiScaled(38) };
 }
 
 pub fn updateCardScroll(x: i32, y: i32, delta: i16) bool {
@@ -230,7 +238,7 @@ pub fn updateCardHit(x: i32, y: i32) u8 {
     if (!ptInRect(card, x, y)) return 0;
     if (ptInRect(updateCardCloseRect(card), x, y)) return 2;
     if (ptInRect(updateCardButtonRect(card), x, y)) return 1;
-    if (cardHasToggle() and ptInRect(updateCardMoreRect(card), x, y)) return 4;
+    if (cardShowsSeeAll() and ptInRect(updateCardMoreRect(card), x, y)) return 4;
     return 3;
 }
 
@@ -253,7 +261,6 @@ pub fn updateCardPoll() void {
             debugLog2("update-card: new version ready ", version);
             if (card_notes.count == 0) debugLog2("[update] quiet release waiting ", version);
             card_notes_logged = false;
-            card_expanded = false;
             card_scroll = 0;
             measured_width = 0;
             restart_status = "";
@@ -295,7 +302,6 @@ pub fn updateCardPoll() void {
     if (!update_check.versionDiffers(APP_VERSION, found)) return;
     card_notes = update_release.cardNotes(found);
     card_notes_logged = false;
-    card_expanded = false;
     card_scroll = 0;
     measured_width = 0;
     @memcpy(app_state.g_update_ver[0..found.len], found);
@@ -403,7 +409,7 @@ pub fn paintSidebarUpdateCard(hdc: HANDLE, font_title: HANDLE, font_subtitle: HA
     const notes_rect = updateCardNotesRect(card);
     const viewport_height = @max(0, notes_rect.bottom - notes_rect.top);
     card_scroll = std.math.clamp(card_scroll, 0, @max(0, notes_height - viewport_height));
-    const shown = card_notes.shown(card_expanded);
+    const shown = card_notes.shown();
     const saved_dc = @import("win32.zig").SaveDC(hdc);
     if (saved_dc != 0) {
         _ = @import("win32.zig").IntersectClipRect(hdc, notes_rect.left, notes_rect.top, notes_rect.right, notes_rect.bottom);
@@ -428,11 +434,9 @@ pub fn paintSidebarUpdateCard(hdc: HANDLE, font_title: HANDLE, font_subtitle: HA
         _ = @import("win32.zig").FillRect(hdc, &thumb, brush);
         _ = DeleteObject(brush);
     }
-    var more_buf: [32]u8 = undefined;
-    const more_text: []const u8 = if (card_expanded) "Show less" else card_notes.more(&more_buf, false);
-    if (cardHasToggle()) {
+    if (cardShowsSeeAll()) {
         var more_rect = updateCardMoreRect(card);
-        drawAscii(hdc, more_text, &more_rect, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+        drawAscii(hdc, "See all", &more_rect, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
     }
     if (!std.meta.eql(last_notes_rect, notes_rect)) {
         last_notes_rect = notes_rect;
@@ -445,13 +449,17 @@ pub fn paintSidebarUpdateCard(hdc: HANDLE, font_title: HANDLE, font_subtitle: HA
         for (0..shown) |i| debugLog(std.fmt.bufPrint(&log_buf, "[update] note height {d}={d}", .{ i, note_heights[i] }) catch continue);
         const restart_button = updateCardButtonRect(card);
         debugLog(std.fmt.bufPrint(&log_buf, "[update] restart button={d},{d}", .{ @divTrunc(restart_button.left + restart_button.right, 2), @divTrunc(restart_button.top + restart_button.bottom, 2) }) catch "[update] restart button unavailable");
-        if (cardHasToggle()) {
+        if (cardShowsSeeAll()) {
             const more_button = updateCardMoreRect(card);
             debugLog(std.fmt.bufPrint(&log_buf, "[update] more row={d},{d}", .{ @divTrunc(more_button.left + more_button.right, 2), @divTrunc(more_button.top + more_button.bottom, 2) }) catch "[update] more row unavailable");
+            debugLog(std.fmt.bufPrint(&log_buf, "[update] card see all={s}", .{seeAllUrl()}) catch "[update] card see all unavailable");
         }
-        debugLog(std.fmt.bufPrint(&log_buf, "[update] card view={s} n={d} first={s}", .{ if (card_expanded) "expanded" else "collapsed", shown, if (shown > 0) card_notes.line(0) else "" }) catch "[update] card view unavailable");
-        for (0..shown) |i| debugLog(std.fmt.bufPrint(&log_buf, "[update] card note {d}={s}", .{ i, card_notes.line(i) }) catch continue);
-        debugLog2("[update] card remaining=", more_text);
+        debugLog(std.fmt.bufPrint(&log_buf, "[update] card view=collapsed n={d} first={s}", .{ shown, if (shown > 0) card_notes.line(0) else "" }) catch "[update] card view unavailable");
+        for (0..shown) |i| {
+            debugLog(std.fmt.bufPrint(&log_buf, "[update] card note {d}={s}", .{ i, card_notes.line(i) }) catch continue);
+            debugLog(std.fmt.bufPrint(&log_buf, "[update] card note id {d}={s}", .{ i, card_notes.id(i) }) catch continue);
+        }
+        debugLog2("[update] card remaining=", if (cardShowsSeeAll()) "See all" else "none");
     }
     const button = updateCardButtonRect(card);
     smooth.fillRoundRect(hdc, button, uiScaled(12), RGB(242, 242, 242));
