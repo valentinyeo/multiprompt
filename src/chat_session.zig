@@ -1712,7 +1712,10 @@ pub fn chatFileOnReady() void {
                     app_state.shells[idx].ai_agent = entry.key.agentId();
                     changed = true;
                 }
-                if (changed) saveSession();
+                if (changed) {
+                    saveSession();
+                    @import("window_layout.zig").invalidateSidebar();
+                }
             }
             if (preview_index) |idx| {
                 if (!std.meta.eql(old_preview.?, @import("agent_second_line.zig").forShell(idx))) preview_changed = true;

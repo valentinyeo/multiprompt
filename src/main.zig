@@ -10230,3 +10230,7 @@ test "IGSH-836 palette keyboard survives stationary hover and real movement or c
     _ = wndProc(hwnd, message.message, message.wParam, message.lParam);
     try std.testing.expect(!app_state.g_search_theme_mode);
 }
+
+test {
+    _ = @import("provider_badge.zig");
+}

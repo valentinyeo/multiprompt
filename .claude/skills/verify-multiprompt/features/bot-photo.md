@@ -1,6 +1,6 @@
 # Bot photos
 
-Source files: src/window*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, tools/verify-bot-photo/drive.ps1, src/bot_photo*.zig, src/bot_avatar.zig, src/bot_look.zig
+Source files: src/window*, src/main.zig, build.zig, build.zig.zon, src/command_palette.zig, src/shortcuts.zig, tools/verify-bot-photo/drive.ps1, src/bot_photo*.zig, src/bot_avatar.zig, src/bot_look.zig, src/provider_badge.zig
 
 ## Sub-features
 
