@@ -641,8 +641,8 @@ test "delivery: MUBO-607 a quoted reply survives a skill that overflows the outb
     composer_text = std.unicode.utf8ToUtf16LeStringLiteral("/poteto-mode run the checks now");
     sendChatPrompt();
     try std.testing.expectEqual(@as(usize, 1), g_chat_outbox.items.len);
-    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("/poteto-mode run the checks now\n> quoted message"), g_chat_outbox.items[0].text);
-    const intact = std.unicode.utf8ToUtf16LeStringLiteral("/poteto-mode run the checks now\n> quoted message");
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("/poteto-mode run the checks now\\n> quoted message"), g_chat_outbox.items[0].text);
+    const intact = std.unicode.utf8ToUtf16LeStringLiteral("/poteto-mode run the checks now\\n> quoted message");
     try std.testing.expectEqualSlices(u16, intact, g_chat_message_wide[0..intact.len]);
     try std.testing.expectEqual(@as(usize, 0), composer_text.len);
 }
