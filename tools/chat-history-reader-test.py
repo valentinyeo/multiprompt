@@ -5025,6 +5025,18 @@ class MUBO_601_UnacknowledgedSendTest(MUBO_594_QueuedMessageActionsTest):
         self.assertEqual(reply['state'], 'queued')
         self.start_agent.assert_called_once()
 
+    def test_retry_failed_but_still_unacknowledged_stops_old_stdin(self):
+        original = self.send()
+        self.watchdog(progress=True)
+        self.assertEqual(self.text()['state'], 'failed')
+        self.assertIn(original['id'], reader.host_held('antigravity', 'sid'))
+        reply = self.request('retry', message_id=original['id'], retry_id='retry_mubo601_held')['message']
+        self.assertEqual(reply['state'], 'queued')
+        self.assertNotEqual(reply['attempt'], original['attempt'])
+        self.stop_agent.assert_called_once()
+        self.start_agent.assert_called_once()
+        self.assertEqual(self.session['sends'], [])
+
     def test_retry_refuses_an_accepted_message(self):
         original = self.send()
         reader.host_accept('antigravity', 'sid', 'fixture', self.session, dict(event='step_update'))

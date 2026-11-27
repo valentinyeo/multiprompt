@@ -8630,7 +8630,7 @@ def message_store_transaction(q):
                 return dict(message=message_row(row), epoch=epoch, seq=seq)
             if (row[6] != 'failed' and not (row[6] == 'sent' and row[8] is None)) or row[9] != epoch:
                 raise ValueError('message is not retryable')
-            if host_owned(provider, sid):
+            if token in host_held(provider, sid):
                 db.commit()
                 recovered = host_request(provider, sid, dict(op='recover_send', id=token, attempt=row[5]))
                 db.execute('BEGIN IMMEDIATE')

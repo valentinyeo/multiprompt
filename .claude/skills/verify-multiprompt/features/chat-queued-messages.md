@@ -41,7 +41,7 @@ The tray is painted into the transcript window and handled before transcript sel
 - Edit and Delete reuse the existing dismiss path, so a queue that the shared store already dispatched cancels exactly like the message menu's Cancel item. Behaviour on a terminal-backed chat is unchanged.
 - The new shared-store operations are additive on message protocol 1. Older Desktop and Android clients never send them and keep working untouched.
 
-## MUBO-601 recovery and compatibility
+### MUBO-601 recovery and compatibility
 
 A hosted stream send without acknowledgement fails after 60 seconds. If stdout has also stopped for that interval, the host reopens the same native conversation without automatically repeating the message. Explicit Retry stops the old writer before creating a new attempt on the same shared message ID. Late acceptance may still confirm a timed-out attempt before retry; accepted messages cannot be retried or deleted as unsent. Delete persists cancellation before the outbox removes the row, and late receipts cannot revive it.
 

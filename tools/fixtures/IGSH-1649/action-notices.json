@@ -114,6 +114,7 @@
     "chatEchoRetryAllForActive: showHeaderNoticeAscii(\"No unsent messages for this tab\",3000,false)",
     "chatEchoRetryAllForActive: showHeaderNoticeAscii(msg,3000,false)",
     "chatEchoSendAgain: showHeaderNoticeAscii(\"Cannot verify this Codex chat yet\",5000,true)",
+    "chatEchoSendAgain: showHeaderNoticeAscii(\"Could not retry yet. Try again\",3500,true)",
     "chatEchoSendAgain: showHeaderNoticeAscii(\"Could not save message. Try again\",5000,true)",
     "chatEchoSendAgain: showHeaderNoticeAscii(\"Open the Codex chat before sending again\",5000,true)",
     "chatEchoSendAgain: showHeaderNoticeAscii(\"Waiting for the terminal before sending again\",3000,true)",
