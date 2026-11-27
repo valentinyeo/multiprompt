@@ -4,10 +4,10 @@
     "src/chat_echo.zig": "33a4b74bfb4dc6d494c606088ff6cc42201aa69d58499b00363b4a837cddc611",
     "src/chat_send.zig": "1cf10843cfc187afbe6c5976adfa34f384febda8322bd6c43d283d46a5ac8145",
     "src/chat_render.zig": "421d0e96759943f16138bb9756a3b8596c1f785d0677ae9eae28177b30071e6e",
-    "src/chat_history_reader.py": "b290dd723a98d4a2df4c314fce12506628e37aeaeb09c2919d96342b28233a8d",
+    "src/chat_history_reader.py": "d5fb52f08d7a3eb8705a70128dd888b8cc9908290bff39267a4487367809cf27",
     "src/app_state.zig": "9cbe4ff5c0e01586a75eda9db8c6259d8943e76cd7fba68eb5f4f79e10059001",
     "src/chat_connectors/claude.py": "7be13a50645bbcdb32f606e152ec75927a135db2f15c7310df50d899d093deca",
-    "tools/chat-history-reader-test.py": "023d9da1b332483749bab0d9a6149ac039fbbc17a9cfefcfa8a1f36514de9ecd",
+    "tools/chat-history-reader-test.py": "47d70d4adf28af582de4d069c9519360df0ec8fd861f27a7143fc03cc49e7082",
     "tools/multibot-feedback-test.py": "d1881053e8377aed1cbabc5acbf309429ef761f507f41ed0c7646c9cb299af88"
   },
   "coverage": {

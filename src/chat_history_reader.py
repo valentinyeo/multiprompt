@@ -8447,9 +8447,24 @@ def host_dispatch_start(provider, sid):
                 reason=started.get("reason"), permanent=started.get("permanent", False))
 
 
+def host_stop_legacy_unaccepted(provider, sid, token=None):
+    if token is not None:
+        recorded = host_written(host_session_state(provider, sid)).get(token)
+        if isinstance(recorded, dict) and recorded.get('accepted'):
+            return dict(status='refused', reason='already_read')
+    host_stop(provider, sid)
+    return dict(status='ok')
+
+
 def message_recall(provider, sid, tmux, token, attempt, text):
     if host_owned(provider, sid):
         reply = host_request(provider, sid, dict(op='recall', id=token, attempt=attempt))
+        if (isinstance(reply, dict)
+                and HOST_ADAPTERS.get(provider, {}).get('binding') == 'stream_json_user_line'
+                and (reply.get('reason') == 'invalid_op'
+                     or (reply.get('reason') == 'recall_unavailable'
+                         and HOST_ADAPTERS.get(provider, {}).get('recall') is None))):
+            return host_stop_legacy_unaccepted(provider, sid, token)
         return reply if isinstance(reply, dict) else dict(status='error', reason='invalid_reply')
     return dict(status='refused', reason='recall_unavailable')
 
@@ -8640,6 +8655,9 @@ def message_store_transaction(q):
                 ready = host_dispatch_start(provider, sid)
                 if ready.get('status') == 'owned':
                     prepared = host_request(provider, sid, dict(op='prepare_send_now', id=token))
+                    if prepared.get('reason') == 'invalid_op':
+                        host_stop(provider, sid)
+                        prepared = dict(status='ok')
                     if prepared.get('status') != 'ok':
                         raise ValueError('could not interrupt host')
             else:
@@ -8672,6 +8690,8 @@ def message_store_transaction(q):
             if token in host_held(provider, sid):
                 db.commit()
                 recovered = host_request(provider, sid, dict(op='recover_send', id=token, attempt=row[5]))
+                if recovered.get('reason') == 'invalid_op':
+                    recovered = host_stop_legacy_unaccepted(provider, sid, token)
                 db.execute('BEGIN IMMEDIATE')
                 row = db.execute('SELECT * FROM shared_messages WHERE id=?', (token,)).fetchone()
                 if recovered.get('status') != 'ok' or row[6] not in ('failed', 'sent') or row[9] != epoch:

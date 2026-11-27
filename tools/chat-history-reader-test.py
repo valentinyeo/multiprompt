@@ -5127,6 +5127,86 @@ class MUBO_601_UnacknowledgedSendTest(MUBO_594_QueuedMessageActionsTest):
         self.assertEqual(self.text('message_mubo601_0002')['state'], 'queued')
 
 
+class MUBO_611_LegacyHostQueueFallbackTest(MUBO_601_UnacknowledgedSendTest):
+    def host_request(self, provider, sid, request, **kwargs):
+        op = request.get('op')
+        if op in ('prepare_send_now', 'recover_send'):
+            return dict(status='error', reason='invalid_op')
+        if op == 'recall':
+            return dict(status='refused', reason='recall_unavailable')
+        return reader.host_handle_request(provider, sid, self.base['tmux'], self.session, request)
+
+    def watch_stop(self):
+        return patch.object(reader, 'host_stop', side_effect=reader.host_stop).start()
+
+    def fresh_host(self, pid):
+        self.session = dict(state=dict(native_session='native-conversation-601'))
+        self.agent = types.SimpleNamespace(stdin=io.BytesIO(), stdout=io.BytesIO(), pid=pid)
+        reader.host_session_reset(self.session, self.agent)
+        self.session['ready'] = True
+
+    def accept_on_host_only(self, token):
+        state = reader.host_session_state('antigravity', 'sid')
+        reader.host_written(state)[token] = dict(accepted=True)
+        reader.host_state_write('antigravity', 'sid', state)
+
+    def test_send_now_on_a_legacy_host_stops_it_requeues_and_redispatches(self):
+        stopped = self.watch_stop()
+        original = self.send()
+        result = self.request('send_now', message_id=original['id'])
+        stopped.assert_called_once()
+        self.assertFalse(result['promoted'])
+        self.assertEqual(result['message']['state'], 'queued')
+        self.assertNotEqual(result['message']['attempt'], original['attempt'])
+        self.fresh_host(611)
+        self.request('dispatch')
+        lines = [json.loads(line) for line in self.agent.stdin.getvalue().splitlines()]
+        self.assertEqual([line['message']['content'] for line in lines], [original['text']])
+        self.assertEqual(self.text()['state'], 'sent')
+
+    def test_retry_on_a_legacy_host_stops_it_and_requeues_when_unaccepted(self):
+        stopped = self.watch_stop()
+        original = self.send()
+        reply = self.request('retry', message_id=original['id'], retry_id='retry_mubo611_0001')['message']
+        stopped.assert_called_once()
+        self.assertEqual(reply['state'], 'queued')
+        self.assertNotEqual(reply['attempt'], original['attempt'])
+
+    def test_retry_refuses_an_accepted_message_on_a_legacy_host_without_stopping(self):
+        original = self.send()
+        self.accept_on_host_only(original['id'])
+        stopped = self.watch_stop()
+        with self.assertRaises(ValueError):
+            self.request('retry', message_id=original['id'], retry_id='retry_mubo611_0002')
+        stopped.assert_not_called()
+        self.assertEqual(self.text()['state'], 'sent')
+
+    def test_delete_and_edit_on_a_legacy_host_stop_it_and_cancel_when_unaccepted(self):
+        stopped = self.watch_stop()
+        first = self.send()
+        reply = self.request('dismiss', message_id=first['id'])['message']
+        stopped.assert_called_once()
+        self.assertEqual(reply['state'], 'cancelled')
+        self.fresh_host(612)
+        second = self.submit('message_mubo611_0002', 'second prompt')
+        self.request('dispatch')
+        self.assertEqual(self.text('message_mubo611_0002')['state'], 'sent')
+        edited = self.request('edit', message_id=second['id'])['message']
+        self.assertEqual(stopped.call_count, 2)
+        self.assertEqual((edited['text'], edited['state']), ('second prompt', 'cancelled'))
+
+    def test_delete_and_edit_refuse_an_accepted_message_on_a_legacy_host(self):
+        original = self.send()
+        self.accept_on_host_only(original['id'])
+        stopped = self.watch_stop()
+        with self.assertRaises(ValueError):
+            self.request('dismiss', message_id=original['id'])
+        stopped.assert_not_called()
+        edited = self.request('edit', message_id=original['id'])['message']
+        stopped.assert_not_called()
+        self.assertEqual(edited['state'], 'sent')
+
+
 class MUBO_607_AntigravityTurnQueueTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
