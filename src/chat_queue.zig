@@ -194,6 +194,20 @@ pub fn layout(card: Box, rows: usize, m: Metrics) Layout {
     return out;
 }
 
+pub const OpRefresh = struct {
+    pending: std.atomic.Value(u32) = .init(0),
+
+    pub fn done(self: *OpRefresh, shell_id: u32) void {
+        self.pending.store(shell_id +% 1, .release);
+    }
+
+    pub fn take(self: *OpRefresh) ?u32 {
+        const value = self.pending.swap(0, .acq_rel);
+        if (value == 0) return null;
+        return value - 1;
+    }
+};
+
 pub const Hit = struct {
     row: usize = 0,
     action: Action = .chevron,
@@ -321,4 +335,14 @@ test "MUBO-594 a refreshed queue reports when it changed" {
     copy.reset();
     copy.add(2, first);
     try std.testing.expect(!queue.sameAs(&copy));
+}
+
+test "MUBO-603 a finished queue action asks for one history read" {
+    var refresh = OpRefresh{};
+    try std.testing.expectEqual(@as(?u32, null), refresh.take());
+    refresh.done(41);
+    try std.testing.expectEqual(@as(?u32, 41), refresh.take());
+    try std.testing.expectEqual(@as(?u32, null), refresh.take());
+    refresh.done(0);
+    try std.testing.expectEqual(@as(?u32, 0), refresh.take());
 }

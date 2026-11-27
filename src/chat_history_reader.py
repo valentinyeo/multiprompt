@@ -2993,6 +2993,41 @@ def message_row(row):
     return dict(zip(('id', 'provider', 'sid', 'text', 'position', 'attempt', 'state', 'deadline', 'receipt', 'epoch', 'created', 'origin'), row))
 
 
+def message_unacknowledged(row):
+    return row is not None and row[6] == 'sent' and row[8] is None
+
+
+def message_recall_cancel(db, provider, sid, tmux, row, epoch, seq, strict=True):
+    token, attempt, text = row[0], row[5], row[3]
+    db.commit()
+    try:
+        recall = message_recall(provider, sid, tmux, token, attempt, text)
+    except Exception:
+        recall = dict(status='refused', reason='recall_failed')
+    db.execute('BEGIN IMMEDIATE')
+    fresh = db.execute('SELECT * FROM shared_messages WHERE id=? AND provider=? AND sid=?', (token, provider, sid)).fetchone()
+    if fresh and fresh[6] == 'cancelled':
+        return fresh, seq
+    if (fresh and fresh[9] == epoch and fresh[5] == attempt and fresh[6] in ('sent', 'failed')
+            and isinstance(recall, dict) and recall.get('status') == 'ok'):
+        changed = db.execute("UPDATE shared_messages SET state='cancelled',deadline=NULL WHERE id=? AND epoch=? AND attempt=? AND state IN ('sent','failed')", (token, epoch, attempt)).rowcount
+        row = db.execute('SELECT * FROM shared_messages WHERE id=?', (token,)).fetchone()
+        if changed:
+            seq = message_event(db, provider, sid, message_row(row))
+            return row, seq
+        if row and row[6] == 'cancelled':
+            return row, seq
+    if strict:
+        raise ValueError('message already handed off')
+    return db.execute('SELECT * FROM shared_messages WHERE id=?', (token,)).fetchone() or row, seq
+
+
+def message_requeue(db, provider, sid, token, epoch):
+    import uuid
+    db.execute("UPDATE shared_messages SET attempt=?,state='queued',deadline=?,receipt=NULL,created=? WHERE id=? AND state IN ('sent','failed') AND epoch=?", (uuid.uuid4().hex, time.time() + 15, time.time(), token, epoch))
+    return message_row(db.execute('SELECT * FROM shared_messages WHERE id=?', (token,)).fetchone())
+
+
 def host_turn_busy(provider, sid):
     if provider not in HOST_PROVIDERS or not host_owned(provider, sid):
         return False
@@ -8547,26 +8582,7 @@ def message_store_transaction(q):
                 row = db.execute('SELECT * FROM shared_messages WHERE id=?', (token,)).fetchone()
                 seq = message_event(db, provider, sid, message_row(row))
             elif row[6] in ('sent', 'failed'):
-                attempt, text = row[5], row[3]
-                db.commit()
-                try:
-                    recall = message_recall(provider, sid, tmux, token, attempt, text)
-                except Exception:
-                    recall = dict(status='refused', reason='recall_failed')
-                db.execute('BEGIN IMMEDIATE')
-                fresh = db.execute('SELECT * FROM shared_messages WHERE id=? AND provider=? AND sid=?', (token, provider, sid)).fetchone()
-                if fresh and fresh[6] == 'cancelled':
-                    row = fresh
-                elif (fresh and fresh[9] == epoch and fresh[5] == attempt and fresh[6] in ('sent', 'failed')
-                        and isinstance(recall, dict) and recall.get('status') == 'ok'):
-                    changed = db.execute("UPDATE shared_messages SET state='cancelled',deadline=NULL WHERE id=? AND epoch=? AND attempt=? AND state IN ('sent','failed')", (token, epoch, attempt)).rowcount
-                    row = db.execute('SELECT * FROM shared_messages WHERE id=?', (token,)).fetchone()
-                    if changed:
-                        seq = message_event(db, provider, sid, message_row(row))
-                    elif not row or row[6] != 'cancelled':
-                        raise ValueError('message already handed off')
-                else:
-                    raise ValueError('message already handed off')
+                row, seq = message_recall_cancel(db, provider, sid, tmux, row, epoch, seq)
             elif row[6] != 'cancelled':
                 raise ValueError('message already handed off')
             return dict(message=message_row(row), epoch=epoch, seq=seq)
@@ -8580,7 +8596,10 @@ def message_store_transaction(q):
             row = db.execute('SELECT * FROM shared_messages WHERE id=? AND provider=? AND sid=?', (token, provider, sid)).fetchone()
             if not row:
                 raise ValueError('message not found')
-            if row[6] not in ('queued', 'failed') or row[9] != epoch:
+            if row[9] != epoch or (row[6] not in ('queued', 'failed') and not message_unacknowledged(row)):
+                return dict(message=message_row(row), epoch=epoch, seq=seq)
+            if message_unacknowledged(row):
+                row, seq = message_recall_cancel(db, provider, sid, tmux, row, epoch, seq, strict=False)
                 return dict(message=message_row(row), epoch=epoch, seq=seq)
             if text is None:
                 db.execute("UPDATE shared_messages SET state='cancelled',deadline=NULL WHERE id=? AND epoch=? AND state IN ('queued','failed')", (token, epoch))
@@ -8598,7 +8617,11 @@ def message_store_transaction(q):
             row = db.execute('SELECT * FROM shared_messages WHERE id=? AND provider=? AND sid=?', (token, provider, sid)).fetchone()
             if not row:
                 raise ValueError('message not found')
-            if row[6] != 'queued' or row[9] != epoch:
+            unacknowledged = message_unacknowledged(row)
+            if row[9] != epoch or (row[6] != 'queued' and not unacknowledged):
+                return dict(message=message_row(row), epoch=epoch, seq=seq, promoted=False)
+            hosting = host_dispatch_switch(provider, sid)
+            if unacknowledged and not hosting:
                 return dict(message=message_row(row), epoch=epoch, seq=seq, promoted=False)
             front = db.execute("SELECT MIN(position) FROM shared_messages WHERE provider=? AND sid=? AND epoch=? AND state IN ('queued','sent')", (provider, sid, epoch)).fetchone()[0]
             promoted = front is not None and row[4] > front
@@ -8606,8 +8629,9 @@ def message_store_transaction(q):
                 db.execute('UPDATE shared_messages SET position=? WHERE id=? AND epoch=?', (front - 1, token, epoch))
                 row = db.execute('SELECT * FROM shared_messages WHERE id=?', (token,)).fetchone()
                 seq = message_event(db, provider, sid, message_row(row))
+            attempt = row[5]
             db.commit()
-            if host_dispatch_switch(provider, sid):
+            if hosting:
                 ready = host_dispatch_start(provider, sid)
                 if ready.get('status') == 'owned':
                     prepared = host_request(provider, sid, dict(op='prepare_send_now', id=token))
@@ -8615,6 +8639,16 @@ def message_store_transaction(q):
                         raise ValueError('could not interrupt host')
             else:
                 send_now_response(dict(q, text=row[3]))
+            db.execute('BEGIN IMMEDIATE')
+            fresh = db.execute('SELECT * FROM shared_messages WHERE id=? AND provider=? AND sid=?', (token, provider, sid)).fetchone()
+            if not fresh or fresh[9] != epoch or fresh[6] == 'cancelled':
+                return dict(message=message_row(fresh or row), epoch=epoch, seq=seq, promoted=promoted)
+            if unacknowledged and fresh[6] in ('sent', 'failed') and fresh[5] == attempt:
+                row = message_requeue(db, provider, sid, token, epoch)
+                seq = message_event(db, provider, sid, row)
+            elif not unacknowledged and fresh[6] != 'queued':
+                return dict(message=message_row(fresh), epoch=epoch, seq=seq, promoted=promoted)
+            db.commit()
             dispatched = message_store_transaction(dict(q, op='message_dispatch'))
             current = db.execute('SELECT * FROM shared_messages WHERE id=?', (token,)).fetchone()
             return dict(message=message_row(current), epoch=epoch, seq=dispatched['seq'], promoted=promoted)

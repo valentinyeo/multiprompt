@@ -8448,6 +8448,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             }
             if (wp == TIMER_CHAT_OUTBOX) {
                 chatSendNowFinish();
+                if (@import("chat_queue_view.zig").chatQueueRefresh()) |shell_id| @import("chat_send.zig").chatQueueOpDone(shell_id);
                 chatOutboxTick();
                 return 0;
             }

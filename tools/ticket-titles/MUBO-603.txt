@@ -1,0 +1,1 @@
+Make Send Now and Edit work on waiting queued messages

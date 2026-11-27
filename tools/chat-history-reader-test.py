@@ -5070,8 +5070,47 @@ class MUBO_601_UnacknowledgedSendTest(MUBO_594_QueuedMessageActionsTest):
         self.assertFalse(result['promoted'])
         self.assertEqual(result['message']['state'], 'sent')
         self.assertEqual(len(self.agent.stdin.getvalue().splitlines()), 1)
-        self.request('send_now', message_id=original['id'])
-        self.assertEqual(len(self.agent.stdin.getvalue().splitlines()), 1)
+
+    def test_send_now_on_an_unacknowledged_send_recovers_the_host_and_sends_once(self):
+        original = self.send()
+        before = self.text()
+        result = self.request('send_now', message_id=original['id'])
+        self.assertFalse(result['promoted'])
+        self.assertEqual(result['message']['state'], 'queued')
+        self.assertNotEqual(result['message']['attempt'], before['attempt'])
+        self.stop_agent.assert_called_once()
+        self.start_agent.assert_called_once()
+        self.assertEqual(self.session['sends'], [])
+        self.assertEqual(self.agent.stdin.getvalue(), b'')
+        self.session['ready'] = True
+        self.request('dispatch')
+        lines = [json.loads(line) for line in self.agent.stdin.getvalue().splitlines()]
+        self.assertEqual([line['message']['content'] for line in lines], [before['text']])
+        self.assertEqual(self.text()['state'], 'sent')
+
+    def test_edit_pulls_back_an_unacknowledged_send_and_cancels_it(self):
+        original = self.send()
+        reply = self.request('edit', message_id=original['id'])['message']
+        self.assertEqual((reply['text'], reply['state']), ('queued prompt', 'cancelled'))
+        self.stop_agent.assert_called_once()
+        self.start_agent.assert_called_once()
+        self.assertEqual(self.session['sends'], [])
+        self.assertEqual([row['state'] for row in self.queued()], ['cancelled'])
+        self.assertEqual(self.request('edit', message_id=original['id'])['message']['state'], 'cancelled')
+
+    def test_edit_with_new_text_still_cancels_an_unacknowledged_send(self):
+        original = self.send()
+        reply = self.request('edit', message_id=original['id'], text='a better prompt')['message']
+        self.assertEqual(reply['state'], 'cancelled')
+        self.assertEqual(self.text()['state'], 'cancelled')
+        self.assertEqual(self.session['sends'], [])
+
+    def test_edit_refuses_an_accepted_message(self):
+        original = self.send()
+        reader.host_accept('antigravity', 'sid', 'fixture', self.session, dict(event='step_update'))
+        reply = self.request('edit', message_id=original['id'])['message']
+        self.assertEqual(reply['state'], 'accepted')
+        self.stop_agent.assert_not_called()
 
     def test_send_now_interrupts_a_wedged_turn_and_sends_target_before_the_rest(self):
         self.send()
