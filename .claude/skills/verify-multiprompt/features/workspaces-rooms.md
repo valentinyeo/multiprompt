@@ -53,9 +53,6 @@ Journey: workspaces, workspace-focus, sessions. UNREACHABLE for cross-device fol
 | `SEARCH_WSMOVE_OFFSET` | Choose **Move to workspace**, then select its destination name. Follow `workspace` above. |
 | `SEARCH_WSSORT_MENU_OFFSET` | Ctrl+K, search for **sort workspaces**. Follow `workspace` above. |
 | `SEARCH_WSSORT_OFFSET` | Open **Sort workspaces**, then choose the displayed sort mode. Follow `workspace` above. |
-| `SEARCH_WS_SWITCH_CLAUDE_OFFSET` | Ctrl+K, type **switch all chats claude**, then choose the workspace row. Follow `switch-ai` below. |
-| `SEARCH_WS_SWITCH_CODEX_OFFSET` | Ctrl+K, type **switch all chats codex**, then choose the workspace row. Follow `switch-ai` below. |
-| `SEARCH_WS_SWITCH_ANTIGRAVITY_OFFSET` | Ctrl+K, type **switch all chats antigravity**, then choose the workspace row. Follow `switch-ai` below. |
 
 ### switch-ai: Switch every chat in a workspace
 
@@ -64,6 +61,12 @@ Open Ctrl+K in the workspace that owns the chats, search **switch all chats**, p
 Observable proof: `mb workspace switch-ai` output lists every chat with `switched`, `already`, `busy` or `refused` plus a reason, and a repeat run reports the same chats as `already`. In the app, each switched chat keeps its row name and picture, shows its earlier messages above the divider, and the next message is answered by the new provider. A chat on a provider the host cannot start yet is refused with the host reason and stays on its current AI.
 
 Journey: none yet. MUBO-564 owns the real bulk-switching journey video; until it lands this recipe is documented and not covered by a recorded run.
+
+| Palette row or dynamic family | User reaches it |
+| --- | --- |
+| `SEARCH_WS_SWITCH_CLAUDE_OFFSET` | Ctrl+K, type **switch all chats claude**, then choose the workspace row. Follow `switch-ai` above. |
+| `SEARCH_WS_SWITCH_CODEX_OFFSET` | Ctrl+K, type **switch all chats codex**, then choose the workspace row. Follow `switch-ai` above. |
+| `SEARCH_WS_SWITCH_ANTIGRAVITY_OFFSET` | Ctrl+K, type **switch all chats antigravity**, then choose the workspace row. Follow `switch-ai` above. |
 
 Source files: src/workspace_switch_ai.zig, src/command_palette.zig, src/sidebar.zig, src/shortcuts.zig, src/browser_bridge.zig, src/mp_zsb.sh, tools/mb.mjs, tools/mb-workspace-switch-ai.test.js
 
