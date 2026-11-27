@@ -187,7 +187,7 @@ with tempfile.TemporaryDirectory() as directory:
         def unregister(self, *args): pass
         def select(self, timeout):
             assert steps, session
-            return [(SimpleNamespace(data=steps.pop(0)), None)]
+            return [(SimpleNamespace(data=steps.pop(0), fileobj=session['agent'].stdout), None)]
     class Output:
         def __init__(self, fresh): self.fresh = fresh
         def read1(self, size):

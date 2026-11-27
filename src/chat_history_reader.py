@@ -3217,6 +3217,7 @@ HOST_FRESH_CONTEXT_MESSAGE_LIMIT = 1200
 HOST_FRESH_HANDOVER_NOISE = re.compile(
     r"(?:^Reloaded skills:|hit your \d+-hour limit|hit your .* limit|^You've hit your )", re.I | re.M)
 HOST_DELIVERY_TIMEOUT = 15
+HOST_ACK_TIMEOUT = 60
 HOST_STOP_GRACE = 5.0
 HOST_TERMINAL_TIMEOUT = 20
 HOST_LINE_LIMIT = 4 * 1024 * 1024
@@ -6175,6 +6176,55 @@ def host_refuse(reason, **extra):
     return dict(status="refused", reason=reason, **extra)
 
 
+def host_recover_agent(provider, sid, tmux, session):
+    agent = session.get("agent")
+    selector = session.get("selector")
+    if selector is not None and agent is not None:
+        selector.unregister(agent.stdout)
+    host_agent_stop(agent)
+    session["agent"] = None
+    for entry in list(session.get("sends") or []):
+        host_unsent(provider, sid, tmux, session, entry["id"], "unacknowledged")
+    host_turn_end(provider, sid, tmux, session,
+                  dict(status="interrupted", stop_reason="host_recovery", usage={}), dict(subtype="host_recovery"))
+    try:
+        agent = host_agent_start(provider, sid, session["state"].get("mode"))
+    except (OSError, RuntimeError):
+        session["stop"] = True
+        return dict(status="error", reason="agent_start_failed")
+    host_session_reset(session, agent)
+    session["state"]["agent_pid"] = agent.pid
+    if "settings" in session:
+        session["starting_settings"] = dict(session["settings"])
+        session["applied_settings"] = None
+    host_state_write(provider, sid, session["state"])
+    if selector is not None:
+        selector.register(agent.stdout, 1, "agent")
+    HOST_ADAPTERS[provider]["open"](provider, sid, tmux, session)
+    host_log(provider, sid, "recovered", dict(native=session["state"].get("native_session")))
+    return dict(status="ok")
+
+
+def host_ack_watchdog(provider, sid, tmux, session, now=None):
+    if HOST_ADAPTERS[provider]["binding"] != "stream_json_user_line":
+        return
+    if session.get("parked") or session["state"].get("fresh_start"):
+        return
+    now = time.time() if now is None else now
+    expired = [entry for entry in session.get("sends") or []
+               if not entry.get("accepted") and now - entry.get("at", now) >= HOST_ACK_TIMEOUT]
+    for entry in expired:
+        if entry.get("ack_timed_out"):
+            continue
+        digest = hashlib.sha256((sid + ":" + entry["id"] + ":" + entry["attempt"]).encode()).hexdigest()
+        host_apply(provider, sid, tmux, [dict(kind="not_sent", sid=sid, id=entry["id"], attempt=entry["attempt"],
+                   event_id="host:ack_timeout:" + digest, reason="unacknowledged",
+                   provenance=HOST_ADAPTERS[provider]["provenance"])])
+        entry["ack_timed_out"] = True
+    if expired and now - session.get("stdout_at", min(entry["at"] for entry in expired)) >= HOST_ACK_TIMEOUT:
+        host_recover_agent(provider, sid, tmux, session)
+
+
 def host_handle_request(provider, sid, tmux, session, request):
     operation = request.get("op")
     if operation == "ping":
@@ -6189,6 +6239,27 @@ def host_handle_request(provider, sid, tmux, session, request):
         host_log(provider, sid, "stop_requested")
         return dict(status="ok")
     adapter = HOST_ADAPTERS[provider]
+    if operation == "recover_send":
+        token, attempt = request.get("id"), request.get("attempt")
+        entry = next((item for item in session.get("sends") or []
+                      if item.get("id") == token and item.get("attempt") == attempt), None)
+        recorded = host_written(session["state"]).get(token)
+        if entry is not None and entry.get("accepted") or isinstance(recorded, dict) and recorded.get("accepted"):
+            return host_refuse("already_read")
+        if entry is None:
+            return dict(status="ok")
+        return host_recover_agent(provider, sid, tmux, session)
+    if operation == "prepare_send_now":
+        if session["state"].get("fresh_start"):
+            return dict(status="busy", reason="fresh_start_pending")
+        if session.get("inflight") or session.get("sends"):
+            if provider == "codex":
+                return dict(status="ok")
+            if provider == "pi":
+                session["send_now_token"] = request.get("id")
+                return dict(status="ok")
+            return host_recover_agent(provider, sid, tmux, session)
+        return dict(status="ok")
     if operation == "fresh_start":
         return host_fresh_start(provider, sid, tmux, session, request.get("handover_file"))
     if operation == "deliver" and session["state"].get("fresh_start"):
@@ -7023,7 +7094,7 @@ def host_pi_open(provider, sid, tmux, session):
 def host_pi_write(provider, sid, session, token, text):
     payload = dict(id=token, type="prompt", message=text)
     if isinstance(session.get("inflight"), dict):
-        payload["streamingBehavior"] = "followUp"
+        payload["streamingBehavior"] = "steer" if session.pop("send_now_token", None) == token else "followUp"
     return host_control_send(session, payload)
 
 
@@ -7424,6 +7495,8 @@ def host_recall(provider, sid, tmux, session, token, attempt):
         return host_refuse("already_read")
     recall = HOST_ADAPTERS[provider].get("recall")
     if recall is None:
+        if HOST_ADAPTERS[provider]["binding"] == "stream_json_user_line":
+            return host_recover_agent(provider, sid, tmux, session)
         return host_refuse("recall_unavailable")
     reply = recall(provider, sid, tmux, session, entry)
     if not isinstance(reply, dict) or reply.get("status") != "ok":
@@ -7448,6 +7521,7 @@ def host_recall(provider, sid, tmux, session, token, attempt):
 def host_agent_read(provider, sid, tmux, session, chunk):
     if not chunk:
         return False
+    session["stdout_at"] = time.time()
     session["buffer"] += chunk
     while b"\n" in session["buffer"]:
         raw, session["buffer"] = session["buffer"].split(b"\n", 1)
@@ -7637,7 +7711,12 @@ def host_loop(provider, sid, tmux, session, server, agent):
     with selectors.DefaultSelector() as selector:
         selector.register(server, selectors.EVENT_READ, "client")
         selector.register(agent.stdout, selectors.EVENT_READ, "agent")
+        session["selector"] = selector
         while not session["stop"]:
+            host_ack_watchdog(provider, sid, tmux, session)
+            if session["stop"]:
+                return
+            agent = session["agent"]
             host_room_tick(provider, sid, session)
             fresh = session["state"].get("fresh_start")
             fresh_limit = HOST_FRESH_TIMEOUTS.get(fresh.get("phase") if isinstance(fresh, dict) else None)
@@ -7700,6 +7779,11 @@ def host_loop(provider, sid, tmux, session, server, agent):
                 if host_rotate(provider, sid, session, agent):
                     return
             for key, _ in selector.select(host_flush_timeout(session)):
+                agent = session["agent"]
+                if agent is None:
+                    return
+                if key.data == "agent" and key.fileobj is not agent.stdout:
+                    continue
                 if key.data == "agent":
                     try:
                         chunk = agent.stdout.read1(65536)
@@ -8343,7 +8427,7 @@ def message_store_request(q):
             provider not in HOST_PROVIDERS or not isinstance(sid, str) or not SESSION_ID.fullmatch(sid) or
             not isinstance(tmux, str) or not TMUX_NAME.fullmatch(tmux)):
         raise ValueError('invalid message protocol or identity')
-    if q.get('op') not in ('message_dispatch', 'message_reset', 'message_send_now'):
+    if q.get('op') not in ('message_dispatch', 'message_reset', 'message_send_now', 'message_retry', 'message_dismiss'):
         return message_store_transaction(q)
     with message_dispatch_lock_path(provider, sid).open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -8458,11 +8542,11 @@ def message_store_transaction(q):
                 return dict(message=message_row(row), epoch=epoch, seq=seq)
             if row[9] != epoch:
                 return dict(message=dict(message_row(row), state='cancelled'), epoch=epoch, seq=seq)
-            if row[6] in ('queued', 'failed'):
+            if row[6] == 'queued' or row[6] == 'failed' and token not in host_held(provider, sid):
                 db.execute("UPDATE shared_messages SET state='cancelled',deadline=NULL WHERE id=? AND epoch=? AND state=?", (token, epoch, row[6]))
                 row = db.execute('SELECT * FROM shared_messages WHERE id=?', (token,)).fetchone()
                 seq = message_event(db, provider, sid, message_row(row))
-            elif row[6] == 'sent':
+            elif row[6] in ('sent', 'failed'):
                 attempt, text = row[5], row[3]
                 db.commit()
                 try:
@@ -8473,9 +8557,9 @@ def message_store_transaction(q):
                 fresh = db.execute('SELECT * FROM shared_messages WHERE id=? AND provider=? AND sid=?', (token, provider, sid)).fetchone()
                 if fresh and fresh[6] == 'cancelled':
                     row = fresh
-                elif (fresh and fresh[9] == epoch and fresh[5] == attempt and fresh[6] == 'sent'
+                elif (fresh and fresh[9] == epoch and fresh[5] == attempt and fresh[6] in ('sent', 'failed')
                         and isinstance(recall, dict) and recall.get('status') == 'ok'):
-                    changed = db.execute("UPDATE shared_messages SET state='cancelled',deadline=NULL WHERE id=? AND epoch=? AND attempt=? AND state='sent'", (token, epoch, attempt)).rowcount
+                    changed = db.execute("UPDATE shared_messages SET state='cancelled',deadline=NULL WHERE id=? AND epoch=? AND attempt=? AND state IN ('sent','failed')", (token, epoch, attempt)).rowcount
                     row = db.execute('SELECT * FROM shared_messages WHERE id=?', (token,)).fetchone()
                     if changed:
                         seq = message_event(db, provider, sid, message_row(row))
@@ -8517,12 +8601,23 @@ def message_store_transaction(q):
             if row[6] != 'queued' or row[9] != epoch:
                 return dict(message=message_row(row), epoch=epoch, seq=seq, promoted=False)
             front = db.execute("SELECT MIN(position) FROM shared_messages WHERE provider=? AND sid=? AND epoch=? AND state IN ('queued','sent')", (provider, sid, epoch)).fetchone()[0]
-            if front is not None and row[4] <= front:
-                return dict(message=message_row(row), epoch=epoch, seq=seq, promoted=False)
-            db.execute('UPDATE shared_messages SET position=? WHERE id=? AND epoch=?', (front - 1 if front is not None else 0, token, epoch))
-            row = db.execute('SELECT * FROM shared_messages WHERE id=?', (token,)).fetchone()
-            seq = message_event(db, provider, sid, message_row(row))
-            return dict(message=message_row(row), epoch=epoch, seq=seq, promoted=True)
+            promoted = front is not None and row[4] > front
+            if promoted:
+                db.execute('UPDATE shared_messages SET position=? WHERE id=? AND epoch=?', (front - 1, token, epoch))
+                row = db.execute('SELECT * FROM shared_messages WHERE id=?', (token,)).fetchone()
+                seq = message_event(db, provider, sid, message_row(row))
+            db.commit()
+            if host_dispatch_switch(provider, sid):
+                ready = host_dispatch_start(provider, sid)
+                if ready.get('status') == 'owned':
+                    prepared = host_request(provider, sid, dict(op='prepare_send_now', id=token))
+                    if prepared.get('status') != 'ok':
+                        raise ValueError('could not interrupt host')
+            else:
+                send_now_response(dict(q, text=row[3]))
+            dispatched = message_store_transaction(dict(q, op='message_dispatch'))
+            current = db.execute('SELECT * FROM shared_messages WHERE id=?', (token,)).fetchone()
+            return dict(message=message_row(current), epoch=epoch, seq=dispatched['seq'], promoted=promoted)
         if op == 'message_retry':
             token, request = q.get('message_id'), q.get('retry_id')
             if not isinstance(token, str) or not isinstance(request, str) or not re.fullmatch(r'[A-Za-z0-9_-]{16,80}', request):
@@ -8533,8 +8628,15 @@ def message_store_transaction(q):
             previous = db.execute('SELECT attempt FROM message_retries WHERE id=? AND request=?', (token, request)).fetchone()
             if previous:
                 return dict(message=message_row(row), epoch=epoch, seq=seq)
-            if row[6] != 'failed' or row[9] != epoch:
+            if (row[6] != 'failed' and not (row[6] == 'sent' and row[8] is None)) or row[9] != epoch:
                 raise ValueError('message is not retryable')
+            if token in host_held(provider, sid):
+                db.commit()
+                recovered = host_request(provider, sid, dict(op='recover_send', id=token, attempt=row[5]))
+                db.execute('BEGIN IMMEDIATE')
+                row = db.execute('SELECT * FROM shared_messages WHERE id=?', (token,)).fetchone()
+                if recovered.get('status') != 'ok' or row[6] not in ('failed', 'sent') or row[9] != epoch:
+                    raise ValueError('message is not retryable')
             state = host_session_state(provider, sid)
             failure = state.get('startup_failure')
             if (isinstance(failure, dict) and 'retry_generation' not in failure
@@ -8543,7 +8645,7 @@ def message_store_transaction(q):
                 host_state_write(provider, sid, state)
             attempt = uuid.uuid4().hex
             db.execute('INSERT INTO message_retries VALUES (?,?,?)', (token, request, attempt))
-            db.execute("UPDATE shared_messages SET attempt=?,state='queued',deadline=?,receipt=NULL,created=? WHERE id=? AND state='failed' AND epoch=?", (attempt, time.time() + 15, time.time(), token, epoch))
+            db.execute("UPDATE shared_messages SET attempt=?,state='queued',deadline=?,receipt=NULL,created=? WHERE id=? AND state IN ('failed','sent') AND epoch=?", (attempt, time.time() + 15, time.time(), token, epoch))
             row = message_row(db.execute('SELECT * FROM shared_messages WHERE id=?', (token,)).fetchone())
             seq = message_event(db, provider, sid, row)
             return dict(message=row, epoch=epoch, seq=seq)

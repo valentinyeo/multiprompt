@@ -86,7 +86,10 @@ with tempfile.TemporaryDirectory() as directory:
     assert r['message_store_request'](dict(request, op='message_dispatch'))['message']['state'] == 'failed'
     r['message_store_request'](dict(request, op='message_retry', message_id=token, retry_id='synthetic-retry-789'))
     def racing_start(*args):
-        r['message_store_request'](dict(request, op='message_retry', message_id=race_token, retry_id='synthetic-retry-race'))
+        assert r['host_owned'](provider, sid)
+        assert race_token not in r['host_held'](provider, sid)
+        with patch.dict(r, host_request=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError('startup retry requested recovery'))):
+            r['message_store_request'](dict(request, op='message_retry', message_id=race_token, retry_id='synthetic-retry-race'))
         raise FileNotFoundError('synthetic')
     r['host_agent_start'] = racing_start
     assert r['host_main'](provider, sid) == 5

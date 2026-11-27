@@ -1,0 +1,1 @@
+Fix Antigravity stuck sends, queue force-send, delete and duplicate bubbles
