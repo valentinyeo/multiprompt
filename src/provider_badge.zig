@@ -52,6 +52,11 @@ pub fn modelLabel(model: chat_live.Model) []const u8 {
         .terra => "Terra",
         .luna => "Luna",
         .astra => "Astra",
+        .neon => "Neon",
+        .carbon => "Carbon",
+        .argon => "Argon",
+        .hydrogen => "Hydrogen",
+        .flash => "Flash",
         .unknown => "",
     };
 }
@@ -61,6 +66,7 @@ pub fn effortLabel(effort: chat_live.Effort) []const u8 {
         .low => "Low effort",
         .medium => "Medium effort",
         .high => "High effort",
+        .xhigh => "XHigh",
         .unknown => "",
     };
 }
@@ -334,4 +340,25 @@ test "MUBO-568 hover names the model and effort only when the chat reports them"
     try std.testing.expectEqualStrings("Codex · Sol", detail(&out, mark(2).?, .{ .model = .sol, .effort = .unknown }));
     try std.testing.expectEqualStrings("Pi · Low effort", detail(&out, mark(3).?, .{ .model = .unknown, .effort = .low }));
     try std.testing.expectEqualStrings("Antigravity · Astra", detail(&out, mark(8).?, .{ .model = .astra, .effort = .unknown }));
+}
+
+test "MUBO-568 the focused proof carries every provider badge test" {
+    const expected = [_][]const u8{
+        "provider_badge.test.MUBO-568 each resolved provider draws its own corner and unknown agents draw none",
+        "provider_badge.test.MUBO-568 a misleading chat name never chooses the badge",
+        "provider_badge.test.MUBO-568 the solid triangle fills the avatar corner at 100, 150 and pinned sizes",
+        "provider_badge.test.MUBO-568 the collapsed avatar keeps the solid corner at 100 and 150 percent",
+        "provider_badge.test.MUBO-568 the corner triangle fills and stays inside the avatar at every size",
+        "provider_badge.test.MUBO-568 hover names the model and effort only when the chat reports them",
+    };
+    var carried: usize = 0;
+    for (@import("builtin").test_functions) |function| {
+        for (expected) |name| {
+            if (std.mem.eql(u8, function.name, name)) carried += 1;
+        }
+    }
+    if (carried != expected.len) {
+        std.debug.print("provider badge proofs carried: {d} of {d}\n", .{ carried, expected.len });
+    }
+    try std.testing.expectEqual(expected.len, carried);
 }

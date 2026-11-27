@@ -10234,24 +10234,3 @@ test "IGSH-836 palette keyboard survives stationary hover and real movement or c
 test {
     _ = @import("provider_badge.zig");
 }
-
-test "MUBO-568 the focused proof carries every provider badge test" {
-    const expected = [_][]const u8{
-        "provider_badge.test.MUBO-568 each resolved provider draws its own corner and unknown agents draw none",
-        "provider_badge.test.MUBO-568 a misleading chat name never chooses the badge",
-        "provider_badge.test.MUBO-568 the solid triangle fills the avatar corner at 100, 150 and pinned sizes",
-        "provider_badge.test.MUBO-568 the collapsed avatar keeps the solid corner at 100 and 150 percent",
-        "provider_badge.test.MUBO-568 the corner triangle fills and stays inside the avatar at every size",
-        "provider_badge.test.MUBO-568 hover names the model and effort only when the chat reports them",
-    };
-    var carried: usize = 0;
-    for (@import("builtin").test_functions) |function| {
-        for (expected) |name| {
-            if (std.mem.eql(u8, function.name, name)) carried += 1;
-        }
-    }
-    if (carried != expected.len) {
-        std.debug.print("provider badge proofs carried: {d} of {d}\n", .{ carried, expected.len });
-    }
-    try std.testing.expectEqual(expected.len, carried);
-}
