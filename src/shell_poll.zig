@@ -535,6 +535,13 @@ test "IGSH-901 restored tab names survive the folder name of a restart" {
     try std.testing.expect(!restoredNameStaysForCwd(false, github, ""));
 }
 
+test "MUBO-221 generated live-chat session IDs never overwrite a named default tab during poll" {
+    try std.testing.expect(!shouldAdoptTmuxSessionFallbackName("live-54de9", "Antigravity".len));
+    try std.testing.expect(shouldAdoptTmuxSessionFallbackName("live-54de9", 0));
+    try std.testing.expect(shouldAdoptTmuxSessionFallbackName("verify-agent", "VPS 1".len));
+    try std.testing.expect(shouldAdoptTmuxSessionFallbackName("term-123", "Terminal".len));
+}
+
 fn lastPathSegment(path: []const u16) struct { start: usize, end: usize } {
     var last_sep: ?usize = null;
     for (path, 0..) |c, i| {
@@ -1304,6 +1311,11 @@ pub fn restoredNameStaysForCwd(hold: bool, live_cwd: []const u16, cached_cwd: []
     return cached_cwd.len == 0 or cwdMatchesCachedU16(live_cwd, cached_cwd);
 }
 
+pub fn shouldAdoptTmuxSessionFallbackName(tmux_session: []const u8, current_name_len: usize) bool {
+    if (@import("chat_view.zig").isLive(tmux_session) and current_name_len > 0) return false;
+    return true;
+}
+
 fn applyCwdSegmentName(shell: *Shell, cwd: []const u16, agent: AgentName) bool {
     const cached_len: usize = @intCast(shell.cached_cwd_len);
     if (restoredNameStaysForCwd(shell.restored_name_hold, cwd, shell.cached_cwd[0..cached_len])) return false;
@@ -1887,7 +1899,7 @@ pub fn pollShellNames() void {
             } else {
                 app_state.shells[i].adopt_streak = 0;
             }
-        } else if (app_state.shells[i].kind != .tmux and det_pid != 0) {
+        } else if (app_state.shells[i].kind != .tmux and app_state.shells[i].tmux_session_len == 0 and det_pid != 0) {
             var detected: [64]u8 = undefined;
             var detected_len: u32 = 0;
             if (isTmuxRunningInConsole(det_pid) and extractTmuxSessionFromStatus(det_pid, &detected, &detected_len)) {
@@ -2134,6 +2146,7 @@ pub fn pollShellNames() void {
                 continue;
             }
             const ts = app_state.shells[i].tmux_session[0..app_state.shells[i].tmux_session_len];
+            if (!shouldAdoptTmuxSessionFallbackName(ts, app_state.shells[i].name_len)) continue;
             var ts_u16: [64]u16 = undefined;
             for (0..ts.len) |j| {
                 ts_u16[j] = ts[j];

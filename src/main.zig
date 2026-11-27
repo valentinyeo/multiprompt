@@ -495,7 +495,7 @@ const updateCardInit = @import("update_card.zig").updateCardInit;
 const startUpdateCardWatch = @import("update_card.zig").startUpdateCardWatch;
 const stopUpdateCardWatch = @import("update_card.zig").stopUpdateCardWatch;
 const updateCardHit = @import("update_card.zig").updateCardHit;
-const updateCardToggleNotes = @import("update_card.zig").updateCardToggleNotes;
+const updateCardSeeAll = @import("update_card.zig").updateCardSeeAll;
 const updateCardPoll = @import("update_card.zig").updateCardPoll;
 const updateCardDismiss = @import("update_card.zig").updateCardDismiss;
 const updateCardRelaunch = @import("update_card.zig").updateCardRelaunch;
@@ -1577,6 +1577,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         @import("native_session.zig").ready(@intCast(wp), lp != 0);
         return 0;
     }
+    if (msg == @import("win32.zig").WM_APP_NATIVE_SIZE) {
+        @import("native_session.zig").reportSize(@intCast(wp));
+        return 0;
+    }
     if (msg == @import("win32.zig").WM_APP_BROWSER_SIGNIN_DONE) {
         @import("browser_pane.zig").handleBrowserSigninDone(@bitCast(lp), wp);
         return 0;
@@ -2134,7 +2138,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     const upd_hit = updateCardHit(mx, my);
                     if (upd_hit != 0) {
                         app_state.g_shell_focused = false;
-                        if (upd_hit == 1) updateCardRelaunch(hwnd) else if (upd_hit == 2) updateCardDismiss() else if (upd_hit == 4) updateCardToggleNotes();
+                        if (upd_hit == 1) updateCardRelaunch(hwnd) else if (upd_hit == 2) updateCardDismiss() else if (upd_hit == 4) updateCardSeeAll();
                         _ = InvalidateRect(hwnd, null, 0);
                         return 0;
                     }
@@ -3919,7 +3923,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             };
             switch (item) {
                 .attach => _ = PostMessageW(hwnd, WM_APP_CHAT_ATTACH, 0, 0),
-                .model_opus, .model_sonnet, .model_haiku, .model_fable, .model_sol, .model_terra, .model_luna, .model_astra, .effort_low, .effort_medium, .effort_high => {
+                .model_opus, .model_sonnet, .model_haiku, .model_fable, .model_sol, .model_terra, .model_luna, .model_astra, .model_neon, .model_carbon, .model_argon, .model_hydrogen, .model_flash, .model_agy_opus, .model_agy_sonnet, .effort_low, .effort_medium, .effort_high, .effort_xhigh => {
                     const setting: @import("chat_live.zig").Setting = switch (item) {
                         .model_opus => .{ .model = .opus },
                         .model_sonnet => .{ .model = .sonnet },
@@ -3929,9 +3933,17 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         .model_terra => .{ .model = .terra },
                         .model_luna => .{ .model = .luna },
                         .model_astra => .{ .model = .astra },
+                        .model_neon => .{ .model = .neon },
+                        .model_carbon => .{ .model = .carbon },
+                        .model_argon => .{ .model = .argon },
+                        .model_hydrogen => .{ .model = .hydrogen },
+                        .model_flash => .{ .model = .flash },
+                        .model_agy_opus => .{ .model = .opus },
+                        .model_agy_sonnet => .{ .model = .sonnet },
                         .effort_low => .{ .effort = .low },
                         .effort_medium => .{ .effort = .medium },
-                        else => .{ .effort = .high },
+                        .effort_high => .{ .effort = .high },
+                        else => .{ .effort = .xhigh },
                     };
                     if (@import("chat_send.zig").chatSetLiveSetting(setting)) @import("chat_send.zig").chatSettingNotice(setting) else showHeaderNoticeAscii("Could not change chat settings", 4000, true);
                 },
@@ -3991,6 +4003,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         app_state.WM_APP_CHAT_SWITCH_AI => {
             @import("command_palette.zig").finishSwitchAi(lp);
+            return 0;
+        },
+        app_state.WM_APP_CHAT_HOST_READY => {
+            @import("command_palette.zig").finishHostLaunch(wp);
             return 0;
         },
         app_state.WM_APP_PI_MODEL_RESULT => {
@@ -5040,7 +5056,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_SEARCH_CONFIRM => {
-            if (lp != 0 and (lp != @as(isize, @intCast(app_state.g_search_revision)) or wp != @as(usize, app_state.g_search_sel) + 1)) return 0;
+            if (lp != 0 and (wp != @as(usize, app_state.g_search_sel) + 1 or (!app_state.g_search_active and lp != @as(isize, @intCast(app_state.g_search_revision))))) return 0;
             if (app_state.g_search_active and app_state.g_browser_url_mode) {
                 _ = PostMessageW(hwnd, WM_APP_BROWSER_OPEN_URL, 0, 0);
                 return 0;

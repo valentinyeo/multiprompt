@@ -454,6 +454,7 @@ pub fn chatVoiceIdentity() ?VoiceIdentity {
         shell.claude_sid[0..shell.claude_sid_len], shell.claude_cwd[0..shell.claude_cwd_len]);
     if (key.shell_id == 0) return null;
     key.pi = shell.ai_agent == 3;
+    key.agent = shell.ai_agent;
     @memcpy(key.tmux[0..shell.tmux_session_len], shell.tmux_session[0..shell.tmux_session_len]);
     if (key.sid[0] == 0 and key.tmux[0] == 0) return null;
     return .{ .key = key, .agent = shell.ai_agent };
@@ -461,7 +462,7 @@ pub fn chatVoiceIdentity() ?VoiceIdentity {
 
 fn chatVoiceMatches(key: chat_transcript.Identity, entry: *const ChatHistoryEntry) bool {
     return !entry.retired and key.shell_id == entry.key.shell_id and key.host == entry.key.host and
-        key.codex == entry.key.codex and key.pi == entry.key.pi and std.mem.eql(u8, &key.tmux, &entry.key.tmux) and
+        key.agentId() == entry.key.agentId() and std.mem.eql(u8, &key.tmux, &entry.key.tmux) and
         std.mem.eql(u8, &key.cwd, &entry.key.cwd) and
         (key.sid[0] == 0 or std.mem.eql(u8, &key.sid, &entry.key.sid));
 }
@@ -488,6 +489,44 @@ test "voice source rejects permissive cross-session matches" {
     entry.key = key;
     entry.retired = true;
     try std.testing.expect(!chatVoiceMatches(key, &entry));
+}
+
+test "MUBO-584 a voice match keeps antigravity apart from claude" {
+    var claude = chat_transcript.Identity.initTmux(1, 2, false, "session", "/a");
+    claude.agent = 1;
+    var antigravity = claude;
+    antigravity.agent = 8;
+    var entry: ChatHistoryEntry = .{ .key = antigravity };
+    try std.testing.expect(chatVoiceMatches(antigravity, &entry));
+    try std.testing.expect(!chatVoiceMatches(claude, &entry));
+    entry.key = claude;
+    try std.testing.expect(chatVoiceMatches(claude, &entry));
+    try std.testing.expect(!chatVoiceMatches(antigravity, &entry));
+}
+
+test "MUBO-584 the voice identity carries the full agent id" {
+    const old_count = app_state.shell_count;
+    const old_shell = app_state.shells[0];
+    const old_active = app_state.active_shell;
+    defer {
+        app_state.shells[0] = old_shell;
+        app_state.shell_count = old_count;
+        app_state.active_shell = old_active;
+    }
+    app_state.shell_count = 1;
+    app_state.shells[0] = empty_shell;
+    app_state.active_shell = 0;
+    app_state.shells[0].kind = .tmux;
+    app_state.shells[0].shell_id = 42;
+    app_state.shells[0].tmux_host = 1;
+    app_state.shells[0].ai_agent = 8;
+    @memcpy(app_state.shells[0].tmux_session[0..6], "term-1");
+    app_state.shells[0].tmux_session_len = 6;
+    const voice = chatVoiceIdentity() orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(u8, 8), voice.key.agentId());
+    try std.testing.expect(!voice.key.codex);
+    try std.testing.expect(!voice.key.pi);
+    try std.testing.expectEqual(@as(u8, 8), chatFileIdentity().agentId());
 }
 
 fn chatVoiceRequestAllowed(key: chat_transcript.Identity, entries: []const *ChatHistoryEntry) bool {
@@ -787,12 +826,17 @@ var g_chat_live_stream: ?*ChatLiveStream = null;
 pub fn chatSettingsEligible() bool {
     if (!app_state.g_chat_active or app_state.active_shell >= app_state.shell_count or !@import("room_frontend.zig").privateActionsAllowed()) return false;
     const key = chatFileIdentityForShell(app_state.active_shell);
-    return (std.mem.eql(u8, key.provider(), "claude") or std.mem.eql(u8, key.provider(), "codex")) and chatLiveWanted(key) and @import("chat_live.zig").settingsKnown(key.shell_id);
+    return (std.mem.eql(u8, key.provider(), "claude") or std.mem.eql(u8, key.provider(), "codex") or std.mem.eql(u8, key.provider(), "antigravity") or std.mem.eql(u8, key.provider(), "pi")) and chatLiveWanted(key) and @import("chat_live.zig").settingsKnown(key.shell_id);
 }
 
 pub fn chatSettingsCodex() bool {
     if (app_state.active_shell >= app_state.shell_count) return false;
     return std.mem.eql(u8, chatFileIdentityForShell(app_state.active_shell).provider(), "codex");
+}
+
+pub fn chatSettingsPi() bool {
+    if (app_state.active_shell >= app_state.shell_count) return false;
+    return std.mem.eql(u8, chatFileIdentityForShell(app_state.active_shell).provider(), "pi");
 }
 
 pub fn chatSettingsPending(shell_id: u32) bool {
@@ -801,7 +845,7 @@ pub fn chatSettingsPending(shell_id: u32) bool {
     const stream = g_chat_live_stream orelse return false;
     if (app_state.active_shell >= app_state.shell_count) return false;
     const key = chatFileIdentityForShell(app_state.active_shell);
-    return stream.identity.owner == shell_id and key.shell_id == shell_id and (std.mem.eql(u8, key.provider(), "claude") or std.mem.eql(u8, key.provider(), "codex")) and std.mem.eql(u8, stream.identity.provider(), key.provider()) and stream.pending_settings.pending();
+    return stream.identity.owner == shell_id and key.shell_id == shell_id and (std.mem.eql(u8, key.provider(), "claude") or std.mem.eql(u8, key.provider(), "codex") or std.mem.eql(u8, key.provider(), "antigravity") or std.mem.eql(u8, key.provider(), "pi")) and std.mem.eql(u8, stream.identity.provider(), key.provider()) and stream.pending_settings.pending();
 }
 
 fn chatLiveWanted(key: chat_transcript.Identity) bool {
@@ -991,7 +1035,7 @@ pub fn chatLiveWrite(identity: @import("session_identity.zig").Session, line: []
     if (!stream.identity.same(identity) or stream.cancelled.load(.acquire) or stream.channel.shared == null) return false;
     if (setting) {
         const key = chatFileIdentityForShell(app_state.active_shell);
-        if (stream.identity.owner != key.shell_id or stream.identity.host.index() != key.host or !(std.mem.eql(u8, key.provider(), "claude") or std.mem.eql(u8, key.provider(), "codex")) or !std.mem.eql(u8, stream.identity.provider(), key.provider()) or !std.mem.eql(u8, std.mem.sliceTo(&stream.identity.sid, 0), std.mem.sliceTo(&key.sid, 0))) return false;
+        if (stream.identity.owner != key.shell_id or stream.identity.host.index() != key.host or !(std.mem.eql(u8, key.provider(), "claude") or std.mem.eql(u8, key.provider(), "codex") or std.mem.eql(u8, key.provider(), "antigravity") or std.mem.eql(u8, key.provider(), "pi")) or !std.mem.eql(u8, stream.identity.provider(), key.provider()) or !std.mem.eql(u8, std.mem.sliceTo(&stream.identity.sid, 0), std.mem.sliceTo(&key.sid, 0))) return false;
     }
     while (!stream.mutex.tryLock()) Sleep(1);
     defer stream.mutex.unlock();
@@ -1136,7 +1180,15 @@ pub fn chatReaderBundle(allocator: std.mem.Allocator) ?[]u8 {
     _ = std.base64.standard.Encoder.encode(layout64, layout);
     _ = std.base64.standard.Encoder.encode(mp_fresh64, mp_fresh);
     _ = std.base64.standard.Encoder.encode(zsb64, zsb);
-    return std.fmt.allocPrint(allocator, "CONNECTOR_SOURCES = {{'claude':'{s}','codex':'{s}'}}\nMP_SEND_SOURCE = '{s}'\nFEEDBACK_SOURCE = '{s}'\nMP_HELPER_SOURCE = '{s}'\nMP_SHELL_SOURCE = '{s}'\nMP_SESSIONS_SOURCE = '{s}'\nMP_LAYOUT_SOURCE = '{s}'\nMP_FRESH_SOURCE = '{s}'\nZSB_SOURCE = '{s}'\nMULTIBOT_APP_VERSION = '{s}'\n{s}", .{ claude64, codex64, mp_send64, feedback64, helper64, shell64, sessions64, layout64, mp_fresh64, zsb64, @import("main.zig").APP_VERSION, @embedFile("chat_history_reader.py") }) catch null;
+    const room_service = @embedFile("room_service.py");
+    const room_bridge = @embedFile("room_bridge.py");
+    const service64 = allocator.alloc(u8, std.base64.standard.Encoder.calcSize(room_service.len)) catch return null;
+    defer allocator.free(service64);
+    const bridge64 = allocator.alloc(u8, std.base64.standard.Encoder.calcSize(room_bridge.len)) catch return null;
+    defer allocator.free(bridge64);
+    _ = std.base64.standard.Encoder.encode(service64, room_service);
+    _ = std.base64.standard.Encoder.encode(bridge64, room_bridge);
+    return std.fmt.allocPrint(allocator, "ROOM_SERVICE_SOURCE = '{s}'\nROOM_BRIDGE_SOURCE = '{s}'\nCONNECTOR_SOURCES = {{'claude':'{s}','codex':'{s}'}}\nMP_SEND_SOURCE = '{s}'\nFEEDBACK_SOURCE = '{s}'\nMP_HELPER_SOURCE = '{s}'\nMP_SHELL_SOURCE = '{s}'\nMP_SESSIONS_SOURCE = '{s}'\nMP_LAYOUT_SOURCE = '{s}'\nMP_FRESH_SOURCE = '{s}'\nZSB_SOURCE = '{s}'\nMULTIBOT_APP_VERSION = '{s}'\n{s}", .{ service64, bridge64, claude64, codex64, mp_send64, feedback64, helper64, shell64, sessions64, layout64, mp_fresh64, zsb64, @import("main.zig").APP_VERSION, @embedFile("chat_history_reader.py") }) catch null;
 }
 
 fn uiThreadBusy() bool {
@@ -1223,6 +1275,63 @@ fn chatHistoryRequest(target: @import("session_identity.zig").Host, id: u32, que
         }
     }
     return false;
+}
+
+fn hostPublishedSha(target: @import("session_identity.zig").Host) ?[64]u8 {
+    const host = target.index();
+    if (uiThreadBusy()) return null;
+    transport.kick(host);
+    if (!transport.waitReady(host, 5_000)) return null;
+    const channel = transport.open(host, false) orelse return null;
+    defer transport.close(channel);
+    if (!transport.write(channel, "{\"id\":1,\"op\":\"engine_info\"}")) return null;
+    const a = std.heap.page_allocator;
+    var frame: std.ArrayList(u8) = .empty;
+    defer frame.deinit(a);
+    var chunk: [4096]u8 = undefined;
+    const deadline = GetTickCount64() + 8_000;
+    while (std.mem.indexOfScalar(u8, frame.items, '\n') == null) {
+        if (GetTickCount64() >= deadline) return null;
+        const n = transport.readWithin(channel, &chunk, 1_000) orelse return null;
+        if (n == 0) continue;
+        if (frame.items.len + n > 65536) return null;
+        frame.appendSlice(a, chunk[0..n]) catch return null;
+    }
+    const line = frame.items[0..std.mem.indexOfScalar(u8, frame.items, '\n').?];
+    const parsed = std.json.parseFromSlice(struct {
+        id: u32,
+        engine_info: ?struct { sha256: []const u8 = "" } = null,
+    }, a, line, .{ .ignore_unknown_fields = true }) catch return null;
+    defer parsed.deinit();
+    const sha = (parsed.value.engine_info orelse return null).sha256;
+    if (sha.len != 64) return null;
+    for (sha) |c| if (!std.ascii.isDigit(c) and !(c >= 'a' and c <= 'f')) return null;
+    var out: [64]u8 = undefined;
+    @memcpy(&out, sha);
+    return out;
+}
+
+fn hostLaunchPrepareThread(slot: usize) void {
+    const launch = &app_state.g_host_launches[slot];
+    defer {
+        launch.ready.store(true, .release);
+        if (app_state.g_main_hwnd) |main| _ = PostMessageW(main, app_state.WM_APP_CHAT_HOST_READY, slot, 0);
+    }
+    const target = @import("session_identity.zig").Host.fromIndex(launch.host) orelse return;
+    const published = hostPublishedSha(target) orelse {
+        @import("diagnostics.zig").debugLog("[chat] launch refused: chat runtime not confirmed");
+        return;
+    };
+    var path_buf: [96]u8 = undefined;
+    const path = @import("agent_host.zig").runtimePath(&path_buf, &published) orelse return;
+    @memcpy(launch.runtime[0..path.len], path);
+    launch.runtime_len = @intCast(path.len);
+}
+
+pub fn chatHostLaunchPrepare(slot: usize) bool {
+    const thread = std.Thread.spawn(.{}, hostLaunchPrepareThread, .{slot}) catch return false;
+    thread.detach();
+    return true;
 }
 
 fn chatHistoryQuery(key: chat_transcript.Identity, id: u32, history: chat_history.History, before: u64) ?[]u8 {
@@ -1600,7 +1709,7 @@ pub fn chatFileOnReady() void {
                     changed = true;
                 }
                 if (!disk and app_state.shells[idx].ai_agent == 0) {
-                    app_state.shells[idx].ai_agent = if (entry.key.pi) 3 else if (entry.key.codex) 2 else 1;
+                    app_state.shells[idx].ai_agent = entry.key.agentId();
                     changed = true;
                 }
                 if (changed) {
@@ -1832,6 +1941,7 @@ fn chatCacheIdentity() chat_transcript.Identity {
     const shell = &app_state.shells[app_state.active_shell];
     var cache_key = chat_transcript.Identity.init(shell.shell_id, shell.tmux_host, shell.ai_agent == 2, shell.claude_sid[0..shell.claude_sid_len], shell.claude_cwd[0..shell.claude_cwd_len]);
     cache_key.pi = shell.ai_agent == 3;
+    cache_key.agent = shell.ai_agent;
     return cache_key;
 }
 

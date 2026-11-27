@@ -57,3 +57,42 @@ test "IGSH-1732 room answers stay beneath their questions across pages and repla
         try std.testing.expectEqual(expected.len, item.messages.items.len);
     }
 }
+
+test "MUBO-533 a receipt preview cannot skip the events the room shows next" {
+    const previous = building_model;
+    defer building_model = previous;
+    const source =
+        \\{"events":[{"id":"10000000-0000-4000-8000-000000000003","room_id":"10000000-0000-4000-8000-000000000001","seq":2,"type":"human","revision":1,"text":"Earlier question","recipients":["10000000-0000-4000-8000-000000000002"]},{"id":"10000000-0000-4000-8000-000000000004","room_id":"10000000-0000-4000-8000-000000000001","seq":3,"type":"human","revision":1,"text":"Gap question","recipients":["10000000-0000-4000-8000-000000000002"]},{"id":"10000000-0000-4000-8000-000000000005","room_id":"10000000-0000-4000-8000-000000000001","seq":4,"type":"agent_reply","parent_event_id":"10000000-0000-4000-8000-000000000004","member_id":"10000000-0000-4000-8000-000000000002","response_id":"10000000-0000-4000-8000-000000000010","text":"Gap answer"},{"id":"10000000-0000-4000-8000-000000000006","room_id":"10000000-0000-4000-8000-000000000001","seq":5,"type":"human","revision":1,"text":"My immediate send","recipients":["10000000-0000-4000-8000-000000000002"]},{"id":"10000000-0000-4000-8000-000000000007","room_id":"10000000-0000-4000-8000-000000000001","seq":6,"type":"agent_reply","parent_event_id":"10000000-0000-4000-8000-000000000003","member_id":"10000000-0000-4000-8000-000000000002","response_id":"10000000-0000-4000-8000-000000000011","text":"Earlier answer"},{"id":"10000000-0000-4000-8000-000000000008","room_id":"10000000-0000-4000-8000-000000000001","seq":7,"type":"agent_reply","parent_event_id":"10000000-0000-4000-8000-000000000006","member_id":"10000000-0000-4000-8000-000000000002","response_id":"10000000-0000-4000-8000-000000000012","text":"Answer to my send"}],"next_after":7}
+    ;
+    const expected = [_][]const u16{
+        std.unicode.utf8ToUtf16LeStringLiteral("Earlier question"),
+        std.unicode.utf8ToUtf16LeStringLiteral("Earlier answer"),
+        std.unicode.utf8ToUtf16LeStringLiteral("Gap question"),
+        std.unicode.utf8ToUtf16LeStringLiteral("Gap answer"),
+        std.unicode.utf8ToUtf16LeStringLiteral("My immediate send"),
+        std.unicode.utf8ToUtf16LeStringLiteral("Answer to my send"),
+    };
+    const gap_after: u64 = 1;
+    var item = OwnedModel{
+        .arena = std.heap.ArenaAllocator.init(std.testing.allocator),
+        .value = .{ .room_id = "10000000-0000-4000-8000-000000000001", .name = &.{}, .revision = 1, .members = &.{}, .candidates = &.{}, .messages = &.{} },
+        .after = gap_after,
+        .highwater = 7,
+        .replay_revision = 1,
+    };
+    defer item.arena.deinit();
+    const a = item.arena.allocator();
+    try item.history.append(a, .{ .id = "10000000-0000-4000-8000-000000000002", .sid = "session", .provider = "claude", .alias = "alice", .seen_revision = 1, .author = .{ .name = std.unicode.utf8ToUtf16LeStringLiteral("Alice"), .appearance = .{ .face = 0, .color = 0 }, .name_color = 0 } });
+    building_model = &item;
+    const parsed = try std.json.parseFromSlice(std.json.Value, a, source, .{});
+    try std.testing.expect(acceptEvents(parsed.value));
+    try std.testing.expectEqual(@as(u64, 7), item.after);
+    try std.testing.expectEqual(expected.len, item.messages.items.len);
+    for (expected, item.messages.items) |text, message| try std.testing.expectEqualSlices(u16, text, message.text);
+    var immediate: usize = 0;
+    for (item.messages.items) |message| {
+        if (std.mem.eql(u16, message.text, std.unicode.utf8ToUtf16LeStringLiteral("My immediate send"))) immediate += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 1), immediate);
+    try std.testing.expectEqualStrings(item.messages.items[4].question_id, item.messages.items[5].question_id);
+}

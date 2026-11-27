@@ -334,6 +334,73 @@ def claude_rows(cwd):
     return ("stale" if stale else "ok"), rows + skills
 
 
+ANTIGRAVITY_BUILTINS = (
+    ("B", "compact", "", "Summarize conversation to free context"),
+    ("B", "plan", "", "Plan complex work step by step before executing"),
+    ("B", "goal", "", "Run thoroughly until the goal is fully achieved"),
+    ("B", "schedule", "", "Run an instruction on a schedule or timer"),
+    ("B", "browser", "", "Browse the web or interact with web apps"),
+    ("B", "grill-me", "", "Align on a plan through an interactive interview"),
+    ("B", "teamwork", "", "Coordinate a team of agents on a large project"),
+    ("B", "learn", "", "Save a workflow or correction for future tasks"),
+    ("B", "boost", "", "Deep thinking, planning, and rigorous verification"),
+)
+
+
+def antigravity_rows(cwd):
+    rows = list(ANTIGRAVITY_BUILTINS)
+    root = cwd
+    while root != HOME:
+        rows += scan(root / ".agents/skills", "", "J", {})
+        rows += scan(root / ".agent/skills", "", "J", {})
+        rows += scan(root / ".claude/skills", "", "J", {})
+        rows += scan(root / ".claude/commands", "", "J", {}, True)
+        if root.parent == root:
+            break
+        root = root.parent
+    for folder in (".gemini/config/skills", ".gemini/antigravity-cli/skills", ".agents/skills", ".gemini/skills"):
+        rows += scan(HOME / folder, "", "S", {})
+    return "ok", rows
+
+
+PI_BUILTINS = (
+    ("B", "model", "<provider/model>", "Select a model"),
+    ("B", "login", "<provider>", "Configure provider authentication"),
+    ("B", "logout", "", "Remove provider authentication"),
+    ("B", "compact", "", "Compact the session context"),
+    ("B", "new", "", "Start a new session"),
+    ("B", "thinking", "<level>", "Set thinking level"),
+    ("B", "reload", "", "Reload extensions, skills, prompts, and context files"),
+    ("B", "name", "", "Set session display name"),
+    ("B", "session", "", "Show session info and stats"),
+    ("B", "settings", "", "Open settings menu"),
+    ("B", "tree", "", "Navigate session tree"),
+    ("B", "fork", "", "Fork from a previous user message"),
+    ("B", "clone", "", "Duplicate the current session"),
+    ("B", "resume", "", "Resume another session"),
+    ("B", "export", "", "Export session to HTML or JSONL"),
+    ("B", "copy", "", "Copy last assistant message"),
+)
+
+
+def pi_rows(cwd):
+    rows = list(PI_BUILTINS)
+    root = cwd
+    while root != HOME:
+        rows += scan(root / ".pi/skills", "", "J", {})
+        rows += scan(root / ".pi/prompts", "", "J", {}, True)
+        rows += scan(root / ".agents/skills", "", "J", {})
+        rows += scan(root / ".claude/skills", "", "J", {})
+        rows += scan(root / ".claude/commands", "", "J", {}, True)
+        if root.parent == root:
+            break
+        root = root.parent
+    for folder in (".pi/agent/skills", ".agents/skills"):
+        rows += scan(HOME / folder, "", "S", {})
+    rows += scan(HOME / ".pi/agent/prompts", "", "C", {}, True)
+    return "ok", rows
+
+
 def codex_call(method, params):
     global SERVER, SERVER_LAST, SERVER_BUFFER
     if SERVER and (SERVER.poll() is not None or time.monotonic() - SERVER_LAST > 600):
@@ -779,7 +846,7 @@ def request(line):
     session_field = fields[3] if len(fields) > 3 else "-"
     session_ok = bool(TMUX_NAME.fullmatch(session_field)) if session_field.startswith("tmux:") else session_field_ok(op, session_field)
     if (len(fields) != 6 or len(line) > 4096 or not fields[0].isdigit() or
-        fields[1] not in ("ping", "slash", "skills", "files", "transcript", "models") or fields[2] not in ("claude", "codex", "pi") or
+        fields[1] not in ("ping", "slash", "skills", "files", "transcript", "models") or fields[2] not in ("claude", "codex", "pi", "antigravity") or
         not session_ok or
         fields[4] != "-" and not Path(fields[4]).is_absolute() or
         len(fields[5]) > 200 or any(ord(c) < 32 or ord(c) == 127 for c in fields[4] + fields[5])):
@@ -804,6 +871,10 @@ def request(line):
         status, rows = pi_model_rows() if fields[2] == "pi" else ("error", [])
     elif fields[2] == "claude":
         status, rows = claude_rows(cwd)
+    elif fields[2] == "antigravity":
+        status, rows = antigravity_rows(cwd) if op == "slash" else ("ok", [])
+    elif fields[2] == "pi":
+        status, rows = pi_rows(cwd) if op == "slash" else ("ok", [])
     else:
         status, rows = codex_rows(cwd, op)
     if op == "skills":

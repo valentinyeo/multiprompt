@@ -415,6 +415,94 @@ test('boundary runs the actual supplied Python bootstrap and logs raw fake tmux 
   assert.match(launcher, /CreateProcessW\(python, command, NULL, NULL, TRUE, flags/);
 });
 
+test('the Antigravity fixture hands ownership and delivery to the production host and serves only Claude chats itself', () => {
+  const boundary = path.join(root, 'tools/verify-chat-delivery/boundary.py');
+  const script = String.raw`
+import importlib.util, json, os, pathlib, sys, tempfile
+root = pathlib.Path(tempfile.mkdtemp())
+(root / 'state.json').write_text(json.dumps(dict(name='antigravity-chats', sid='11111111-1111-4111-8111-111111111111', cwd='/verify/work')))
+os.environ['MP_VERIFY_STATE'] = str(root)
+text = sys.argv[1]
+sys.argv = ['boundary', 'ssh']
+spec = importlib.util.spec_from_file_location('fixture_boundary', text)
+boundary = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(boundary)
+seed = '11111111-1111-4111-8111-111111111111'
+fresh = '22222222-2222-4222-8222-222222222222'
+calls = []
+def host_paths(provider, sid):
+    return dict(config=root / (provider + '-' + sid + '.config.json'), state=root / (provider + '-' + sid + '.state.json'))
+def host_owned(provider, sid):
+    calls.append(['owned', provider, sid])
+    return False
+def host_deliver(provider, sid, token, attempt, epoch, text):
+    calls.append(['deliver', provider, sid, text])
+    return dict(status='sent', host='production')
+namespace = dict(
+    host_write=lambda path, value: None,
+    host_paths=host_paths,
+    host_dispatch_switch=lambda provider, sid: True,
+    host_owned=host_owned,
+    host_deliver=host_deliver,
+    host_event=lambda *args, **kwargs: None,
+    host_accept=lambda *args, **kwargs: None,
+    host_start=lambda provider, sid, source=None: dict(status='started'),
+    host_switch_ai=lambda *args, **kwargs: dict(status='refused'),
+    host_switch_follow=lambda sid: None,
+    host_read=lambda path: {},
+    host_switched_path=lambda: root / 'switched.json',
+    host_stream_block=lambda session, message_id, kind, index=None: dict(id=message_id),
+    host_delta=lambda session, block, text: None,
+    host_complete=lambda *args, **kwargs: None,
+    host_state_write=lambda provider, sid, state: None,
+    message_poll=lambda *args, **kwargs: None,
+    message_store_request=lambda *args, **kwargs: {},
+    message_store_db=lambda *args, **kwargs: None,
+)
+boundary.install_antigravity_host(namespace)
+antigravity_reply = namespace['host_deliver']('antigravity', fresh, 'token', 'attempt', 0, 'fresh text')
+claude_reply = namespace['host_deliver']('claude', seed, 'token', 'attempt', 0, 'seed text')
+print(json.dumps(dict(
+    antigravity_owned=namespace['host_owned']('antigravity', fresh),
+    claude_owned=namespace['host_owned']('claude', seed),
+    antigravity_host=antigravity_reply.get('host'),
+    claude_status=claude_reply.get('status'),
+    calls=calls,
+)))
+`;
+  const result = JSON.parse(execFileSync('python3', ['-I', '-c', script, boundary], { encoding: 'utf8', timeout: 60000 }));
+  assert.equal(result.antigravity_owned, false, 'the fixture claimed a fresh Antigravity chat before any host owned it');
+  assert.equal(result.antigravity_host, 'production', 'the fixture kept Antigravity delivery instead of the production host');
+  assert.ok(result.calls.some(call => call[0] === 'deliver' && call[1] === 'antigravity' && call[3] === 'fresh text'), 'the Antigravity message never reached the production host');
+  assert.equal(result.claude_owned, true, 'the fixture stopped serving its Claude chat');
+  assert.equal(result.claude_status, 'sent');
+  assert.ok(!result.calls.some(call => call[0] === 'deliver' && call[1] === 'claude'), 'the Claude chat has no live host to deliver its message');
+});
+
+test('the remote shell runs an enable && start launch as two commands', () => {
+  const boundary = path.join(root, 'tools/verify-chat-delivery/boundary.py');
+  const script = String.raw`
+import importlib.util, json, os, sys, tempfile
+os.environ['MP_VERIFY_STATE'] = tempfile.mkdtemp()
+text = sys.argv[1]
+sys.argv = ['boundary', 'ssh']
+spec = importlib.util.spec_from_file_location('fixture_boundary', text)
+boundary = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(boundary)
+launch = ('python3 /home/verify/.multiprompt-runtime/3e8089cf.py host enable antigravity 0576beb6-78bf-4ac2-aa8e-4afbf8f284ba --tmux live-4a96b --cwd /verify/work'
+          ' && python3 /home/verify/.multiprompt-runtime/3e8089cf.py host start antigravity 0576beb6-78bf-4ac2-aa8e-4afbf8f284ba')
+print(json.dumps(dict(
+    launch=boundary.python_commands(launch),
+    quoted=boundary.python_commands('python3 /r.py host enable claude x --cwd "/tmp/a && b"'),
+)))
+`;
+  const result = JSON.parse(execFileSync('python3', ['-I', '-c', script, boundary], { encoding: 'utf8', timeout: 60000 }));
+  assert.equal(result.launch.length, 2, 'the launch chain was flattened into one command');
+  assert.match(result.launch[0], /^python3 .*host enable antigravity/);
+  assert.match(result.launch[1], /^python3 .*host start antigravity/);
+  assert.equal(result.quoted.length, 1, 'a quoted && inside an argument was split');
+});
+
 test('background host probes are explicitly declined and unknown remote commands remain diagnostic failures', () => {
   const literals = source => [...source.matchAll(/"(?:\\.|[^"\\])*"/g)].map(match => JSON.parse(match[0]));
   const app = read('src/app_state.zig');
@@ -427,7 +515,9 @@ test('background host probes are explicitly declined and unknown remote commands
   assert.ok(loopStart && loopEnd);
   const relay = literal(read('src/console.zig'), 'if test -f ~/.local/state/multiprompt/relay-v1;');
   const relayCommand = relay.slice(relay.indexOf('"') + 1, -1).replace('{s}', 'fixture-0123456789abcdef');
-  const ladder = literal(read('src/telemetry_panel.zig'), ' cat ~/.local/state/token-ladder/status.json').split(' {s} ')[1];
+  const panel = read('src/telemetry_panel.zig');
+  const ladder = literal(panel, 'cat ~/.local/state/token-ladder/status.json');
+  assert.match(panel, /captureSharedCommand\([^\n]*cat ~\/\.local\/state\/token-ladder\/status\.json/, 'the ladder status probe rides the shared channel, so it never reaches ssh as its own argv');
   const probes = [];
   for (const host of ['remote-1', 'remote-2', 'remote-3']) {
     const options = ['-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', host];
@@ -440,7 +530,6 @@ test('background host probes are explicitly declined and unknown remote commands
       probes.push({ argv: [...constant(name).trim().split(' '), '-R', '19548:127.0.0.1:12345', host], kind: 'notification-forward', output: '', code: 255 });
     }
   }
-  probes.push({ argv: ['-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', 'remote-2', ...ladder.split(' ')], kind: 'ladder-status', output: '', code: 1 });
   const unknown = [
     ['-G', 'unexpected-host'],
     ['-T', 'remote-1', 'uname -a'],
@@ -1229,6 +1318,50 @@ print('WINDOWS_NOTIFICATION_BOUNDARY_OK')
 });
 
 
+test('reader runtime publication keeps the immutable reader file and journals its filename', () => {
+  const script = String.raw`
+import ast, hashlib, json, os, sys, tempfile, time
+from pathlib import Path
+boundary = Path(sys.argv[1])
+wanted = ('record', 'runtime_directory', 'publish_runtime')
+functions = [node for node in ast.parse(boundary.read_text(encoding='utf-8')).body if isinstance(node, ast.FunctionDef) and node.name in wanted]
+assert [node.name for node in functions] == list(wanted), [node.name for node in functions]
+source = 'RUNTIME_GENERATION = 7\n'
+digest = hashlib.sha256(source.encode('utf-8')).hexdigest()
+for held in (False, True):
+    with tempfile.TemporaryDirectory() as temp:
+        home = Path(temp) / 'home'
+        state = Path(temp) / 'state'
+        home.mkdir()
+        state.mkdir()
+        os.environ['HOME'] = os.environ['USERPROFILE'] = str(home)
+        if held:
+            (state / 'stale-reader').write_text('older shared reader without the provider\n', encoding='utf-8')
+        directory = home / '.multiprompt-runtime'
+        directory.mkdir()
+        pointer = directory / 'reader.py'
+        pointer.write_text('older shared reader without the provider\n', encoding='utf-8')
+        scope = dict(ROOT=state, Path=Path, os=os, json=json, time=time, state=lambda: dict(name='antigravity-chats'))
+        exec(compile(ast.Module(body=functions, type_ignores=[]), '<boundary-publish>', 'exec'), scope)
+        namespace = dict(READER_SOURCE=source, RUNTIME_GENERATION=7)
+        scope['publish_runtime'](namespace)
+        runtime = directory / (digest + '.py')
+        assert runtime.read_text(encoding='utf-8') == source, 'immutable runtime file holds the published reader'
+        assert json.loads((directory / 'active.json').read_text(encoding='utf-8')) == dict(protocol=1, generation=7, sha256=digest)
+        expected = 'older shared reader without the provider\n' if held else source
+        assert pointer.read_text(encoding='utf-8') == expected, ('shared pointer', held)
+        assert namespace['ENGINE_INFO'] == dict(protocol=1, generation=7, sha256=digest)
+        rows = [json.loads(line) for line in (state / 'runtime-publish.jsonl').read_text(encoding='utf-8').splitlines()]
+        assert len(rows) == 1, rows
+        row = rows[0]
+        assert row['sha256'] == digest and row['generation'] == 7 and row['sharedPointerHeld'] is held, row
+        assert row['file'] == runtime.name, row
+        assert row['case'] == 'antigravity-chats' and isinstance(row['ms'], int) and isinstance(row['pid'], int), row
+print('RUNTIME_PUBLICATION_OK')
+`;
+  assert.match(execFileSync('python3', ['-I', '-c', script, path.join(root, 'tools/verify-chat-delivery/boundary.py')], { encoding: 'utf8', timeout: 30000 }), /RUNTIME_PUBLICATION_OK/);
+});
+
 test('retained-history recovery targets the owned HWND without stealing typing focus', () => {
   const start = drive.indexOf('function Retention-Top {');
   const end = drive.indexOf('\nfunction Assert-Retention', start);
@@ -1538,4 +1671,35 @@ test('IGSH-1197 complete-history journeys request old pages through owned scroll
   assert.match(retention, /WheelOwnedTranscriptMessage\(\$main, \$app.Id, \$historyView, 30000\)/);
   assert.match(history, /incomplete copied messages/);
   assert.match(retention, /retained copy missing or reordered/);
+});
+
+test('MUBO-221 the fresh Antigravity launch is read through a wait for that launch, not a snapshot of the file', () => {
+  const journey = read('tools/verify-chat-delivery/antigravity-chats.ps1');
+  assert.match(journey, /\$launch = Wait-For 'the fresh Antigravity chat ran its host enable launch' \{/, 'the launch row must be waited for');
+  assert.match(journey, /kind -ceq 'reader' -and \(\(\$_\.argv -join ' '\) -match 'host enable antigravity'\)/, 'the wait must name the launch it needs');
+  assert.doesNotMatch(journey, /\$launchRows = @\(/, 'a snapshot of the invocation file races the launch that has not run yet');
+});
+
+test('MUBO-221 the fresh Antigravity transcript check enforces alternating prompt and reply turns and retains the six-row history', () => {
+  const journey = read('tools/verify-chat-delivery/antigravity-chats.ps1');
+  const start = journey.indexOf('function Fresh-Transcript');
+  const end = journey.indexOf('function Fresh-Resync');
+  const body = journey.slice(start, end);
+  assert.doesNotMatch(body, /\$freshTexts\s*\+\s*\$freshReplies/, 'concatenating prompts before replies rejects real alternating turns');
+  assert.match(body, /\$ordered\.Add\(\$freshTexts\[\$turn\]\)/);
+  assert.match(body, /\$ordered\.Add\(\$freshReplies\[\$turn\]\)/);
+  assert.match(body, /did not match the exact alternating turns/);
+  assert.match(journey, /\$freshThirdReply[\s\S]*Copy-Item \$freshHistory "\$caseDir\/fresh-antigravity-history\.jsonl" -Force/);
+});
+
+test('MUBO-221 the fresh Antigravity identity check resolves unique stable sid/host/tmux without blind indexing and enforces the name contract', () => {
+  const journey = read('tools/verify-chat-delivery/antigravity-chats.ps1');
+  assert.doesNotMatch(journey, /Where-Object\s*\{\s*\$_\.name\s*-ceq\s*'Antigravity'\s*\}\s*\)\[0\]/);
+  assert.match(journey, /function Resolve-FreshTab\(/);
+  assert.match(journey, /\(\$rowSid -ceq \$ExpectedSid\) -and \(\$rowHost -eq \$ExpectedHost\) -and \(\$rowTmux -ceq \$ExpectedTmux\)/);
+  assert.match(journey, /if \(\$matched\.Count -eq 0\) \{ 'missing' \} else \{ 'duplicate' \}/);
+  assert.match(journey, /Copy-Item "\$settings\/session\.json" "\$caseDir\/session-after-fresh-reload\.json" -Force/);
+  assert.match(journey, /\$freshSessionRow = Resolve-FreshTab \$savedAfterFresh\.tabs \$freshSid \$freshHost \$freshTmux 'post-reload'/);
+  assert.match(journey, /\$freshSessionRow\.name -cne 'Antigravity'/);
+  assert.match(journey, /\$verifyTabAfter\.Count -ne 1 -or \$verifyTabAfter\[0\]\.name -cne \$tabsBefore\[0\]\.name -or \$verifyTabAfter\[0\]\.manual -ne \$true/);
 });

@@ -28,6 +28,7 @@ pub const Message = struct {
     author: ?Author,
     time: []const u16,
     question_id: []const u8 = "",
+    member_id: []const u8 = "",
 };
 pub const ViewModel = struct {
     room_id: []const u8,
@@ -37,15 +38,15 @@ pub const ViewModel = struct {
     candidates: []const Member,
     messages: []const Message,
 };
-pub const ActionKind = enum { create, edit, submit, restart };
+pub const ActionKind = enum { create, edit, submit };
 pub const ActionToken = struct { generation: u64, serial: u64, kind: ActionKind };
 pub const Callbacks = struct {
     context: *anyopaque,
     create: *const fn (*anyopaque, ActionToken, []const u16, []const []const u8) ActionResult,
     edit: *const fn (*anyopaque, ActionToken, []const u8, u64, []const u16, []const []const u8) ActionResult,
     submit: *const fn (*anyopaque, ActionToken, []const u8, u64, []const u16) ActionResult,
-    restart: *const fn (*anyopaque, ActionToken, []const u8, []const u8) ActionResult,
     draft_changed: ?*const fn (*anyopaque) void = null,
+    still_working: ?*const fn (*anyopaque, ActionToken) bool = null,
 };
 
 const StoredId = struct {
@@ -107,10 +108,15 @@ pub const View = struct {
     focus_target: usize = 0,
     too_small: bool = false,
     result: ?ActionResult = null,
+    start_failed: bool = false,
+    loading: bool = false,
+    deferred_submit: bool = false,
+    opening: [128]u8 = undefined,
+    opening_len: usize = 0,
+    error_text: [1024]u16 = undefined,
+    error_len: usize = 0,
     title_hit: w.RECT = empty_rect,
     send_hit: w.RECT = empty_rect,
-    restart_hit: w.RECT = empty_rect,
-    restart_member: ?[]const u8 = null,
     cancel_hit: w.RECT = empty_rect,
     confirm_hit: w.RECT = empty_rect,
     picker_hits: [64]w.RECT = @splat(empty_rect),
@@ -199,8 +205,58 @@ pub const View = struct {
     }
 
     pub fn showUnavailable(self: *View) void {
-        self.result = .unsupported;
+        self.showError("Could not load this room. Check the server connection and try again.");
+    }
+
+    pub fn showLoading(self: *View, room_id: []const u8, identity: ?*const ViewModel) void {
+        if (!self.openingRoom(room_id)) self.deferred_submit = false;
+        self.opening_len = @min(room_id.len, self.opening.len);
+        @memcpy(self.opening[0..self.opening_len], room_id[0..self.opening_len]);
+        if (identity) |model| if (validModel(model) and std.mem.eql(u8, model.room_id, room_id)) {
+            if (!sameRoom(self.model, model)) {
+                self.retire();
+                self.scroll = 0;
+                self.presented_revision = 0;
+                self.picker = false;
+            }
+            self.model = model;
+        };
+        self.loading = true;
+        self.result = null;
+        self.error_len = 0;
+        self.layout();
+    }
+
+    pub fn openingRoom(self: *const View, room_id: []const u8) bool {
+        return self.opening_len > 0 and std.mem.eql(u8, self.opening[0..self.opening_len], room_id);
+    }
+
+    pub fn isRoomMode(self: *const View) bool {
+        return self.mode == .room;
+    }
+
+    pub fn showError(self: *View, message: []const u8) void {
+        self.loading = false;
+        self.deferred_submit = false;
+        self.error_len = std.unicode.utf8ToUtf16Le(&self.error_text, message) catch 0;
+        self.result = .failed;
         self.invalidate();
+    }
+
+    pub fn flushDeferred(self: *View) void {
+        if (!self.deferred_submit or self.presented_revision == 0 or self.pending != null) return;
+        if (!self.openingRoom(self.model.room_id)) {
+            self.deferred_submit = false;
+            return;
+        }
+        self.deferred_submit = false;
+        if (w.GetWindowTextLengthW(self.composer) <= 0) return;
+        self.submit();
+    }
+
+    pub fn showHostStartError(self: *View, message: []const u8) void {
+        self.start_failed = true;
+        self.showError(message);
     }
 
     pub fn setDpi(self: *View, dpi: u32) bool {
@@ -236,8 +292,11 @@ pub const View = struct {
             self.scroll = 0;
             self.presented_revision = 0;
             self.picker = false;
+            if (!self.openingRoom(model.room_id)) self.deferred_submit = false;
         }
         self.model = model;
+        self.loading = false;
+        self.presented_revision = if (self.mode == .room) model.revision else 0;
         self.layout();
         if (focus_composer) self.setFocus(self.composer);
         return true;
@@ -249,6 +308,7 @@ pub const View = struct {
 
     pub fn resetScope(self: *View, empty: *const ViewModel) void {
         self.retire();
+        self.deferred_submit = false;
         self.selected_count = 0;
         self.mode = .room;
         self.scroll = 0;
@@ -308,6 +368,7 @@ pub const View = struct {
 
     fn closeDialog(self: *View) void {
         self.retire();
+        self.deferred_submit = false;
         self.mode = .room;
         self.layout();
         self.setFocus(self.composer);
@@ -316,6 +377,7 @@ pub const View = struct {
     fn openDialog(self: *View, mode: Mode) void {
         if (self.too_small) return;
         self.retire();
+        self.deferred_submit = false;
         self.mode = mode;
         self.edit_revision = self.model.revision;
         self.selected_count = 0;
@@ -380,8 +442,6 @@ pub const View = struct {
     fn clearHits(self: *View) void {
         self.title_hit = empty_rect;
         self.send_hit = empty_rect;
-        self.restart_hit = empty_rect;
-        self.restart_member = null;
         self.cancel_hit = empty_rect;
         self.confirm_hit = empty_rect;
         self.picker_count = 0;
@@ -392,10 +452,15 @@ pub const View = struct {
         self.generation +%= 1;
         self.pending = null;
         self.result = null;
+        self.start_failed = false;
+        self.loading = false;
         self.clearHits();
     }
 
     fn token(self: *View, kind: ActionKind) ActionToken {
+        self.error_len = 0;
+        self.start_failed = false;
+        self.loading = false;
         self.serial +%= 1;
         return .{ .generation = self.generation, .serial = self.serial, .kind = kind };
     }
@@ -457,28 +522,35 @@ pub const View = struct {
         self.completeAction(action, result);
     }
 
-    fn restart(self: *View) void {
-        refreshHits(self);
-        if (self.pending != null or self.too_small) return;
-        const id = self.restart_member orelse return;
-        const action = self.token(.restart);
-        self.pending = action;
-        const result = self.callbacks.restart(self.callbacks.context, action, self.model.room_id, id);
-        self.completeAction(action, result);
-    }
-
     fn submit(self: *View) void {
-        if (self.pending != null or self.too_small or self.presented_revision == 0) return;
+        if (self.pending) |pending| {
+            const working = if (self.callbacks.still_working) |check| check(self.callbacks.context, pending) else true;
+            if (working) { self.rejectSubmit("command_pending", "Wait for the current room action to finish, then try again."); return; }
+            self.pending = null;
+            self.result = null;
+        }
+        if (self.too_small) { self.rejectSubmit("window_too_small", "Make this window larger before sending."); return; }
+        if (self.presented_revision == 0) {
+            self.deferred_submit = true;
+            self.invalidate();
+            return;
+        }
         var buffer: [65537]u16 = undefined;
-        const value = self.draft(&buffer) orelse { self.result = .failed; self.invalidate(); return; };
-        if (value.len == 0) return;
+        const value = self.draft(&buffer) orelse { self.rejectSubmit("draft_unavailable", "Could not read your draft. Shorten it and try again."); return; };
+        if (value.len == 0) { self.rejectSubmit("empty_draft", "Write a message before sending."); return; }
         var utf8: [196608]u8 = undefined;
         const bytes = std.unicode.utf16LeToUtf8(&utf8, value) catch 0;
-        if (bytes == 0 or bytes > 65536) { self.result = .failed; self.invalidate(); return; }
+        if (bytes == 0 or bytes > 65536) { self.rejectSubmit("invalid_draft", "Shorten this message to at most 65536 bytes and try again."); return; }
         const action = self.token(.submit);
         self.pending = action;
         const result = self.callbacks.submit(self.callbacks.context, action, self.model.room_id, self.presented_revision, value);
         self.completeAction(action, result);
+    }
+
+    fn rejectSubmit(self: *View, reason: []const u8, message: []const u8) void {
+        var log: [256]u8 = undefined;
+        @import("diagnostics.zig").syncLog(std.fmt.bufPrint(&log, "[rooms] post rejected reason={s}", .{reason}) catch unreachable);
+        self.showError(message);
     }
 };
 
@@ -594,24 +666,8 @@ fn draw(view: *View, dc: w.HANDLE, bounds: w.RECT) void {
     const count_len = std.unicode.utf8ToUtf16Le(&count_w, count) catch 0;
     _ = w.SelectObject(dc, small);
     text(dc, count_w[0..count_len], .{ .left = view.title_hit.right - view.px(26), .top = view.title_hit.top, .right = view.title_hit.right - view.px(4), .bottom = view.title_hit.bottom }, 0x8a8a8a, w.DT_SINGLELINE | w.DT_VCENTER);
-    view.restart_hit = empty_rect;
-    view.restart_member = null;
-    for (view.model.members) |member| if (member.presence == .offline) {
-        const bar = w.RECT{ .left = @max(view.px(16), center - view.px(380)), .top = height - view.px(122), .right = @min(width - view.px(16), center + view.px(380)), .bottom = height - view.px(78) };
-        smooth.fillRoundRect(dc, bar, view.px(8), rgb(0x5a4a1e));
-        var inner = bar;
-        inner.left += p; inner.top += p; inner.right -= p; inner.bottom -= p;
-        smooth.fillRoundRect(dc, inner, view.px(7), rgb(0x2a2210));
-        _ = w.SelectObject(dc, body);
-        text(dc, member.name, .{ .left = bar.left + view.px(12), .top = bar.top, .right = bar.right - view.px(96), .bottom = bar.bottom }, 0xf5c26b, w.DT_SINGLELINE | w.DT_VCENTER | w.DT_END_ELLIPSIS);
-        view.restart_hit = .{ .left = bar.right - view.px(90), .top = bar.top + view.px(4), .right = bar.right - view.px(8), .bottom = bar.bottom - view.px(4) };
-        view.restart_member = member.id;
-        smooth.fillRoundRect(dc, view.restart_hit, view.px(18), rgb(if (w.GetFocus() == view.hwnd and view.focus_target == 1) 0xb0b0b0 else 0xf2f2f2));
-        text(dc, L("Restart"), view.restart_hit, 0x181818, w.DT_SINGLELINE | w.DT_VCENTER | w.DT_CENTER);
-        break;
-    };
     const top = view.px(78);
-    const bottom = @max(top, height - view.px(if (view.restart_member == null) 90 else 130));
+    const bottom = @max(top, height - view.px(90));
     const left = @max(view.px(20), center - view.px(380));
     const right = @min(width - view.px(20), center + view.px(380));
     const clip = w.CreateRectRgn(left, top, right, bottom);
@@ -628,7 +684,7 @@ fn draw(view: *View, dc: w.HANDLE, bounds: w.RECT) void {
         _ = w.SelectObject(dc, heading);
         text(dc, view.model.name, .{ .left = left, .top = mid - view.px(12), .right = right, .bottom = mid + view.px(18) }, 0xf2f2f2, w.DT_SINGLELINE | w.DT_CENTER | w.DT_END_ELLIPSIS);
         _ = w.SelectObject(dc, body);
-        text(dc, L("Start the conversation"), .{ .left = left, .top = mid + view.px(22), .right = right, .bottom = mid + view.px(52) }, 0x8a8a8a, w.DT_SINGLELINE | w.DT_CENTER);
+        if (!view.loading) text(dc, L("Start the conversation"), .{ .left = left, .top = mid + view.px(22), .right = right, .bottom = mid + view.px(52) }, 0x8a8a8a, w.DT_SINGLELINE | w.DT_CENTER);
     }
     for (view.model.messages) |message| {
         const member = message.author;
@@ -670,7 +726,7 @@ fn draw(view: *View, dc: w.HANDLE, bounds: w.RECT) void {
     smooth.fillRoundRect(dc, view.send_hit, view.px(18), rgb(0xf2f2f2));
     text(dc, L("↑"), view.send_hit, 0x111111, w.DT_SINGLELINE | w.DT_CENTER | w.DT_VCENTER);
     if (view.picker) drawPicker(view, dc, composer, body);
-    if (view.result == .failed or view.result == .unsupported) text(dc, if (view.result == .unsupported) L("Action unavailable") else L("Action failed"), .{ .left = left, .top = height - view.px(94), .right = right, .bottom = height - view.px(76) }, 0xf5c26b, w.DT_SINGLELINE);
+    if (view.result == .failed or view.result == .unsupported) text(dc, if (view.error_len > 0) view.error_text[0..view.error_len] else L("Could not send. Try again."), .{ .left = left, .top = height - view.px(94), .right = right, .bottom = height - view.px(76) }, 0xf5c26b, w.DT_SINGLELINE);
 }
 
 fn matchSearch(value: []const u16, query: []const u16) bool {
@@ -759,12 +815,15 @@ fn drawDialog(view: *View, dc: w.HANDLE, bounds: w.RECT, body: w.HANDLE, heading
     smooth.fillRoundRect(dc, view.confirm_hit, view.px(20), rgb(if (w.GetFocus() == view.hwnd and view.focus_target == 1) 0xb0b0b0 else 0xf2f2f2));
     text(dc, L("Cancel"), view.cancel_hit, 0xf2f2f2, w.DT_SINGLELINE | w.DT_CENTER | w.DT_VCENTER);
     var count_buf: [48]u8 = undefined;
-    const count = if (view.mode == .create) (std.fmt.bufPrint(&count_buf, "Create · {d}", .{view.selected_count}) catch "") else (std.fmt.bufPrint(&count_buf, "Save · {d}", .{view.selected_count}) catch "");
+    const count = if (view.mode == .create)
+        (if (view.start_failed) std.fmt.bufPrint(&count_buf, "Retry · {d}", .{view.selected_count}) catch "" else std.fmt.bufPrint(&count_buf, "Create · {d}", .{view.selected_count}) catch "")
+    else
+        (std.fmt.bufPrint(&count_buf, "Save · {d}", .{view.selected_count}) catch "");
     var count_w: [48]u16 = undefined;
     const count_len = std.unicode.utf8ToUtf16Le(&count_w, count) catch 0;
     text(dc, count_w[0..count_len], view.confirm_hit, 0x181818, w.DT_SINGLELINE | w.DT_CENTER | w.DT_VCENTER);
     _ = w.SelectObject(dc, small);
-    if (view.result == .failed or view.result == .unsupported) text(dc, if (view.result == .unsupported) L("Action unavailable") else L("Check name and members, then try again"), .{ .left = left + view.px(24), .top = bottom - view.px(82), .right = left + width - view.px(24), .bottom = bottom - view.px(62) }, 0xf5c26b, w.DT_SINGLELINE | w.DT_END_ELLIPSIS);
+    if (view.result == .failed or view.result == .unsupported) text(dc, if (view.error_len > 0) view.error_text[0..view.error_len] else L("Check name and members, then try again"), .{ .left = left + view.px(24), .top = bottom - view.px(82), .right = left + width - view.px(24), .bottom = bottom - view.px(62) }, 0xf5c26b, w.DT_SINGLELINE | w.DT_END_ELLIPSIS);
 }
 
 fn drawPicker(view: *View, dc: w.HANDLE, composer: w.RECT, body: w.HANDLE) void {
@@ -779,7 +838,7 @@ fn drawPicker(view: *View, dc: w.HANDLE, composer: w.RECT, body: w.HANDLE) void 
     var count: usize = 0;
     for (view.model.members, 0..) |member, i| {
         if (count == indices.len) break;
-        if (matchSearch(member.alias, query)) {
+        if (matchSearch(member.name, query) or matchSearch(member.alias, query)) {
             indices[count] = i;
             count += 1;
         }
@@ -842,18 +901,13 @@ fn refreshHits(view: *View) void {
     const x = @divTrunc(width - composer_width, 2);
     const composer = w.RECT{ .left = x, .top = height - view.px(74), .right = x + composer_width, .bottom = height - view.px(20) };
     view.send_hit = .{ .left = composer.right - view.px(45), .top = composer.top + view.px(8), .right = composer.right - view.px(8), .bottom = composer.bottom - view.px(8) };
-    for (view.model.members) |member| if (member.presence == .offline) {
-        view.restart_member = member.id;
-        view.restart_hit = .{ .left = composer.right - view.px(90), .top = composer.top - view.px(44), .right = composer.right - view.px(8), .bottom = composer.top - view.px(8) };
-        break;
-    };
     if (!view.picker) return;
     var buffer: [65537]u16 = undefined;
     const value = view.draft(&buffer) orelse return;
     const start = mentionStart(value) orelse return;
     var indices: [64]usize = undefined;
     var count: usize = 0;
-    for (view.model.members, 0..) |member, i| if (matchSearch(member.alias, value[start + 1 ..])) {
+    for (view.model.members, 0..) |member, i| if (matchSearch(member.name, value[start + 1 ..]) or matchSearch(member.alias, value[start + 1 ..])) {
         indices[count] = i;
         count += 1;
     };
@@ -878,7 +932,7 @@ fn mentionStart(value: []const u16) ?usize {
             if (pos > 0 and value[pos - 1] != ' ' and value[pos - 1] != '\n' and value[pos - 1] != '\r') return null;
             return pos;
         }
-        if (!((c >= 'a' and c <= 'z') or (c >= '0' and c <= '9') or c == '_' or c == '-')) return null;
+        if (c == '\n' or c == '\r' or value.len - pos > 256) return null;
     }
     return null;
 }
@@ -888,8 +942,8 @@ fn chooseMention(view: *View, index: usize) void {
     var draft_buf: [65537]u16 = undefined;
     const draft = view.draft(&draft_buf) orelse return;
     const start = mentionStart(draft) orelse return;
-    var replacement: [66:0]u16 = @splat(0);
-    const alias = view.model.members[index].alias;
+    var replacement: [260:0]u16 = @splat(0);
+    const alias = view.model.members[index].name;
     if (alias.len + 2 >= replacement.len) return;
     replacement[0] = '@';
     @memcpy(replacement[1 .. 1 + alias.len], alias);
@@ -939,6 +993,10 @@ fn editProc(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w.
     }
     if (msg == w.WM_KEYDOWN) {
         if (w.GetKeyState(0x11) < 0 and w.GetKeyState(0x12) >= 0) {
+            if (wp == 'A') {
+                _ = w.SendMessageW(hwnd, 0x00b1, 0, -1);
+                return 0;
+            }
             if (wp == 'K') {
                 _ = w.PostMessageW(@import("app_state.zig").g_main_hwnd, w.WM_APP_SEARCH_OPEN, if (w.GetKeyState(0x10) < 0) 1 else 0, 0);
                 return 0;
@@ -993,14 +1051,14 @@ fn editProc(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w.
                     if (reverse) { view.focus_target = 1; view.setFocus(view.hwnd); } else view.setFocus(view.search_edit);
                 } else if (reverse) view.setFocus(view.name_edit) else { view.focus_target = 0; view.setFocus(view.hwnd); }
             } else {
-                view.focus_target = if (reverse and view.restart_member != null) 1 else 0;
+                view.focus_target = 0;
                 view.setFocus(view.hwnd);
             }
             view.invalidate();
             return 0;
         }
     }
-    if (msg == 0x0102 and (wp == 0x0b or wp == 0x09 or wp == 0x1b or (wp == 0x0d and (hwnd != view.composer or w.GetKeyState(0x10) >= 0)))) return 0;
+    if (msg == 0x0102 and (wp == 0x01 or wp == 0x0b or wp == 0x09 or wp == 0x1b or (wp == 0x0d and (hwnd != view.composer or w.GetKeyState(0x10) >= 0)))) return 0;
     return w.CallWindowProcW(original, hwnd, msg, wp, lp);
 }
 
@@ -1058,12 +1116,12 @@ fn windowProc(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(
                     }
                 }
             } else if (wp == 0x0d or wp == 0x20) {
-                if (view.focus_target == 0) view.openEdit() else view.restart();
+                view.openEdit();
             } else if (wp == 0x09) {
                 if (reverse) {
                     if (view.focus_target == 1) view.focus_target = 0 else view.setFocus(view.composer);
                 } else {
-                    if (view.focus_target == 0 and view.restart_member != null) view.focus_target = 1 else view.setFocus(view.composer);
+                    view.setFocus(view.composer);
                 }
             }
             view.invalidate();
@@ -1092,9 +1150,7 @@ fn windowProc(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(
                 };
                 view.picker = false;
                 view.invalidate();
-            } else if (inside(view.title_hit, x, y)) view.openEdit() else if (inside(view.send_hit, x, y)) view.submit() else if (inside(view.restart_hit, x, y)) {
-                view.restart();
-            }
+            } else if (inside(view.title_hit, x, y)) view.openEdit() else if (inside(view.send_hit, x, y)) view.submit();
             return 0;
         },
         w.WM_MOUSEWHEEL => {
@@ -1205,7 +1261,6 @@ test "IGSH-1697 synthetic native create and room paint" {
         }
         fn edit(_: *anyopaque, _: ActionToken, _: []const u8, _: u64, _: []const u16, _: []const []const u8) ActionResult { return .failed; }
         fn submit(_: *anyopaque, _: ActionToken, _: []const u8, _: u64, _: []const u16) ActionResult { return .failed; }
-        fn restart(_: *anyopaque, _: ActionToken, _: []const u8, _: []const u8) ActionResult { return .failed; }
     };
 
     const parent = w.CreateWindowExW(0, L("STATIC"), L("Rooms synthetic test"), w.WS_POPUP | w.WS_VISIBLE, 0, 0, 1200, 900, null, null, w.GetModuleHandleW(null), null) orelse return error.TestUnexpectedResult;
@@ -1225,7 +1280,7 @@ test "IGSH-1697 synthetic native create and room paint" {
             const create_model = ViewModel{ .room_id = "", .name = &.{}, .revision = 0, .members = &.{}, .candidates = members, .messages = &.{} };
             var fixture = Fixture{ .response = response };
             var view: View = undefined;
-            try std.testing.expect(view.create(parent, &create_model, .{ .context = &fixture, .create = Fixture.create, .edit = Fixture.edit, .submit = Fixture.submit, .restart = Fixture.restart }));
+            try std.testing.expect(view.create(parent, &create_model, .{ .context = &fixture, .create = Fixture.create, .edit = Fixture.edit, .submit = Fixture.submit }));
             defer view.destroy();
             try std.testing.expect(view.setDpi(96));
             view.setBounds(.{ .left = 0, .top = 0, .right = 1000, .bottom = 800 });

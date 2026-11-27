@@ -3,9 +3,22 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <io.h>
+#include <fcntl.h>
 
 static char root[MAX_PATH];
 static char sessions[4096];
+static unsigned channel;
+
+static void emit(const char *text) {
+    if (!channel) { puts(text); return; }
+    printf("{\"channel\":%u,\"data\":\"", channel);
+    for (const unsigned char *p = (const unsigned char *)text; *p; p++) {
+        if (*p == '"' || *p == '\\') putchar('\\');
+        if (*p >= 32) putchar(*p);
+    }
+    puts("\"}");
+}
 
 static void load_sessions(void) {
     char path[MAX_PATH];
@@ -42,9 +55,36 @@ static void clients(void) {
         char path[MAX_PATH], name[128];
         snprintf(path, sizeof(path), "%s\\%s", root, data.cFileName);
         FILE *f = fopen(path, "rb");
-        if (f) { if (fgets(name, sizeof(name), f)) { name[strcspn(name, "\r\n")] = 0; if (exists(name)) puts(name); } fclose(f); }
+        if (f) { if (fgets(name, sizeof(name), f)) { name[strcspn(name, "\r\n")] = 0; if (exists(name)) emit(name); } fclose(f); }
     } while (FindNextFileA(search, &data));
     FindClose(search);
+}
+
+static int broker(void) {
+    _setmode(_fileno(stdout), _O_BINARY);
+    char *line = malloc(16 * 1024 * 1024);
+    if (!line) return 98;
+    for (int i = 0; i < 2; i++) if (!fgets(line, 16 * 1024 * 1024, stdin)) { free(line); return 99; }
+    puts("{\"ready\":true}"); fflush(stdout);
+    while (fgets(line, 16 * 1024 * 1024, stdin)) {
+        char *id = strstr(line, "\"channel\":");
+        if (!id) continue;
+        channel = strtoul(id + strlen("\"channel\":"), NULL, 10);
+        if (strstr(line, "\"close\":true")) continue;
+        if (strstr(line, "tmux list-clients")) {
+            load_sessions();
+            clients();
+            for (char *p = strtok(sessions, "\r\n"); p; p = strtok(NULL, "\r\n")) {
+                char row[256]; snprintf(row, sizeof(row), "@@S %s", p); emit(row);
+            }
+            emit("@@LS_OK@@"); emit("@@MP_LIVE@@"); emit("@@MP_PROBE_END@@");
+        } else if (strstr(line, "@@MP_LADDER_END@@")) {
+            emit("@@MP_LADDER_END@@");
+        }
+        fflush(stdout);
+    }
+    free(line);
+    return 0;
 }
 
 int main(int argc, char **argv) {
@@ -56,6 +96,7 @@ int main(int argc, char **argv) {
     FILE *log = fopen(path, "ab");
     if (log) { fprintf(log, "%llu %lu %s\n", GetTickCount64(), GetCurrentProcessId(), cmd); fclose(log); }
     load_sessions();
+    if (strstr(cmd, "base64.b64decode")) return broker();
     if (strstr(cmd, "tmux list-clients")) {
         clients();
         if (strstr(cmd, "tmux list-sessions")) {

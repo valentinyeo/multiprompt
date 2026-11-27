@@ -4,83 +4,77 @@ const fs = require('node:fs');
 const { spawnSync } = require('node:child_process');
 const os = require('node:os');
 const path = require('node:path');
+const harness = require('./room-view-harness.cjs');
 
 test('accepted room creation waits for its model without exposing an empty room or allowing another create', () => {
   const source = fs.readFileSync('src/room_view.zig', 'utf8');
-  function method(signature) {
-    const start = source.indexOf(signature);
-    const end = source.indexOf('\n    }', start);
-    assert.ok(start >= 0 && end > start, `production method ${signature}`);
-    return source.slice(start, end + 6);
-  }
-  function declaration(name) {
-    const match = source.match(new RegExp(`^(?:pub )?const ${name} = .+;$`, 'm'));
-    assert.ok(match, `production declaration ${name}`);
-    return match[0];
-  }
-  function helper(name) {
-    const start = source.indexOf(`fn ${name}(`);
-    const end = source.indexOf('\n}', start);
-    assert.ok(start >= 0 && end > start, `production helper ${name}`);
-    return source.slice(start, end + 2);
-  }
+  const view = harness.view({
+    source,
+    stub: {
+      ownsFocus: '    fn ownsFocus(_: *const View) bool { return owns_focus; }',
+      layout: '    fn layout(_: *View) void { layout_calls += 1; }',
+      setFocus: '    fn setFocus(self: *View, target: w.HANDLE) void {\n        std.debug.assert(target == self.composer);\n        focus_calls += 1;\n    }',
+    },
+  });
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'room-create-state-'));
   try {
-    const fixture = String.raw`
+    fs.writeFileSync(path.join(directory, 'diagnostics.zig'), 'pub fn syncLog(_: []const u8) void {}\n');
+    fs.writeFileSync(path.join(directory, 'creation.zig'), String.raw`
 const std = @import("std");
 const Member = struct { id: []const u8 };
-const ViewModel = struct { room_id: []const u8, name: []const u16, members: []const Member = &.{}, candidates: []const Member = &.{} };
-` + ['ActionResult', 'ActionKind', 'ActionToken', 'Mode'].map(declaration).join('\n') + '\n' + ['sameRoom', 'validModel'].map(helper).join('\n') + String.raw`
-const View = struct {
-    model: *const ViewModel,
-    mode: Mode,
-    pending: ?ActionToken,
-    result: ?ActionResult = .pending,
-    generation: u64 = 1,
-    selected_count: usize = 0,
-    scroll: i32 = 0,
-    presented_revision: u64 = 0,
-    picker: bool = false,
-    composer: u32 = 7,
-    layout_calls: usize = 0,
-    focus_calls: usize = 0,
-    owns_focus: bool = true,
-    fn clearHits(_: *View) void {}
-    fn ownsFocus(self: *View) bool { return self.owns_focus; }
-    fn layout(self: *View) void { self.layout_calls += 1; }
-    fn setFocus(self: *View, target: u32) void { std.debug.assert(target == self.composer); self.focus_calls += 1; }
-    fn invalidate(_: *View) void {}
-` + [method('    pub fn completeAction('), method('    pub fn setModel('), method('    fn retire(')].join('\n') + String.raw`
+const ViewModel = struct { room_id: []const u8, name: []const u16, members: []const Member = &.{}, candidates: []const Member = &.{}, revision: u64 = 0, messages: []const u8 = &.{} };
+const w = struct {
+    pub const BOOL = i32;
+    pub const HANDLE = ?*anyopaque;
+    pub const RECT = extern struct { left: i32, top: i32, right: i32, bottom: i32 };
+    pub fn InvalidateRect(_: HANDLE, _: ?*const RECT, _: BOOL) BOOL { return 1; }
 };
+var owns_focus = true;
+var layout_calls: usize = 0;
+var focus_calls: usize = 0;
+var context: u8 = 0;
+fn onCreate(_: *anyopaque, _: ActionToken, _: []const u16, _: []const []const u8) ActionResult { return .pending; }
+fn onEdit(_: *anyopaque, _: ActionToken, _: []const u8, _: u64, _: []const u16, _: []const []const u8) ActionResult { return .pending; }
+fn onSubmit(_: *anyopaque, _: ActionToken, _: []const u8, _: u64, _: []const u16) ActionResult { return .pending; }
+const callbacks = Callbacks{ .context = &context, .create = onCreate, .edit = onEdit, .submit = onSubmit };
+` + view + String.raw`
 test "accepted creation retains creation focus and prevents another admission until the room model arrives" {
+    defer {
+        owns_focus = true;
+        layout_calls = 0;
+        focus_calls = 0;
+    }
     const empty = ViewModel{ .room_id = "", .name = &.{} };
     const room = ViewModel{ .room_id = "room", .name = std.unicode.utf8ToUtf16LeStringLiteral("Product sync") };
     const token = ActionToken{ .generation = 1, .serial = 1, .kind = .create };
-    var view = View{ .model = &empty, .mode = .create, .pending = token };
+    var view = View{ .model = &empty, .callbacks = callbacks, .mode = .create, .pending = token };
     view.completeAction(token, .accepted);
     try std.testing.expectEqual(Mode.create, view.mode);
     try std.testing.expectEqual(token, view.pending.?);
-    try std.testing.expectEqual(@as(usize, 0), view.layout_calls);
-    try std.testing.expectEqual(@as(usize, 0), view.focus_calls);
+    try std.testing.expectEqual(@as(usize, 0), layout_calls);
+    try std.testing.expectEqual(@as(usize, 0), focus_calls);
     try std.testing.expect(view.setModel(&room));
     try std.testing.expectEqual(Mode.room, view.mode);
     try std.testing.expectEqual(@as(?ActionToken, null), view.pending);
     try std.testing.expectEqualStrings("room", view.model.room_id);
-    try std.testing.expectEqual(@as(usize, 1), view.layout_calls);
-    try std.testing.expectEqual(@as(usize, 1), view.focus_calls);
+    try std.testing.expectEqual(@as(usize, 1), layout_calls);
+    try std.testing.expectEqual(@as(usize, 1), focus_calls);
 }
 test "background publication never steals focus from another view" {
+    defer owns_focus = true;
     const empty = ViewModel{ .room_id = "", .name = &.{} };
     const room = ViewModel{ .room_id = "room", .name = std.unicode.utf8ToUtf16LeStringLiteral("Room") };
-    var view = View{ .model = &empty, .mode = .create, .pending = null, .owns_focus = false };
+    owns_focus = false;
+    var view = View{ .model = &empty, .callbacks = callbacks, .mode = .create, .pending = null };
     try std.testing.expect(view.setModel(&room));
-    try std.testing.expectEqual(@as(usize, 0), view.focus_calls);
+    try std.testing.expectEqual(@as(usize, 0), focus_calls);
     try std.testing.expectEqual(Mode.room, view.mode);
 }
 test "rejected creation can retry and accepted edits return to the existing room" {
+    defer focus_calls = 0;
     const room = ViewModel{ .room_id = "room", .name = std.unicode.utf8ToUtf16LeStringLiteral("Room") };
     const create = ActionToken{ .generation = 1, .serial = 1, .kind = .create };
-    var view = View{ .model = &room, .mode = .create, .pending = create };
+    var view = View{ .model = &room, .callbacks = callbacks, .mode = .create, .pending = create };
     view.completeAction(create, .failed);
     try std.testing.expectEqual(Mode.create, view.mode);
     try std.testing.expectEqual(@as(?ActionToken, null), view.pending);
@@ -93,10 +87,9 @@ test "rejected creation can retry and accepted edits return to the existing room
     view.completeAction(edit, .accepted);
     try std.testing.expectEqual(Mode.room, view.mode);
     try std.testing.expectEqual(@as(?ActionToken, null), view.pending);
-    try std.testing.expectEqual(@as(usize, 1), view.focus_calls);
+    try std.testing.expectEqual(@as(usize, 1), focus_calls);
 }
-`;
-    fs.writeFileSync(path.join(directory, 'creation.zig'), fixture);
+`);
     const result = spawnSync(process.env.ZIG || process.env.ZIG_EXE || 'zig', ['test', path.join(directory, 'creation.zig')], { encoding: 'utf8', timeout: 180000 });
     assert.equal(result.status, 0, result.stdout + result.stderr);
     assert.match(result.stderr, /All 3 tests passed/);

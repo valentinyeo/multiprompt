@@ -356,13 +356,16 @@ function assertsDispatchOnly(source) {
 test('IGSH-1033 master runs the full runnable set while PR journeys remain selected', () => {
   assert.doesNotMatch(workflow, /^  push:/m);
   assert.deepEqual(journeyMatrix(workflow, 'pull_request'), featureMatrix(workflow).pr);
-  for (const event of ['schedule', 'push', 'workflow_dispatch']) assert.deepEqual(journeyMatrix(workflow, event, 'all'), featureMatrix(workflow).available);
+  const automatic = featureMatrix(workflow).available.filter(feature => feature !== 'rooms');
+  for (const event of ['schedule', 'push']) assert.deepEqual(journeyMatrix(workflow, event, 'all'), automatic);
+  assert.deepEqual(journeyMatrix(workflow, 'workflow_dispatch', 'all'), featureMatrix(workflow).available);
+  assert.equal(journeyMatrix(workflow, 'schedule', 'all').includes('rooms'), false);
   assert.deepEqual(journeyMatrix(workflow, 'workflow_dispatch', 'chat-dictation'), ['chat-dictation']);
 });
 
 test('explicit runner-note proof selects its native journey without expanding ordinary PR checks', () => {
   assert.deepEqual(journeyMatrix(workflow, 'pull_request', 'chat-delivery', 'refs/pull/577/merge', { chat_notes_proof: true }), ['chat-delivery']);
-  assert.deepEqual(journeyMatrix(workflow, 'pull_request', 'all'), featureMatrix(workflow).available);
+  assert.deepEqual(journeyMatrix(workflow, 'pull_request', 'all'), featureMatrix(workflow).available.filter(feature => feature !== 'rooms'));
 });
 
 test('switch timing is selected on PRs and included in full nightly and release coverage', () => {

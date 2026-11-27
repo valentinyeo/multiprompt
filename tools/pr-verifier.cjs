@@ -361,6 +361,13 @@ function pickVerifier(body) {
   return { engine: verifier.engine };
 }
 
+function verifierExclusions(body) {
+  const text = String(body || '');
+  const families = new Set([...text.matchAll(/^Author model:\s*(\S+)\s*$/gim)].map(match => modelFamily(match[1])).filter(Boolean));
+  if (/^Verifier:\s*no-anthropic\s*$/im.test(text)) families.add('anthropic');
+  return [...families].sort();
+}
+
 function judgeLabel(engine, lane = '') {
   if (lane) return `ladder ${lane}`;
   if (engine === 'openai') return `openai ${CODEX_MODEL}`;
@@ -604,8 +611,9 @@ function resolve(env) {
     : gh(['api', `repos/${repo}/compare/${pr.baseRefName}...${pr.headRefOid}`, '--jq', '.merge_base_commit.sha']).trim();
   if (!/^[0-9a-f]{40}$/.test(baseSha)) throw new Error('Merge base not found');
   const { engine = '', problem = '' } = pickVerifier(pr.body);
+  const excluded = verifierExclusions(pr.body);
   const baseTipSha = gh(['api', `repos/${repo}/commits/${pr.baseRefName}`, '--jq', '.sha']).trim();
-  setOutputs({ eligible: String(eligible), number: String(pr.number), head_sha: pr.headRefOid, base_tip_sha: baseTipSha, base_sha: baseSha, base_ref: pr.baseRefName, engine, author_model_problem: problem });
+  setOutputs({ eligible: String(eligible), number: String(pr.number), head_sha: pr.headRefOid, base_tip_sha: baseTipSha, base_sha: baseSha, base_ref: pr.baseRefName, engine, exclude_families: excluded.join(','), exclude_openai: String(excluded.includes('openai')), exclude_anthropic: String(excluded.includes('anthropic')), author_model_problem: problem });
 }
 
 function availableFeatures(env) {
@@ -1098,7 +1106,7 @@ async function main(argv, env) {
   throw new Error('Usage: pr-verifier.cjs resolve|recover|wait-for-tests|prepare|select|download|summarize|build-ladder-request|parse-ladder-answer|judge-openai|finalize');
 }
 
-module.exports = { describeRun, runOutcome, journeyRows, waitForTests, githubState, cancelledRunNeedsRetry, supersededCancellation, MARKER, CODEX_MODEL, LADDER_SCREENSHOTS_NOTE, modelFamily, pickVerifier, judgeLabel, judgeMessages, openaiJudgePrompt, openaiJudgeSchema, pickerMessages, ladderRequestBody, buildLadderRequest, parseLadderAnswer, ladderMessageContent, judgeInputs, MAX_FEATURES, MAX_EVIDENCE_LINES, SLOW_FEATURES, validateSelection, summarize, finalize, evidenceMarkdown, selectable, featureDirPattern, testsGate, testsInherited, masterJourneyFailures, checkConclusion, recoveryNeeded, recoveryReport, infrastructureJobs, latestArtifacts, isRepair, isEmergency, ownedJourneysOnly, userFacingUnmapped };
+module.exports = { describeRun, runOutcome, journeyRows, waitForTests, githubState, cancelledRunNeedsRetry, supersededCancellation, MARKER, CODEX_MODEL, LADDER_SCREENSHOTS_NOTE, modelFamily, pickVerifier, verifierExclusions, judgeLabel, judgeMessages, openaiJudgePrompt, openaiJudgeSchema, pickerMessages, ladderRequestBody, buildLadderRequest, parseLadderAnswer, ladderMessageContent, judgeInputs, MAX_FEATURES, MAX_EVIDENCE_LINES, SLOW_FEATURES, validateSelection, summarize, finalize, evidenceMarkdown, selectable, featureDirPattern, testsGate, testsInherited, masterJourneyFailures, checkConclusion, recoveryNeeded, recoveryReport, infrastructureJobs, latestArtifacts, isRepair, isEmergency, ownedJourneysOnly, userFacingUnmapped };
 
 if (require.main === module) {
   main(process.argv.slice(2), process.env).catch(error => {

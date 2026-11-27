@@ -27,7 +27,12 @@ with tempfile.TemporaryDirectory() as directory:
         assert r['host_settings'](provider, sid)['model'] == name
     refused = r['host_reply'](dict(provider=provider, sid=sid, op='set_model', model='opus'))
     assert refused['status'] == 'refused', refused
-    assert r['host_reply'](dict(provider=provider, sid=sid, op='set_effort', effort='low'))['status'] == 'refused'
+    for level in ('low', 'medium', 'high'):
+        reply = r['host_reply'](dict(provider=provider, sid=sid, op='set_effort', effort=level))
+        assert reply['status'] == 'ok', (level, reply)
+        assert r['host_config'](provider, sid)['effort'] == level
+        assert r['host_settings'](provider, sid)['effort'] == level
+    assert r['host_reply'](dict(provider=provider, sid=sid, op='set_effort', effort='xhigh'))['status'] == 'refused'
     r['host_reply'](dict(provider=provider, sid=sid, op='set_model', model='terra'))
     sent = []
     r['host_control_send'] = lambda session, payload: sent.append(payload) or True
@@ -35,11 +40,14 @@ with tempfile.TemporaryDirectory() as directory:
     assert r['host_codex_write'](provider, sid, session, 'tok', 'hello')
     turn = [p for p in sent if p['method'] == 'turn/start'][-1]
     assert turn['params']['model'] == 'gpt-6.1-terra', turn
+    assert turn['params']['effort'] == 'high', turn
     r['host_reply'](dict(provider=provider, sid=sid, op='set_model', model='astra'))
+    r['host_reply'](dict(provider=provider, sid=sid, op='set_effort', effort='low'))
     session['native_turn'] = None
     assert r['host_codex_write'](provider, sid, session, 'tok2', 'again')
     turn = [p for p in sent if p['method'] == 'turn/start'][-1]
     assert turn['params']['model'] == 'gpt-6-astra', turn
+    assert turn['params']['effort'] == 'low', turn
     claude = 'synthetic-claude'
     r['host_write'](r['host_paths']('claude', claude)['config'], config)
     assert r['host_reply'](dict(provider='claude', sid=claude, op='set_model', model='sol'))['status'] == 'refused'

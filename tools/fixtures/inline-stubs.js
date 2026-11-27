@@ -140,11 +140,35 @@ function writeChatMention(dir) {
   fs.writeFileSync(path.join(dir, 'chat_mention.zig'), chatMention);
 }
 
+const chatInlineCode = `pub fn padX() i32 {
+    return 0;
+}
+
+pub fn chipWidth(text_w: i32, pad_x: i32) i32 {
+    return @max(0, text_w) + 2 * @max(0, pad_x);
+}
+
+pub fn fits(x: i32, text_w: i32, max_w: i32, pad_x: i32) bool {
+    return x <= 0 or chipWidth(text_w, pad_x) <= max_w - x;
+}
+
+pub fn textColor(_: bool) u32 {
+    return 0;
+}
+
+pub fn paint(_: anytype, _: anytype, _: bool) void {}
+`;
+
+function writeChatInlineCode(dir) {
+  fs.writeFileSync(path.join(dir, 'chat_inline_code.zig'), chatInlineCode);
+}
+
 function writeAll(dir) {
   writeRoomFrontend(dir);
   writeVoice(dir);
   writeAccountDesktop(dir);
   writeChatMention(dir);
+  writeChatInlineCode(dir);
 }
 
-module.exports = { roomFrontend, voice, accountDesktop, chatMention, writeRoomFrontend, writeVoice, writeAccountDesktop, writeChatMention, writeAll };
+module.exports = { roomFrontend, voice, accountDesktop, chatMention, chatInlineCode, writeRoomFrontend, writeVoice, writeAccountDesktop, writeChatMention, writeChatInlineCode, writeAll };

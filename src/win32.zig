@@ -302,6 +302,7 @@ pub const WM_APP_BROWSER_SIGNIN_DONE: u32 = WM_APP + 212;
 pub const WM_APP_NATIVE_TERMINAL: u32 = WM_APP + 217;
 pub const WM_APP_NATIVE_SPAWN: u32 = WM_APP + 218;
 pub const WM_APP_NATIVE_READY: u32 = WM_APP + 219;
+pub const WM_APP_NATIVE_SIZE: u32 = WM_APP + 216;
 pub const WM_APP_FOOTPRINT_READY: u32 = WM_APP + 220;
 pub const WM_APP_WORKSPACE_MENU_REGISTRY_READY: u32 = WM_APP + 226;
 pub const WM_APP_NEW_ROOM: u32 = WM_APP + 223;
@@ -1128,6 +1129,7 @@ pub extern "kernel32" fn WaitForMultipleObjects(DWORD, [*]const HANDLE, BOOL, DW
 
 pub extern "kernel32" fn OpenEventW(dwDesiredAccess: DWORD, bInheritHandle: BOOL, lpName: LPCWSTR) callconv(WINAPI) HANDLE;
 pub extern "kernel32" fn SetEvent(hEvent: HANDLE) callconv(WINAPI) BOOL;
+pub extern "kernel32" fn ResetEvent(hEvent: HANDLE) callconv(WINAPI) BOOL;
 pub extern "kernel32" fn SetProcessInformation(hProcess: HANDLE, ProcessInformationClass: i32, ProcessInformation: *anyopaque, ProcessInformationSize: DWORD) callconv(WINAPI) BOOL;
 
 pub extern "kernel32" fn CreateMutexW(?*anyopaque, BOOL, [*:0]const u16) callconv(WINAPI) HANDLE;

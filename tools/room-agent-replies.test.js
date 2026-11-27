@@ -65,7 +65,7 @@ with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as roo
         a, b = bridge.execute(first), bridge.execute(second)
         assert bridge.execute(first) == a
         deadline = time.monotonic() + 20
-        for delivery, text in [(a['deliveries'][0], first['text']), (b['deliveries'][0], second['text'])]:
+        for delivery, text in [(a['deliveries'][0], first['text'])]:
             while True:
                 bridge.execute(dict(op='events', host_uuid=host, room_id=room, after=0, limit=200))
                 saved = r['message_store_request'](dict(message_protocol=1, op='message_status', provider='claude', sid=sid, tmux=tmux, message_id=delivery['id']))
@@ -74,6 +74,8 @@ with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as roo
                 assert time.monotonic() < deadline, 'stored room message timeout: ' + delivery['id']
                 time.sleep(0.05)
             assert saved['message']['text'] == text
+        pending = r['message_store_request'](dict(message_protocol=1, op='message_status', provider='claude', sid=sid, tmux=tmux, message_id=b['deliveries'][0]['id']))
+        assert pending['message'] is None, 'next room turn was admitted before shared context was available'
         logs = []
         state = {}
         session = dict(state=state)
@@ -94,6 +96,9 @@ with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as roo
             r['host_agent_event']('claude', sid, tmux, session, json.dumps(dict(type='assistant', message=dict(id=uid(), content=[dict(type='text', text=text)]))))
             r['host_agent_event']('claude', sid, tmux, session, json.dumps(dict(type='result', subtype='success')))
         reply('Answer one')
+        bridge.execute(dict(op='events', host_uuid=host, room_id=room, after=0, limit=200))
+        saved = r['message_store_request'](dict(message_protocol=1, op='message_status', provider='claude', sid=sid, tmux=tmux, message_id=b['deliveries'][0]['id']))
+        assert saved['message']['text'] == second['text']
         assert r['host_handle_request']('claude', sid, tmux, session, private)['status'] == 'sent'
         blocked = dict(req, id=b['deliveries'][0]['id'])
         assert r['host_handle_request']('claude', sid, tmux, session, blocked)['status'] == 'busy'
@@ -127,9 +132,10 @@ with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as roo
             raise AssertionError('unproven reply accepted')
         except room_bridge.RoomError:
             pass
-        status.return_value['enabled'] = True
+        status.return_value['enabled'] = False
         third = bridge.execute(post('Removed recipient must not receive this'))
         third_id = third['deliveries'][0]['id']
+        status.return_value['enabled'] = True
         def removing_rpc(query):
             if query.get('op') == 'message_status' and query.get('message_id') == third_id:
                 bridge.store.execute(dict(op='edit_members', command_id=uid(), room_id=room, expected_revision=1, members=[]))
@@ -157,11 +163,11 @@ test('room replies retain their exact parent and session without publishing priv
 });
 
 const processProgram = String.raw`
-import hashlib, json, os, signal, sys, tempfile, time, uuid
+import base64, hashlib, json, os, signal, sys, tempfile, time, uuid
 from pathlib import Path
 sys.path.insert(0, str(Path.cwd() / 'src'))
 import room_bridge
-outer = {}
+outer = {name: base64.b64encode(Path(file).read_bytes()).decode() for name, file in [('ROOM_SERVICE_SOURCE', 'src/room_service.py'), ('ROOM_BRIDGE_SOURCE', 'src/room_bridge.py')]}
 exec(compile(Path('src/chat_history_reader.py').read_text(), 'reader', 'exec'), outer)
 assert 'ROOM_MESSAGE_PROTOCOL = 1' in outer['READER_SOURCE'], 'scoped runtime required'
 source = outer['READER_SOURCE'].encode()
@@ -204,7 +210,12 @@ with tempfile.TemporaryDirectory() as home:
     script.write_text(agent_source)
     r = {}
     exec(compile(outer['READER_SOURCE'], 'runtime', 'exec'), r)
-    bridge = room_bridge.RoomBridge(Path(home) / 'rooms')
+    directory = Path(home) / '.local/state/multiprompt' / ('rooms-account-' + 'a' * 64)
+    directory.mkdir(mode=0o700, parents=True)
+    room_bridge.RUNTIME_FINGERPRINT = 'f' * 64
+    room_bridge.STORE_DIRECTORY = str(directory)
+    room_bridge.remember_published('f' * 64, digest)
+    bridge = room_bridge.RoomBridge(directory)
     try:
         capabilities = bridge.execute(dict(op='capabilities', room_messages=1))
         assert capabilities['live_send'], capabilities
@@ -215,19 +226,28 @@ with tempfile.TemporaryDirectory() as home:
             r['host_write'](r['host_paths']('claude', sid)['config'], dict(enabled=True, tmux='proof-' + alias, command=[sys.executable, str(script)]))
             members.append(dict(alias=alias, display_name=alias.title(), host_uuid=host, provider='claude', provider_sid=sid, session_identity='claude:' + sid))
         room = bridge.execute(dict(op='create', command_id=str(uuid.uuid4()), host_uuid=host, name='Proof', members=members))['event']['room_id']
+        offline_sid = members[-1]['provider_sid']
+        offline_path = r['host_paths']('claude', offline_sid)['config']
+        offline_config = r['host_read'](offline_path)
+        r['host_write'](offline_path, dict(offline_config, enabled=False))
         receipts = []
         for member in members:
             request = dict(op='post_human', command_id=str(uuid.uuid4()), host_uuid=host, room_id=room, expected_revision=1, text='Question @' + member['alias'], recipients=[member['alias']])
             receipts.append((request, bridge.execute(request)))
+        r['host_write'](offline_path, dict(offline_config, enabled=True))
+        started = r['host_start']('claude', offline_sid, source=source.decode())
+        assert started.get('status') in ('started', 'already'), started
         query = dict(op='events', host_uuid=host, room_id=room, after=0, limit=200)
         deadline = time.monotonic() + 40
         while True:
-            page = bridge.execute(query)
-            replies = [event for event in page['events'] if event['type'] == 'agent_reply']
-            if len(replies) == 2:
+            bridge.execute(query)
+            replies_in_store = bridge.store.db.execute("SELECT COUNT(*) FROM events WHERE room_id=? AND json_extract(body,'$.type')='agent_reply'", (room,)).fetchone()[0]
+            if replies_in_store >= 2:
                 break
-            assert time.monotonic() < deadline, 'real host reply timeout'
+            assert time.monotonic() < deadline, 'real host reply timeout without a room reader'
             time.sleep(0.1)
+        page = bridge.store.execute(dict(op='events', room_id=room, after=0, limit=200))
+        replies = [event for event in page['events'] if event['type'] == 'agent_reply']
         by_parent = {event['parent_event_id']: event for event in replies}
         bindings = {member['alias']: member['id'] for member in bridge.store.members(room)}
         for member, (request, receipt) in zip(members, receipts):
@@ -237,7 +257,7 @@ with tempfile.TemporaryDirectory() as home:
             assert reply['member_id'] == bindings[member['alias']]
             assert bridge.execute(request) == receipt
         bridge.close()
-        bridge = room_bridge.RoomBridge(Path(home) / 'rooms')
+        bridge = room_bridge.RoomBridge(directory)
         assert bridge.execute(query) == page
         print('ROOM_REAL_HOST_PROCESS_PASS')
     finally:
@@ -264,4 +284,41 @@ test('real selected runtime and host processes produce scoped room replies', { s
   const result = spawnSync('python3', ['-'], { cwd: root, input: processProgram, encoding: 'utf8', timeout: 90000 });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /ROOM_REAL_HOST_PROCESS_PASS/);
+});
+
+const publishedSourcesProgram = String.raw`
+import base64, hashlib, json, os, sys, tempfile, time
+from pathlib import Path
+sources = {name: base64.b64encode(Path(file).read_bytes()).decode() for name, file in [('ROOM_SERVICE_SOURCE', 'src/room_service.py'), ('ROOM_BRIDGE_SOURCE', 'src/room_bridge.py')]}
+bundled = dict(sources)
+exec(compile(Path('src/chat_history_reader.py').read_text(), 'reader', 'exec'), bundled)
+plain = {}
+exec(compile(Path('src/chat_history_reader.py').read_text(), 'reader', 'exec'), plain)
+assert not plain.get('ROOM_BRIDGE_SOURCE'), 'the host stands in for one started without the bundled room sources'
+session = dict(parked={}, state={})
+with tempfile.TemporaryDirectory() as home:
+    plain['HOME'] = Path(home)
+    before = plain['host_handle_request']('claude', 'ffffffff', 'room-chat', session, dict(op='ping'))
+    assert before['room_message_protocol'] == 1, before
+    assert before['room_features'] == [], before
+    runtime = Path(home) / '.multiprompt-runtime'
+    runtime.mkdir(mode=0o700)
+    digest = hashlib.sha256(bundled['READER_SOURCE'].encode()).hexdigest()
+    for name, data in [('reader.py', bundled['READER_SOURCE']), (digest + '.py', bundled['READER_SOURCE']), ('active.json', json.dumps(dict(protocol=1, generation=bundled['RUNTIME_GENERATION'], sha256=digest)))]:
+        file = runtime / name
+        file.write_text(data)
+        file.chmod(0o600)
+    time.sleep(1.1)
+    after = plain['host_handle_request']('claude', 'ffffffff', 'room-chat', session, dict(op='ping'))
+    assert after['room_features'] == [1], after
+    loaded = plain['host_room_sources']()
+    assert loaded['service'] == sources['ROOM_SERVICE_SOURCE'], 'the host loads the published service helper'
+    assert loaded['bridge'] == sources['ROOM_BRIDGE_SOURCE'], 'the host loads the published bridge helper'
+print('ROOM_PUBLISHED_SOURCES_PASS')
+`;
+
+test('a host started without bundled room sources advertises the published room helper', { skip: process.platform === 'win32' }, () => {
+  const result = spawnSync('python3', ['-'], { cwd: root, input: publishedSourcesProgram, encoding: 'utf8', timeout: 60000 });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /ROOM_PUBLISHED_SOURCES_PASS/);
 });

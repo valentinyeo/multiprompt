@@ -230,8 +230,10 @@ terminal Claude sits under it.
    UUID) before anything is spawned, names the tmux session `live-<hex>`, and
    builds one remote command with `agent_host.launchCommand`: create the tmux
    session whose only program runs `host enable` and `host start` from the
-   selected runtime file and then `exec sleep infinity`, then attach. The pane
-   never holds a shell, so nothing can be typed into it. The session only parks
+   content-addressed runtime file this desktop published on that server and then
+   `exec sleep infinity`, then attach. The app asks its own bundle for that file
+   name first, so a reader an older client selected cannot refuse the provider.
+   The pane never holds a shell, so nothing can be typed into it. The session only parks
    the chat: the reader needs a live tmux name to deliver, and closing the tab
    kills it and stops the host.
 3. The tab records the minted id as the chat's `sid` at spawn time and opens with

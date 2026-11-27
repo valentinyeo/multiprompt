@@ -129,7 +129,7 @@ Remove-Item -LiteralPath "$state/hold-reply" -Force -ErrorAction SilentlyContinu
 [void](Wait-For 'antigravity stand-in released the held reply' { (Read-Shared "$state/antigravity-hold.jsonl").Contains('"stage": "released"') } 30)
 $releaseEvent.Dispose()
 [void](Wait-For 'antigravity stand-in received the new message' {
-    (Test-Path "$state/antigravity-deliver.jsonl") -and (Read-Shared "$state/antigravity-deliver.jsonl").Contains($afterText)
+    (Test-Path "$state/agy-received.jsonl") -and (Read-Shared "$state/agy-received.jsonl").Contains($afterText)
 } 60)
 [void](Wait-For 'antigravity reply reached the switched chat' {
     (Read-Shared $antigravityHistory[0].FullName).Contains($heldReply)
@@ -180,6 +180,14 @@ foreach ($kept in @($earlierText, 'Claude stand-in answer', $afterText, $heldRep
 Press @(0x1B) 'Esc: clear switched-back history selection'
 Shot 'antigravity-switch-back-claude'
 Save @{notice='Chat switched to Claude'; screenshot='antigravity-switch-back-claude.png'; provider=(Get-Content $claudeBackConfig -Raw | ConvertFrom-Json).provider; switchedFrom=(Get-Content $claudeBackConfig -Raw | ConvertFrom-Json).switched_from.provider; rows=$backRows.Count; name=$tabsBefore[0].name} "$caseDir/switch-back.json"
+$runtimeDir = "$profile/home/.multiprompt-runtime"
+$sharedReader = Join-Path $runtimeDir 'reader.py'
+New-Item -ItemType Directory -Force $runtimeDir | Out-Null
+if (Test-Path $sharedReader) { Copy-Item $sharedReader "$caseDir/shared-reader-before-fresh.py" }
+$staleReader = Join-Path $PSScriptRoot '../fixtures/MUBO-221/stale-reader.py'
+Copy-Item $staleReader $sharedReader -Force
+[IO.File]::WriteAllText("$state/stale-reader", 'older shared reader without the Antigravity provider')
+Save @{case='fresh antigravity chat'; sharedReader='reader.py'; staleSha256=(Get-FileHash $sharedReader -Algorithm SHA256).Hash.ToLower(); reason='an older client selected its own bundle last'; pinnedRuntime=$null} "$caseDir/fresh-start-runtime.json"
 Palette-Choose 'new antigravity sessions' 5109 'antigravity-new-session-palette'
 [void](Wait-For 'new Antigravity session tab in Chat View' {
     if (-not (Test-Path "$settings/session.json")) { return $false }
@@ -190,9 +198,190 @@ $expectedShells = $tabsBefore.Count + 1
 Bind-Transcript
 $savedNewSession = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
 Copy-Item "$settings/session.json" "$caseDir/session-new-session.json"
-$newTab = @($savedNewSession.tabs | Where-Object { $_.name -ceq 'Antigravity' })[0]
+$newMatches = @($savedNewSession.tabs | Where-Object { $_.name -ceq 'Antigravity' -and $_.cv -eq $true })
+if ($newMatches.Count -ne 1) { throw ('Expected one fresh Antigravity tab in session-new-session.json, found ' + $newMatches.Count) }
+$newTab = $newMatches[0]
 if (-not $newTab.tmux_session.StartsWith('live-')) { throw 'The new Antigravity tab is not a hosted live chat' }
+$freshTmux = [string]$newTab.tmux_session
+$freshHost = if ($newTab.PSObject.Properties['tmux_host'] -and $null -ne $newTab.tmux_host) { [int]$newTab.tmux_host } else { 0 }
 [void](Wait-For 'launch command carried the antigravity provider' {
     (Test-Path "$state/invocations.jsonl") -and (Read-Shared "$state/invocations.jsonl").Contains('antigravity')
 } 30)
 Shot 'antigravity-new-session'
+$launch = Wait-For 'the fresh Antigravity chat ran its host enable launch' {
+    $found = @((Read-Shared "$state/invocations.jsonl") -split "`n" | Where-Object { $_.Trim() } | ForEach-Object {
+        try { $_ | ConvertFrom-Json } catch { $null }
+    } | Where-Object { $_ -and $_.kind -ceq 'reader' -and (($_.argv -join ' ') -match 'host enable antigravity') })
+    if ($found.Count -gt 0) { $found[$found.Count - 1] }
+} 30
+$launchText = $launch.argv -join ' '
+$pinned = [regex]::Match($launchText, '\.multiprompt-runtime/([0-9a-f]{64})\.py')
+if (-not $pinned.Success) { throw ('The fresh Antigravity chat launched the shared pointer instead of its own published runtime: ' + $launchText) }
+$publishRows = @((Read-Shared "$state/runtime-publish.jsonl") -split "`n" | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json })
+$ownRuntime = @($publishRows | Where-Object { $_.sha256 -ceq $pinned.Groups[1].Value })
+if ($ownRuntime.Count -lt 1) { throw 'The launched runtime is not a bundle this app published' }
+if (-not ($publishRows | Where-Object { $_.sharedPointerHeld -eq $true })) { throw 'The shared reader pointer was not held stale during the fresh launch' }
+$heldPublish = @($publishRows | Where-Object { $_.sharedPointerHeld -eq $true })[-1]
+Save @{case='fresh antigravity chat'; sharedReader='reader.py'; staleSha256=(Get-FileHash $staleReader -Algorithm SHA256).Hash.ToLower(); reason='an older client selected its own bundle last'; pinnedRuntime=$pinned.Groups[1].Value; launch=$launchText; published=@($ownRuntime.sha256); sharedPointerHeldAtPreparation=$true; generation=$heldPublish.generation} "$caseDir/fresh-start-runtime.json"
+$freshSid = $newTab.csid
+[void](Wait-For 'the fresh Antigravity chat enabled itself on the server' {
+    @((Agent-Configs) | Where-Object { $_.provider -ceq 'antigravity' -and $_.sid -ceq $freshSid -and $_.enabled -eq $true -and $_.tmux.StartsWith('live-') }).Count -eq 1
+} 90)
+$freshConfig = @((Agent-Configs) | Where-Object { $_.sid -ceq $freshSid })[0].path
+Copy-Item $freshConfig "$caseDir/fresh-antigravity-config.json"
+$freshHistory = Join-Path (Split-Path $freshConfig) ((Split-Path $freshConfig -Leaf) -replace '\.config\.json$', '.history.jsonl')
+$freshText = 'first message in a fresh antigravity chat'
+Send-Composer $freshText
+[void](Wait-For 'the fresh Antigravity chat sent its first message' {
+    (Test-Path "$state/agy-received.jsonl") -and (Read-Shared "$state/agy-received.jsonl").Contains($freshText)
+} 60)
+[void](Wait-For 'the fresh Antigravity chat showed a reply' {
+    (Test-Path $freshHistory) -and (Read-Shared $freshHistory).Contains('Antigravity stand-in reply 1.')
+} 60)
+Copy-Item $freshHistory "$caseDir/fresh-antigravity-history.jsonl"
+Remove-Item -LiteralPath "$state/stale-reader" -Force -ErrorAction SilentlyContinue
+Save @{provider='antigravity'; sid=$freshSid; enabled=$true; firstMessage=$freshText; reply='Antigravity stand-in reply 1.'; config=(Split-Path $freshConfig -Leaf); pinnedRuntime=$pinned.Groups[1].Value} "$caseDir/fresh-antigravity-reply.json"
+Shot 'antigravity-fresh-reply'
+$freshReply = 'Antigravity stand-in reply 1.'
+$freshSecondText = 'second message in a fresh antigravity chat'
+$freshThirdText = 'third message in a fresh antigravity chat'
+$freshSecondReply = 'Antigravity stand-in reply 3.'
+$freshThirdReply = 'Antigravity stand-in reply 5.'
+$freshTexts = @($freshText, $freshSecondText, $freshThirdText)
+$freshReplies = @($freshReply, $freshSecondReply, $freshThirdReply)
+$freshState = $freshHistory -replace '\.history\.jsonl$', '.state.json'
+if (-not (Test-Path $freshState)) { throw 'The fresh Antigravity host wrote no state file at its start' }
+$freshKept = Get-Content $freshState -Raw | ConvertFrom-Json
+if ($freshKept.display_history -ne $true) { throw 'The fresh Antigravity host start never claimed its canonical history' }
+if ([bool]($freshKept.PSObject.Properties['display_history']) -ne $true) { throw 'The fresh Antigravity state has no display_history field to read' }
+Save @{state=(Split-Path $freshState -Leaf); display_history=$freshKept.display_history; history=(Split-Path $freshHistory -Leaf); historyExists=(Test-Path $freshHistory); claimBoundary='production host loop start; the fixture never writes this flag'} "$caseDir/fresh-history-claim.json"
+function Fresh-Blocks([string]$Stage) {
+    $offset = (Read-Shared $paletteLog).Length
+    $minimum = $freshTexts.Count + $freshReplies.Count
+    Wait-For "the $Stage Antigravity history paints from the reader" {
+        Press @(0x11, 0x30) "Ctrl+0: measure the $Stage Antigravity history"
+        $frames = [regex]::Matches((Read-Shared $paletteLog).Substring($offset), '\[chatfont\] pt=\d+ blocks=(\d+) content_h=\d+')
+        if ($frames.Count -gt 0) {
+            $painted = [int]$frames[$frames.Count - 1].Groups[1].Value
+            if ($painted -ge $minimum) { $painted }
+        }
+    } 20
+}
+function Fresh-Copied([string]$Stage) {
+    [Windows.Forms.Clipboard]::Clear()
+    Bind-Transcript
+    Palette-Choose 'chat view select all' 6364 ("antigravity-fresh-copy-" + $Stage)
+    Press @(0x11, 0x43) ("Ctrl+C: copy the $Stage Antigravity transcript")
+    [IO.File]::WriteAllText("$caseDir/fresh-copied-$Stage.txt", [Windows.Forms.Clipboard]::GetText())
+    Press @(0x1B) ("Esc: clear the $Stage Antigravity copy selection")
+}
+function Fresh-Text([string]$Stage) {
+    Read-Shared "$caseDir/fresh-copied-$Stage.txt"
+}
+function Fresh-Transcript([string]$Stage, [string]$Text) {
+    if ($freshTexts.Count -ne $freshReplies.Count) { throw 'Expected matching fresh Antigravity prompt and reply counts' }
+    $ordered = [Collections.Generic.List[string]]::new()
+    for ($turn = 0; $turn -lt $freshTexts.Count; $turn++) {
+        $ordered.Add($freshTexts[$turn])
+        $ordered.Add($freshReplies[$turn])
+    }
+    $normalized = ($Text -replace "`r`n", "`n").Trim()
+    $cursor = 0
+    foreach ($kept in $ordered) {
+        if (([regex]::Matches($normalized, [regex]::Escape($kept))).Count -ne 1) { throw ('The ' + $Stage + ' Antigravity transcript does not hold exactly one ' + $kept) }
+        $found = $normalized.IndexOf($kept, $cursor, [StringComparison]::Ordinal)
+        if ($found -lt 0) { throw ('The ' + $Stage + ' Antigravity transcript is out of order at ' + $kept) }
+        $cursor = $found + $kept.Length
+    }
+    if ($normalized -cne ($ordered.ToArray() -join "`n`n")) { throw ('The ' + $Stage + ' Antigravity transcript did not match the exact alternating turns') }
+}
+function Fresh-Resync([string]$Stage) {
+    $reloadOffset = (Read-Shared $paletteLog).Length
+    Press @(0x11, 0x4B) "Ctrl+K: open the chat menu for the $Stage full reload"
+    [void](Wait-For "chat menu palette ready for the $Stage full reload" { (Read-Shared $paletteLog).Substring($reloadOffset) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
+    $reloadQuery = 'more menu'
+    foreach ($letter in $reloadQuery.ToCharArray()) { [ChatDeliveryDesktop]::Type([uint16][char]::ToUpperInvariant($letter)) }
+    [void](Wait-For "more menu command selected for the $Stage full reload" { (Read-Shared $paletteLog).Substring($reloadOffset) -match ('\[palette\] ready chars=' + $reloadQuery.Length + ' count=1 target=6466') })
+    Press @(0x0D) "Enter: open More Menu for the $Stage full reload"
+    $reloadRect = Wait-For "painted Resync row for the $Stage full reload" {
+        $rows = [regex]::Matches((Read-Shared $paletteLog).Substring($reloadOffset), '\[chat\] menu resync rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)')
+        if ($rows.Count) { $rows[$rows.Count - 1].Groups }
+    }
+    $reloadRoot = [System.Windows.Automation.AutomationElement]::FromHandle($main)
+    $reloadCondition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'MultiPromptMoreMenu')
+    $reloadMenus = @($reloadRoot.FindAll([System.Windows.Automation.TreeScope]::Descendants, $reloadCondition) | Where-Object { -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id })
+    if ($reloadMenus.Count -ne 1) { throw 'Expected one owned visible chat menu for the full reload' }
+    $reloadX = [int](([int]$reloadRect[1].Value + [int]$reloadRect[3].Value) / 2)
+    $reloadY = [int](([int]$reloadRect[2].Value + [int]$reloadRect[4].Value) / 2)
+    Doctor
+    $actions.Add(@{case=$plan.name; ms=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(); input="real mouse click Resync chat $Stage"; x=$reloadX; y=$reloadY})
+    [ChatDeliveryDesktop]::PressClient([IntPtr]$reloadMenus[0].Current.NativeWindowHandle, $app.Id, $reloadX, $reloadY)
+    [void](Wait-For "the $Stage Antigravity source reload completes" { (Read-Shared $paletteLog).Substring($reloadOffset).Contains('[chat] resync completed') } 30)
+}
+Send-Composer $freshSecondText
+[void](Wait-For 'the fresh Antigravity chat showed its second reply' { (Read-Shared $freshHistory).Contains($freshSecondReply) } 60)
+Send-Composer $freshThirdText
+[void](Wait-For 'the fresh Antigravity chat showed its third reply' { (Read-Shared $freshHistory).Contains($freshThirdReply) } 60)
+Copy-Item $freshHistory "$caseDir/fresh-antigravity-history.jsonl" -Force
+$freshBlocksBefore = Fresh-Blocks 'sent'
+Fresh-Copied 'before'
+Fresh-Transcript 'sent' (Fresh-Text 'before')
+Shot 'antigravity-fresh-before-reload'
+Fresh-Resync 'first'
+$freshBlocksAfter = Fresh-Blocks 'reloaded'
+Fresh-Copied 'after'
+Fresh-Transcript 'reloaded' (Fresh-Text 'after')
+if ($freshBlocksAfter -ne $freshBlocksBefore) { throw ('The full reload changed the painted Antigravity row count: ' + $freshBlocksBefore + ' -> ' + $freshBlocksAfter) }
+if ((Fresh-Text 'after').Trim() -cne (Fresh-Text 'before').Trim()) { throw 'The full reload changed the visible Antigravity transcript' }
+Shot 'antigravity-fresh-after-reload'
+Fresh-Resync 'second'
+$freshBlocksTwice = Fresh-Blocks 'reloaded twice'
+Fresh-Copied 'reload-twice'
+Fresh-Transcript 'reloaded twice' (Fresh-Text 'reload-twice')
+if ($freshBlocksTwice -ne $freshBlocksBefore) { throw ('The repeated full reload changed the painted Antigravity row count: ' + $freshBlocksBefore + ' -> ' + $freshBlocksTwice) }
+if ((Fresh-Text 'reload-twice').Trim() -cne (Fresh-Text 'before').Trim()) { throw 'The repeated full reload changed the visible Antigravity transcript' }
+Shot 'antigravity-fresh-reload-twice'
+Press @(0x11, 0x09) 'Ctrl+Tab: leave the fresh Antigravity chat'
+Start-Sleep -Milliseconds 500
+Shot 'antigravity-fresh-tab-away'
+Press @(0x11, 0x09) 'Ctrl+Tab: return to the fresh Antigravity chat'
+$freshBlocksReturned = Fresh-Blocks 'tab away and back'
+Fresh-Copied 'tab-away-back'
+Fresh-Transcript 'tab away and back' (Fresh-Text 'tab-away-back')
+if ($freshBlocksReturned -ne $freshBlocksBefore) { throw ('The tab away and back view changed the painted Antigravity row count: ' + $freshBlocksBefore + ' -> ' + $freshBlocksReturned) }
+if ((Fresh-Text 'tab-away-back').Trim() -cne (Fresh-Text 'before').Trim()) { throw 'The tab away and back view changed the visible Antigravity transcript' }
+Shot 'antigravity-fresh-tab-returned'
+function Resolve-FreshTab($Tabs, [string]$ExpectedSid, [int]$ExpectedHost, [string]$ExpectedTmux, [string]$Stage) {
+    $allTabs = @($Tabs)
+    $matched = @($allTabs | Where-Object {
+        $rowHost = if ($_.PSObject.Properties['tmux_host'] -and $null -ne $_.tmux_host) { [int]$_.tmux_host } else { 0 }
+        $rowSid = if ($_.PSObject.Properties['csid']) { [string]$_.csid } else { '' }
+        $rowTmux = if ($_.PSObject.Properties['tmux_session']) { [string]$_.tmux_session } else { '' }
+        ($rowSid -ceq $ExpectedSid) -and ($rowHost -eq $ExpectedHost) -and ($rowTmux -ceq $ExpectedTmux)
+    })
+    if ($matched.Count -ne 1) {
+        $summary = @($allTabs | ForEach-Object {
+            $rHost = if ($_.PSObject.Properties['tmux_host'] -and $null -ne $_.tmux_host) { [int]$_.tmux_host } else { 0 }
+            $rSid = if ($_.PSObject.Properties['csid']) { [string]$_.csid } else { '' }
+            $rTmux = if ($_.PSObject.Properties['tmux_session']) { [string]$_.tmux_session } else { '' }
+            ('{0}[host={1},tmux={2},csid={3}]' -f $_.name, $rHost, $rTmux, $rSid)
+        }) -join '; '
+        $reason = if ($matched.Count -eq 0) { 'missing' } else { 'duplicate' }
+        throw ('The ' + $Stage + ' Antigravity identity lookup failed (' + $reason + ', count=' + $matched.Count + ') for host=' + $ExpectedHost + ' tmux=' + $ExpectedTmux + ' csid=' + $ExpectedSid + '; tabs=' + $summary)
+    }
+    return $matched[0]
+}
+Copy-Item "$settings/session.json" "$caseDir/session-after-fresh-reload.json" -Force
+$savedAfterFresh = Get-Content "$caseDir/session-after-fresh-reload.json" -Raw | ConvertFrom-Json
+$freshSessionRow = Resolve-FreshTab $savedAfterFresh.tabs $freshSid $freshHost $freshTmux 'post-reload'
+if ($freshSessionRow.name -cne 'Antigravity') { throw ('The fresh Antigravity default tab name drifted after reloads: ' + $freshSessionRow.name) }
+if ([int]$freshSessionRow.ai_agent -ne 8) { throw ('The fresh Antigravity tab changed provider after reloads: ' + $freshSessionRow.ai_agent) }
+if ($freshSessionRow.cv -ne $true) { throw 'The fresh Antigravity tab left Chat View after reloads' }
+$verifyTabAfter = @($savedAfterFresh.tabs | Where-Object { $_.tmux_session -ceq 'verify-agent' })
+if ($verifyTabAfter.Count -ne 1 -or $verifyTabAfter[0].name -cne $tabsBefore[0].name -or $verifyTabAfter[0].manual -ne $true) { throw 'The manually named switched tab drifted during the fresh Antigravity journey' }
+$freshConfigAfter = Get-Content $freshConfig -Raw | ConvertFrom-Json
+if ($freshConfigAfter.sid -cne $freshSid -or $freshConfigAfter.tmux -cne $freshTmux -or $freshConfigAfter.provider -cne 'antigravity' -or $freshConfigAfter.enabled -ne $true) { throw 'The fresh Antigravity host config identity changed after reloads' }
+$freshHostAfter = if ($freshSessionRow.PSObject.Properties['tmux_host'] -and $null -ne $freshSessionRow.tmux_host) { [int]$freshSessionRow.tmux_host } else { 0 }
+$freshClaimAfter = Get-Content $freshState -Raw | ConvertFrom-Json
+if ($freshClaimAfter.display_history -ne $true) { throw 'The full reloads dropped the claimed Antigravity history flag' }
+Save @{provider='antigravity'; sid=$freshSid; host=$freshHost; tmux=$freshTmux; nameBefore=$newTab.name; nameAfter=$freshSessionRow.name; messages=$freshTexts.Count; texts=$freshTexts; replies=$freshReplies; reload='Chat View Resync chat'; reloads=2; tabAwayBack=$true; blocksBefore=$freshBlocksBefore; blocksAfter=$freshBlocksAfter; sidAfter=$freshSessionRow.csid; tmuxAfter=$freshSessionRow.tmux_session; hostAfter=$freshHostAfter; displayHistoryAfter=$freshClaimAfter.display_history; copiedBefore='fresh-copied-before.txt'; copiedAfter='fresh-copied-after.txt'; copiedTwice='fresh-copied-reload-twice.txt'; copiedTabAway='fresh-copied-tab-away-back.txt'; sameTranscript=$true; claim='fresh-history-claim.json'} "$caseDir/fresh-reload.json"

@@ -27,6 +27,7 @@ function run(code) {
   try {
     copyZig(['chat_hit.zig', 'chat_echo.zig', 'chat_markdown.zig', 'chat_style.zig', 'chat_code.zig', 'link_detect.zig', 'chat_working.zig', 'chat_reaction.zig', 'chat_transcript.zig'], dir);
     require('./fixtures/inline-stubs').writeChatMention(dir);
+    require('./fixtures/inline-stubs').writeChatInlineCode(dir);
     fs.writeFileSync(path.join(dir, 'chat_skill.zig'), 'pub fn known(_: []const u16) bool { return false; }\npub fn paint(_: anytype, _: anytype, _: u32) u32 { return 0; }\n');
     fs.writeFileSync(path.join(dir, 'chat_find_ui.zig'), 'pub fn paintRun(_: anytype, _: []const u16, _: usize, _: i32, _: i32, _: i32) void {}\n');
     const file = path.join(dir, 'test.zig');
@@ -197,6 +198,15 @@ var g_working_rect: ?RECT = null;
 const g_shell_rect_count: usize = 0;
 fn chatStopVisible() bool { return false; }
 fn chatWorkingDotsVisible() bool { return false; }
+const chat_activity_view = struct {
+    fn reset() void {}
+    fn refresh() void {}
+    fn isVisible() bool { return false; }
+    fn layout(rect: RECT) i32 { return rect.bottom; }
+};
+const chat_view = struct {
+    fn activityStrip(_: bool, dots: bool) bool { return dots; }
+};
 var g_chat_echo_layout_count: usize = 0;
 var g_chat_sel_anchor: usize = 0;
 var g_chat_sel_caret: usize = 0;
@@ -374,6 +384,7 @@ var g_chat_scrolled_up = false;
 fn chatReadBoundary() ReadBoundary { return .{}; }
 fn chatReadMark(_: bool) bool { return false; }
 const chat_code = @import("chat_code.zig");
+const chat_inline_code = @import("chat_inline_code.zig");
 const link_detect = @import("link_detect.zig");
 const HANDLE = usize;
 const RECT = struct { left: i32 = 0, top: i32 = 0, right: i32 = 0, bottom: i32 = 0 };

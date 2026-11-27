@@ -1,0 +1,1 @@
+One shared test checks all five AI harnesses

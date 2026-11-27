@@ -1,0 +1,1 @@
+Rooms do not work at all: make them work and nice to use
