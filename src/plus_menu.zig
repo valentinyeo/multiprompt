@@ -16,7 +16,7 @@ const L = startup.L;
 const RGB = startup.RGB;
 const uiScaled = drawing.uiScaled;
 
-pub const Item = enum(usize) { attach, model_opus, model_sonnet, model_haiku, model_fable, model_sol, model_terra, model_luna, model_astra, model_neon, model_carbon, model_argon, model_hydrogen, model_flash, model_agy_opus, model_agy_sonnet, effort_low, effort_medium, effort_high, effort_xhigh, mode_ask, mode_edits, mode_plan, mode_bypass };
+pub const Item = enum(usize) { ai, models, efforts, permissions, mode_auto, full_access, attach, model_opus, model_sonnet, model_haiku, model_fable, model_sol, model_terra, model_luna, model_astra, model_neon, model_carbon, model_argon, model_hydrogen, model_flash, model_agy_opus, model_agy_sonnet, effort_low, effort_medium, effort_high, effort_xhigh, mode_ask, mode_edits, mode_plan, mode_bypass };
 const ITEM_COUNT = std.meta.tags(Item).len;
 
 const Section = struct { title: ?[]const u8, items: []const Item };
@@ -30,17 +30,25 @@ const sections = [_]Section{
     .{ .title = "Model", .items = &.{ .model_sol, .model_terra, .model_luna, .model_astra } },
     .{ .title = "Model", .items = &antigravity_models },
     .{ .title = "Effort", .items = &.{ .effort_low, .effort_medium, .effort_high, .effort_xhigh } },
-    .{ .title = "Permission level", .items = &.{ .mode_ask, .mode_edits, .mode_plan, .mode_bypass } },
+    .{ .title = "Permission level", .items = &.{ .mode_ask, .mode_auto, .mode_edits, .mode_plan, .mode_bypass, .full_access } },
+    .{ .title = null, .items = &.{ .ai, .models, .efforts, .permissions } },
 };
 
 pub const State = struct {
     shown: [ITEM_COUNT]bool = @splat(false),
     active: [ITEM_COUNT]bool = @splat(false),
+    disabled: [ITEM_COUNT]bool = @splat(false),
     hover: ?Item = null,
 };
 
 fn label(item: Item) []const u8 {
     return switch (item) {
+        .ai => "AI",
+        .models => "Model",
+        .efforts => "Effort",
+        .permissions => "Permission level",
+        .mode_auto => "Auto",
+        .full_access => "Bypass (always full access)",
         .attach => "Attach file",
         .model_opus => "Opus",
         .model_sonnet => "Sonnet",
@@ -61,10 +69,10 @@ fn label(item: Item) []const u8 {
         .effort_medium => "Medium",
         .effort_high => "High",
         .effort_xhigh => "XHigh",
-        .mode_ask => "Ask",
-        .mode_edits => "Accept edits",
-        .mode_plan => "Plan",
-        .mode_bypass => "Bypass",
+        .mode_ask => if (@import("chat_session.zig").chatSettingsCodex()) "Untrusted / workspace write" else "Default",
+        .mode_edits => "On request / workspace write",
+        .mode_plan => "Untrusted / read only",
+        .mode_bypass => if (@import("chat_session.zig").chatSettingsCodex()) "Never / full access" else "Bypass",
     };
 }
 
@@ -91,7 +99,9 @@ pub fn geometry(bounds: RECT, anchor: RECT, shown: *const [ITEM_COUNT]bool) Geom
     for (sections) |section| {
         if (!sectionShown(section, shown)) continue;
         cards += 1;
-        rows += @intCast(section.items.len);
+        for (section.items) |item| {
+            if (shown[@intFromEnum(item)]) rows += 1;
+        }
         if (section.title != null) rows += 1;
     }
     var g: Geometry = std.mem.zeroes(Geometry);
@@ -289,7 +299,7 @@ pub fn paint(dc: HANDLE, bounds: RECT, anchor: RECT, state: *const State) void {
                 solid(dc, .{ .left = cell.left + uiScaled(14), .top = cell.top, .right = cell.right - uiScaled(14), .bottom = cell.top + edge }, c.outline);
             }
             first = false;
-            _ = w.SetTextColor(dc, if (state.active[idx]) activeInk() else c.text);
+            _ = w.SetTextColor(dc, if (state.disabled[idx]) c.hint else if (state.active[idx]) activeInk() else c.text);
             _ = w.SelectObject(dc, drawing.uiFontTitle());
             var row_rc = RECT{ .left = cell.left + uiScaled(14), .top = cell.top, .right = cell.right - uiScaled(14), .bottom = cell.bottom };
             drawing.drawAscii(dc, label(item), &row_rc, flags);
@@ -299,6 +309,9 @@ pub fn paint(dc: HANDLE, bounds: RECT, anchor: RECT, state: *const State) void {
 
 var g_hwnd: HANDLE = null;
 var g_class_registered = false;
+pub const Page = enum { root, ai, models, efforts, permissions };
+var g_page: Page = .root;
+var g_identity: @import("chat_transcript.zig").Identity = .{};
 var g_open = false;
 var g_state: State = .{};
 var g_backdrop: ?more_menu.Backdrop = null;
@@ -374,32 +387,107 @@ fn markClaude(state: *State, selected: chat_live.Settings, status: []const u16) 
     state.active[@intFromEnum(Item.effort_high)] = selected.effort == .high;
 }
 
+pub fn choicesFor(provider: []const u8, selected: chat_live.Settings, status: []const u16, eligible: bool, permissions: bool) State {
+    var result: State = .{};
+    const state = &result;
+    if (eligible) {
+        if (std.mem.eql(u8, provider, "antigravity")) {
+            markAntigravity(state, selected);
+        } else if (std.mem.eql(u8, provider, "codex")) {
+            markCodex(state, selected);
+        } else if (std.mem.eql(u8, provider, "pi")) {
+            markPi(state, selected);
+        } else if (std.mem.eql(u8, provider, "claude")) {
+            markClaude(state, selected, status);
+        }
+    }
+    if (permissions) {
+        if (std.mem.eql(u8, provider, "claude")) {
+            for ([_]Item{ .mode_ask, .mode_auto, .mode_bypass }) |item| state.shown[@intFromEnum(item)] = true;
+        } else if (std.mem.eql(u8, provider, "codex")) {
+            for ([_]Item{ .mode_ask, .mode_edits, .mode_plan, .mode_bypass }) |item| state.shown[@intFromEnum(item)] = true;
+        }
+        state.active[@intFromEnum(Item.mode_auto)] = selected.mode == .auto;
+        state.active[@intFromEnum(Item.mode_ask)] = selected.mode == .manual;
+        state.active[@intFromEnum(Item.mode_edits)] = selected.mode == .acceptEdits;
+        state.active[@intFromEnum(Item.mode_plan)] = selected.mode == .plan;
+        state.active[@intFromEnum(Item.mode_bypass)] = selected.mode == .bypassPermissions;
+    }
+    if (std.mem.eql(u8, provider, "pi") or std.mem.eql(u8, provider, "antigravity")) {
+        state.shown[@intFromEnum(Item.full_access)] = true;
+        state.active[@intFromEnum(Item.full_access)] = true;
+        state.disabled[@intFromEnum(Item.full_access)] = true;
+    }
+    if (std.mem.eql(u8, provider, "antigravity") and selected.model != .neon and selected.model != .hydrogen) {
+        state.shown[@intFromEnum(Item.effort_xhigh)] = false;
+    }
+    return result;
+}
+
+pub fn pageState(page: Page, choices: State, eligible: bool) State {
+    var state = choices;
+    for (std.meta.tags(Item)) |item| {
+        const visible = switch (page) {
+            .root => item == .ai or item == .models or item == .efforts or item == .permissions,
+            .ai => false,
+            .models => @intFromEnum(item) >= @intFromEnum(Item.model_opus) and @intFromEnum(item) <= @intFromEnum(Item.model_agy_sonnet),
+            .efforts => @intFromEnum(item) >= @intFromEnum(Item.effort_low) and @intFromEnum(item) <= @intFromEnum(Item.effort_xhigh),
+            .permissions => item == .mode_auto or item == .full_access or @intFromEnum(item) >= @intFromEnum(Item.mode_ask),
+        };
+        state.shown[@intFromEnum(item)] = visible and (page == .root or choices.shown[@intFromEnum(item)]);
+        if (page == .root) {
+            state.disabled[@intFromEnum(item)] = if (item == .permissions)
+                !choices.shown[@intFromEnum(Item.mode_ask)] and !choices.shown[@intFromEnum(Item.full_access)]
+            else
+                !eligible;
+        }
+    }
+    state.hover = null;
+    return state;
+}
+
 fn snapshot(state: *State) void {
-    state.* = .{};
-    state.shown[@intFromEnum(Item.attach)] = true;
+    state.* = pageState(g_page, .{}, false);
     if (app_state.active_shell >= app_state.shell_count) return;
     const chat_send = @import("chat_send.zig");
     chat_send.chatModeCapturePicker();
     const session = @import("chat_session.zig");
     const selected: chat_live.Settings = chat_live.settings(app_state.shells[app_state.active_shell].shell_id) orelse .{};
     const identity = session.chatFileIdentityForShell(app_state.active_shell);
-    if (session.chatSettingsEligible() and std.mem.eql(u8, identity.provider(), "antigravity")) {
-        markAntigravity(state, selected);
-    } else if (session.chatSettingsEligible() and session.chatSettingsCodex()) {
-        markCodex(state, selected);
-    } else if (session.chatSettingsEligible() and session.chatSettingsPi()) {
-        markPi(state, selected);
-    } else if (session.chatSettingsEligible()) {
-        const status: []const u16 = if (session.chatHistoryEntry(session.chatFileIdentity())) |entry| entry.history.status.model[0..entry.history.status.model_len] else &.{};
-        markClaude(state, selected, status);
+    const status: []const u16 = if (session.chatHistoryEntry(session.chatFileIdentity())) |entry| entry.history.status.model[0..entry.history.status.model_len] else &.{};
+    const eligible = session.chatSettingsEligible();
+    state.* = pageState(g_page, choicesFor(identity.provider(), selected, status, eligible, chat_send.chatModeSelectable()), eligible);
+}
+
+test "MUBO-575 every AI starts with exactly four menu rows" {
+    for ([_]Page{ .root, .models, .efforts, .permissions }) |page| {
+        const state = pageState(page, .{}, true);
+        var count: usize = 0;
+        for (state.shown) |shown| {
+            if (shown) count += 1;
+        }
+        try std.testing.expectEqual(@as(usize, if (page == .root) 4 else 0), count);
     }
-    if (std.mem.eql(u8, identity.provider(), "claude") and chat_send.chatModePickerAvailable()) {
-        for ([_]Item{ .mode_ask, .mode_edits, .mode_plan, .mode_bypass }) |item| state.shown[@intFromEnum(item)] = true;
-        state.active[@intFromEnum(Item.mode_ask)] = selected.mode == .manual;
-        state.active[@intFromEnum(Item.mode_edits)] = selected.mode == .acceptEdits;
-        state.active[@intFromEnum(Item.mode_plan)] = selected.mode == .plan;
-        state.active[@intFromEnum(Item.mode_bypass)] = selected.mode == .bypassPermissions;
+    var choices: State = .{};
+    choices.shown[@intFromEnum(Item.full_access)] = true;
+    choices.disabled[@intFromEnum(Item.full_access)] = true;
+    const fixed = pageState(.permissions, choices, true);
+    try std.testing.expect(fixed.shown[@intFromEnum(Item.full_access)] and fixed.disabled[@intFromEnum(Item.full_access)]);
+    try std.testing.expect(!fixed.shown[@intFromEnum(Item.mode_auto)]);
+}
+
+test "MUBO-575 a live chat can change permission level from the plus menu" {
+    const claude = choicesFor("claude", .{}, &.{}, true, true);
+    const root = pageState(.root, claude, true);
+    try std.testing.expect(root.shown[@intFromEnum(Item.permissions)]);
+    try std.testing.expect(!root.disabled[@intFromEnum(Item.permissions)]);
+    try std.testing.expect(!root.disabled[@intFromEnum(Item.models)] and !root.disabled[@intFromEnum(Item.efforts)]);
+    const modes = pageState(.permissions, claude, true);
+    for ([_]Item{ .mode_ask, .mode_auto, .mode_bypass }) |item| {
+        try std.testing.expect(modes.shown[@intFromEnum(item)]);
+        try std.testing.expect(!modes.disabled[@intFromEnum(item)]);
     }
+    for ([_]Item{ .mode_edits, .mode_plan, .full_access }) |item| try std.testing.expect(!modes.shown[@intFromEnum(item)]);
 }
 
 test "IGSH-1861 the model falls back to the transcript name and never guesses" {
@@ -424,9 +512,25 @@ fn ensureClass() void {
 }
 
 pub fn open() void {
-    if (g_open) return;
+    openPage(.root);
+}
+
+pub fn openPage(page: Page) void {
+    if (page == .ai) {
+        close();
+        openSwitchAi();
+        return;
+    }
+    if (page == .models and @import("chat_session.zig").chatSettingsPi()) {
+        close();
+        @import("chat_send.zig").chatPiModelPicker();
+        return;
+    }
+    if (g_open) close();
+    g_page = page;
     const main = app_state.g_main_hwnd orelse return;
     if (!chat_composer.chatViewOwnsInput()) return;
+    _ = w.UpdateWindow(main);
     const layout = chat_composer.chatViewLayout();
     const pane = layout.pane;
     const width = pane.right - pane.left;
@@ -446,6 +550,7 @@ pub fn open() void {
         return;
     }
     g_backdrop = backdrop;
+    g_identity = @import("chat_session.zig").chatFileIdentityForShell(app_state.active_shell);
     snapshot(&g_state);
     g_bounds = .{ .left = 0, .top = 0, .right = width, .bottom = height };
     const plus = layout.attach_btn;
@@ -453,7 +558,7 @@ pub fn open() void {
     g_open = true;
     const g = geometry(g_bounds, g_anchor, &g_state.shown);
     var log_buf: [128]u8 = undefined;
-    for ([_]Item{ .attach, .model_opus, .effort_low, .mode_ask }) |item| {
+    for (std.meta.tags(Item)) |item| {
         if (!g_state.shown[@intFromEnum(item)]) continue;
         const cell = g.cells[@intFromEnum(item)];
         @import("diagnostics.zig").debugLog(std.fmt.bufPrint(&log_buf, "[chat] plus menu {s} rect={d},{d},{d},{d}", .{ @tagName(item), cell.left, cell.top, cell.right, cell.bottom }) catch "[chat] plus menu");
@@ -476,30 +581,58 @@ pub fn close() void {
 }
 
 fn activate(item: Item) void {
-    if (!g_state.shown[@intFromEnum(item)]) return;
+    if (!g_state.shown[@intFromEnum(item)] or g_state.disabled[@intFromEnum(item)]) return;
+    if (app_state.active_shell >= app_state.shell_count or !std.meta.eql(g_identity, @import("chat_session.zig").chatFileIdentityForShell(app_state.active_shell))) {
+        close();
+        return;
+    }
+    switch (item) {
+        .ai => {
+            close();
+            openSwitchAi();
+            return;
+        },
+        .models => {
+            openPage(.models);
+            return;
+        },
+        .efforts => {
+            openPage(.efforts);
+            return;
+        },
+        .permissions => {
+            openPage(.permissions);
+            return;
+        },
+        else => {},
+    }
     close();
     _ = focus.PostMessageW(app_state.g_main_hwnd, w.WM_APP_PLUS_MENU_ACTION, @intFromEnum(item), 0);
 }
 
 fn step(direction: i32) void {
-    const tags = std.meta.tags(Item);
-    var current: i32 = if (g_state.hover) |item| @intCast(@intFromEnum(item)) else if (direction > 0) -1 else @as(i32, @intCast(tags.len));
-    var tries: usize = 0;
-    while (tries < tags.len) : (tries += 1) {
-        current = @mod(current + direction, @as(i32, @intCast(tags.len)));
-        const candidate: Item = @enumFromInt(@as(usize, @intCast(current)));
-        if (g_state.shown[@intFromEnum(candidate)]) {
-            g_state.hover = candidate;
-            _ = w.InvalidateRect(g_hwnd, null, 0);
-            return;
+    var ordered: [ITEM_COUNT]Item = undefined;
+    var count: usize = 0;
+    var current: i32 = -1;
+    for (sections) |section| {
+        for (section.items) |item| {
+            if (!g_state.shown[@intFromEnum(item)] or g_state.disabled[@intFromEnum(item)]) continue;
+            if (g_state.hover == item) current = @intCast(count);
+            ordered[count] = item;
+            count += 1;
         }
     }
+    if (count == 0) return;
+    if (current < 0 and direction < 0) current = 0;
+    const next: usize = @intCast(@mod(current + direction, @as(i32, @intCast(count))));
+    g_state.hover = ordered[next];
+    _ = w.InvalidateRect(g_hwnd, null, 0);
 }
 
 pub fn key(vk: usize) bool {
     if (!g_open) return false;
     switch (vk) {
-        w.VK_ESCAPE => close(),
+        w.VK_ESCAPE => if (g_page != .root) openPage(.root) else close(),
         0x26 => step(-1),
         0x28 => step(1),
         0x0D => {
@@ -571,4 +704,113 @@ fn wndProc(hwnd: HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w.WIN
         },
         else => return w.DefWindowProcW(hwnd, msg, wp, lp),
     }
+}
+
+pub fn dispatch(wp: usize) void {
+    const item: Item = blk: {
+        inline for (std.meta.fields(Item)) |field| {
+            if (wp == field.value) break :blk @enumFromInt(field.value);
+        }
+        return;
+    };
+    switch (item) {
+        .ai, .models, .efforts, .permissions, .full_access => {},
+        .attach => _ = focus.PostMessageW(app_state.g_main_hwnd, app_state.WM_APP_CHAT_ATTACH, 0, 0),
+        .model_opus, .model_sonnet, .model_haiku, .model_fable, .model_sol, .model_terra, .model_luna, .model_astra, .model_neon, .model_carbon, .model_argon, .model_hydrogen, .model_flash, .model_agy_opus, .model_agy_sonnet, .effort_low, .effort_medium, .effort_high, .effort_xhigh => {
+            const setting: @import("chat_live.zig").Setting = switch (item) {
+                .model_opus => .{ .model = .opus },
+                .model_sonnet => .{ .model = .sonnet },
+                .model_haiku => .{ .model = .haiku },
+                .model_fable => .{ .model = .fable },
+                .model_sol => .{ .model = .sol },
+                .model_terra => .{ .model = .terra },
+                .model_luna => .{ .model = .luna },
+                .model_astra => .{ .model = .astra },
+                .model_neon => .{ .model = .neon },
+                .model_carbon => .{ .model = .carbon },
+                .model_argon => .{ .model = .argon },
+                .model_hydrogen => .{ .model = .hydrogen },
+                .model_flash => .{ .model = .flash },
+                .model_agy_opus => .{ .model = .opus },
+                .model_agy_sonnet => .{ .model = .sonnet },
+                .effort_low => .{ .effort = .low },
+                .effort_medium => .{ .effort = .medium },
+                .effort_high => .{ .effort = .high },
+                else => .{ .effort = .xhigh },
+            };
+            if (@import("chat_send.zig").chatSetLiveSetting(setting)) @import("chat_send.zig").chatSettingNotice(setting) else @import("console.zig").showHeaderNoticeAscii("Could not change chat settings", 4000, true);
+        },
+        .mode_ask, .mode_auto, .mode_edits, .mode_plan, .mode_bypass => {
+            const mode: @import("chat_slash.zig").PermissionMode = switch (item) {
+                .mode_ask => .manual,
+                .mode_auto => .auto,
+                .mode_edits => .acceptEdits,
+                .mode_plan => .plan,
+                else => .bypassPermissions,
+            };
+            if (!@import("chat_send.zig").chatModeSelect(mode)) @import("console.zig").showHeaderNoticeAscii("Could not change permission mode; try again", 4000, true);
+        },
+    }
+}
+
+fn openSwitchAi() void {
+    _ = w.SendMessageW(app_state.g_main_hwnd, w.WM_APP_SEARCH_OPEN, 0, 0);
+    const query = std.unicode.utf8ToUtf16LeStringLiteral("Chat View: Switch AI to");
+    @memcpy(app_state.g_search_buf[0..query.len], query);
+    app_state.g_search_len = query.len;
+    app_state.g_search_sel = 0;
+    app_state.g_search_scroll = 0;
+    @import("command_palette.zig").updateSearchResults();
+    _ = w.InvalidateRect(app_state.g_main_hwnd, null, 0);
+}
+
+pub const palette_rows = [_]struct { id: usize, title: []const u8, page: Page }{
+    .{ .id = app_state.SEARCH_CHAT_AI_MENU_OFFSET, .title = "Chat View: AI", .page = .ai },
+    .{ .id = app_state.SEARCH_CHAT_MODEL_MENU_OFFSET, .title = "Chat View: Model", .page = .models },
+    .{ .id = app_state.SEARCH_CHAT_EFFORT_MENU_OFFSET, .title = "Chat View: Effort", .page = .efforts },
+    .{ .id = app_state.SEARCH_CHAT_PERMISSION_MENU_OFFSET, .title = "Chat View: Permission level", .page = .permissions },
+};
+
+pub fn palettePage(target: usize) Page {
+    for (palette_rows) |row| {
+        if (row.id == target) return row.page;
+    }
+    return .root;
+}
+
+pub fn paletteTitle(target: usize) []const u8 {
+    for (palette_rows) |row| {
+        if (row.id == target) return row.title;
+    }
+    return "Chat View: Plus Menu";
+}
+
+test "MUBO-575 provider choices never offer another AI's controls" {
+    for ([_][]const u8{ "claude", "codex", "pi", "antigravity" }) |provider| {
+        const choices = choicesFor(provider, .{ .model = .carbon, .mode = .bypassPermissions }, &.{}, true, true);
+        const root = pageState(.root, choices, true);
+        for ([_]Item{ .ai, .models, .efforts, .permissions }) |item| try std.testing.expect(root.shown[@intFromEnum(item)] and !root.disabled[@intFromEnum(item)]);
+        try std.testing.expect(!root.shown[@intFromEnum(Item.attach)]);
+        const permission = pageState(.permissions, choices, true);
+        if (std.mem.eql(u8, provider, "claude")) {
+            try std.testing.expect(permission.shown[@intFromEnum(Item.mode_auto)]);
+            try std.testing.expect(!permission.shown[@intFromEnum(Item.mode_edits)]);
+            try std.testing.expect(!permission.shown[@intFromEnum(Item.mode_plan)]);
+        } else if (std.mem.eql(u8, provider, "codex")) {
+            try std.testing.expect(permission.shown[@intFromEnum(Item.mode_edits)]);
+            try std.testing.expect(!permission.shown[@intFromEnum(Item.mode_auto)]);
+        } else {
+            try std.testing.expect(permission.shown[@intFromEnum(Item.full_access)] and permission.disabled[@intFromEnum(Item.full_access)]);
+            try std.testing.expect(!permission.shown[@intFromEnum(Item.mode_ask)]);
+        }
+        if (!std.mem.eql(u8, provider, "pi")) {
+            const models = pageState(.models, choices, true);
+            try std.testing.expectEqual(std.mem.eql(u8, provider, "codex"), models.shown[@intFromEnum(Item.model_sol)]);
+        }
+        try std.testing.expect(!choices.shown[@intFromEnum(Item.effort_xhigh)] or std.mem.eql(u8, provider, "pi"));
+    }
+    const neon = choicesFor("antigravity", .{ .model = .neon }, &.{}, true, true);
+    try std.testing.expect(neon.shown[@intFromEnum(Item.effort_xhigh)]);
+    const loading = pageState(.root, .{}, false);
+    try std.testing.expect(loading.disabled[@intFromEnum(Item.models)] and loading.disabled[@intFromEnum(Item.efforts)]);
 }

@@ -858,6 +858,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         const all = pi_models.models();
         return all[model_idx].nameText();
     }
+    if (target >= app_state.SEARCH_CHAT_AI_MENU_OFFSET and target <= app_state.SEARCH_CHAT_PERMISSION_MENU_OFFSET) return @import("plus_menu.zig").paletteTitle(target);
     return switch (target) {
         SEARCH_PI_MODELS_MENU_OFFSET => "Pi Model...",
         SEARCH_PI_MODELS_BACK_OFFSET => "Back",
@@ -1523,6 +1524,7 @@ pub fn roomPaletteAllowed(target: usize) bool {
 }
 
 pub fn paletteGroupOf(target: usize) ?u8 {
+    if (target >= app_state.SEARCH_CHAT_AI_MENU_OFFSET and target <= app_state.SEARCH_CHAT_PERMISSION_MENU_OFFSET) return 7;
     if (target == SEARCH_PI_MODELS_MENU_OFFSET or target == SEARCH_PI_MODELS_BACK_OFFSET or (target >= SEARCH_PI_MODEL_ROW_OFFSET and target < SEARCH_PI_MODEL_ROW_OFFSET + MAX_PI_MODELS)) return 7;
     if ((target >= SEARCH_CHAT_MODEL_OPUS_OFFSET and target <= SEARCH_CHAT_EFFORT_HIGH_OFFSET) or target == SEARCH_CHAT_MODEL_FABLE_OFFSET or target == SEARCH_CHAT_MODEL_SOL_OFFSET or target == SEARCH_CHAT_MODEL_TERRA_OFFSET or target == SEARCH_CHAT_MODEL_LUNA_OFFSET or target == SEARCH_CHAT_MODEL_ASTRA_OFFSET) return 7;
     if (target == SEARCH_COMPUTER_TOGGLE_OFFSET or target == SEARCH_COMPUTER_CONTROL_OFFSET or target == SEARCH_COMPUTER_WIDTH_OFFSET or target == SEARCH_COMPUTER_RETRY_OFFSET) return 5;
@@ -2477,6 +2479,7 @@ fn buildWorkspaceTmuxLaunchCmd(out: []u8, session: []const u8, cwd: []const u8, 
         if (!appendAsciiBuf(out, &len, cwd)) return null;
         if (!appendAsciiBuf(out, &len, " && ")) return null;
         if (!appendAsciiBuf(out, &len, program)) return null;
+        if (!appendAsciiBuf(out, &len, @import("agent_host.zig").newTerminalPermissionFlag(program))) return null;
         if (!appendAsciiBuf(out, &len, "' Enter; tmux attach -t ")) return null;
     } else if (!appendAsciiBuf(out, &len, " 2>/dev/null; tmux attach -t ")) return null;
     if (!appendAsciiBuf(out, &len, session)) return null;
@@ -2500,14 +2503,14 @@ test "IGSH-1447 a new Claude tab opens as a live chat and other tabs open as ter
     try std.testing.expect(newTabOpensChatView("claude-code"));
     try std.testing.expect(newTabOpensChatView(workspaceSessionProgram("", true)));
     try std.testing.expect(!newTabOpensChatView(""));
-    try std.testing.expect(!newTabOpensChatView("codex"));
-    try std.testing.expect(!newTabOpensChatView("pi"));
+    try std.testing.expect(newTabOpensChatView("codex"));
+    try std.testing.expect(newTabOpensChatView("pi"));
     try std.testing.expect(newTabOpensChatView("cursor"));
     try std.testing.expect(newTabOpensChatView("agent"));
     try std.testing.expect(newTabOpensChatView("antigravity"));
     try std.testing.expect(newTabOpensChatView("agy"));
     try std.testing.expect(!newTabOpensChatView("bash"));
-    try std.testing.expect(!newTabOpensChatView(workspaceSessionProgram("codex", true)));
+    try std.testing.expect(newTabOpensChatView(workspaceSessionProgram("codex", true)));
     try std.testing.expect(!newTabOpensChatView(workspaceSessionProgram("", false)));
     var out: [64]u8 = undefined;
     try std.testing.expect(std.mem.startsWith(u8, buildLiveChatSessionName(&out), "live-"));
@@ -2516,7 +2519,7 @@ test "IGSH-1447 a new Claude tab opens as a live chat and other tabs open as ter
 test "workspace tmux program runs after shell startup and neutral fallback stays unchanged" {
     var out: [512]u8 = undefined;
     const launched = buildWorkspaceTmuxLaunchCmd(&out, "term-test", "~/project", "claude") orelse return error.TestUnexpectedResult;
-    try std.testing.expectEqualStrings("tmux new-session -d -s term-test -c ~/project 2>/dev/null; tmux send-keys -t term-test 'cd ~/project && claude' Enter; tmux attach -t term-test", launched);
+    try std.testing.expectEqualStrings("tmux new-session -d -s term-test -c ~/project 2>/dev/null; tmux send-keys -t term-test 'cd ~/project && claude --dangerously-skip-permissions' Enter; tmux attach -t term-test", launched);
     const neutral = buildWorkspaceTmuxLaunchCmd(&out, "term-test", "~/projects", "") orelse return error.TestUnexpectedResult;
     try std.testing.expectEqualStrings("tmux new-session -d -s term-test -c ~/projects 2>/dev/null; tmux attach -t term-test", neutral);
     try std.testing.expect(buildWorkspaceTmuxLaunchCmd(&out, "term-test", "~/projects", "claude; exit") == null);
@@ -2549,9 +2552,9 @@ test "IGSH-1447 a new Claude session spawns exactly the terminal launch command"
 
     const codex = workspaceLaunchCommand("codex", "term-abc", "~/projects", null, agent_host.READER, &host_buf, &command_buf) orelse
         return error.TestUnexpectedResult;
-    try std.testing.expect(std.mem.indexOf(u8, codex, "send-keys -t term-abc 'cd ~/projects && codex'") != null);
-    try std.testing.expect(workspaceLaunchCommand("codex", "term-abc", "~/projects", sid, agent_host.READER, &host_buf, &command_buf) == null);
-    try std.testing.expect(workspaceLaunchCommand("pi", "term-abc", "~/projects", sid, agent_host.READER, &host_buf, &command_buf) == null);
+    try std.testing.expect(std.mem.indexOf(u8, codex, "send-keys -t term-abc 'cd ~/projects && codex --dangerously-bypass-approvals-and-sandbox'") != null);
+    try std.testing.expect(workspaceLaunchCommand("codex", "term-abc", "~/projects", sid, agent_host.READER, &host_buf, &command_buf) != null);
+    try std.testing.expect(workspaceLaunchCommand("pi", "term-abc", "~/projects", sid, agent_host.READER, &host_buf, &command_buf) != null);
 
     const neutral = workspaceLaunchCommand("", "term-abc", "~/projects", null, agent_host.READER, &host_buf, &command_buf) orelse
         return error.TestUnexpectedResult;
@@ -3429,8 +3432,8 @@ test "IGSH-1546 Codex and Pi chats are live chats that never type into a termina
     try std.testing.expect(pi.len <= app_state.g_pending_tmux_cmd.len);
     try std.testing.expect(std.mem.indexOf(u8, pi, "send-keys") == null);
     try std.testing.expect(std.mem.indexOf(u8, pi, "host start pi ffffffff-ffff-4fff-bfff-ffffffffffff") != null);
-    try std.testing.expect(!agent_host.eligible("pi"));
-    try std.testing.expect(!newTabOpensChatView("pi"));
+    try std.testing.expect(agent_host.eligible("pi"));
+    try std.testing.expect(newTabOpensChatView("pi"));
 }
 
 fn clampSearchSelectionAndScroll() void {
@@ -4703,6 +4706,9 @@ pub fn updateSearchResults() void {
         app_state.g_search_result_count += 1;
     }
 
+    if (@import("chat_session.zig").chatSettingsEligible()) {
+        for (@import("plus_menu.zig").palette_rows) |row| chatPaletteRow(row.id, &.{row.title}, false);
+    }
     chatPaletteRow(SEARCH_CHAT_TODO_OFFSET, &[_][]const u8{ "Chat View: Toggle todo list", "todos tasks plan progress" }, false);
     chatPaletteRow(SEARCH_CHAT_COPY_CODE_OFFSET, &[_][]const u8{ "chat view copy latest code block", "copy code", "ctrl shift d" }, false);
     if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
@@ -4735,7 +4741,7 @@ pub fn updateSearchResults() void {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_SELECT_ALL_OFFSET;
         app_state.g_search_result_count += 1;
     }
-    if (app_state.g_search_len > 0 and @import("chat_send.zig").chatModePickerAvailable() and !app_state.g_inbox_active and !app_state.g_all_sessions_active) {
+    if (app_state.g_search_len > 0 and @import("chat_send.zig").chatModeSelectable() and (@import("chat_session.zig").chatSettingsCodex() or std.mem.eql(u8, @import("chat_session.zig").chatFileIdentityForShell(app_state.active_shell).provider(), "claude")) and !app_state.g_inbox_active and !app_state.g_all_sessions_active) {
         const query = app_state.g_search_buf[0..app_state.g_search_len];
         for ([_]struct { target: usize, label: []const u8 }{
             .{ .target = SEARCH_CHAT_MODE_PLAN_OFFSET, .label = "chat permission mode: plan" },
@@ -5359,24 +5365,12 @@ pub fn updateSearchResults() void {
             app_state.g_search_result_count += 1;
         }
         if (@import("chat_session.zig").chatSettingsEligible() and @import("chat_session.zig").chatSettingsCodex()) {
-            if (app_state.g_search_result_count < app_state.g_search_results.len and (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Model Sol", app_state.g_search_buf[0..app_state.g_search_len]))) {
-                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_MODEL_SOL_OFFSET;
-                app_state.g_search_result_count += 1;
-            }
-            if (app_state.g_search_result_count < app_state.g_search_results.len and (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Model Terra", app_state.g_search_buf[0..app_state.g_search_len]))) {
-                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_MODEL_TERRA_OFFSET;
-                app_state.g_search_result_count += 1;
-            }
-            if (app_state.g_search_result_count < app_state.g_search_results.len and (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Model Luna", app_state.g_search_buf[0..app_state.g_search_len]))) {
-                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_MODEL_LUNA_OFFSET;
-                app_state.g_search_result_count += 1;
-            }
-            if (app_state.g_search_result_count < app_state.g_search_results.len and (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Model Astra", app_state.g_search_buf[0..app_state.g_search_len]))) {
-                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_MODEL_ASTRA_OFFSET;
-                app_state.g_search_result_count += 1;
-            }
-        }
-        if (@import("chat_session.zig").chatSettingsEligible() and !@import("chat_session.zig").chatSettingsCodex()) {
+            for ([_]struct { id: usize, title: []const u8 }{
+                .{ .id = SEARCH_CHAT_MODEL_SOL_OFFSET, .title = "Chat View: Model Sol" },
+                .{ .id = SEARCH_CHAT_MODEL_TERRA_OFFSET, .title = "Chat View: Model Terra" },
+                .{ .id = SEARCH_CHAT_MODEL_LUNA_OFFSET, .title = "Chat View: Model Luna" },
+                .{ .id = SEARCH_CHAT_MODEL_ASTRA_OFFSET, .title = "Chat View: Model Astra" },
+            }) |row| chatPaletteRow(row.id, &.{row.title}, false);
         }
         if (app_state.g_search_result_count < app_state.g_search_results.len and
             (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Chat View: Allow", app_state.g_search_buf[0..app_state.g_search_len])))

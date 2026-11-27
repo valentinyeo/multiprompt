@@ -37,6 +37,8 @@ pub const Provider = enum {
 
 pub fn hostedWorkspaceProvider(program: []const u8) ?Provider {
     if (std.mem.startsWith(u8, program, "claude")) return .claude;
+    if (std.mem.eql(u8, program, "codex")) return .codex;
+    if (std.mem.eql(u8, program, "pi")) return .pi;
     if (std.mem.eql(u8, program, "cursor") or std.mem.eql(u8, program, "agent") or std.mem.startsWith(u8, program, "cursor ")) return .cursor;
     if (std.mem.eql(u8, program, "antigravity") or std.mem.eql(u8, program, "agy") or std.mem.startsWith(u8, program, "antigravity ") or std.mem.startsWith(u8, program, "agy ")) return .antigravity;
     return null;
@@ -131,7 +133,7 @@ pub fn runtimePath(out: []u8, sha256: []const u8) ?[]const u8 {
 pub fn launchCommandFor(out: []u8, provider: Provider, session: []const u8, cwd: []const u8, sid: []const u8, reader: []const u8) ?[]const u8 {
     if (!safeName(session) or !safePath(cwd) or !safeSessionId(sid) or !safePath(reader)) return null;
     if (!std.mem.endsWith(u8, reader, ".py")) return null;
-    const mode = if (provider == .claude) " --permission-mode bypassPermissions" else "";
+    const mode = if (provider == .claude or provider == .codex or provider == .pi or provider == .antigravity) " --permission-mode bypassPermissions" else "";
     const name = provider.wire();
     return std.fmt.bufPrint(out, "python3 {s} host enable {s} {s} --tmux {s} --cwd {s}{s} && python3 {s} host start {s} {s}", .{ reader, name, sid, session, cwd, mode, reader, name, sid }) catch null;
 }
@@ -320,8 +322,8 @@ test "IGSH-1266 new Claude sessions start on the app owned host" {
     try std.testing.expect(ENABLED);
     try std.testing.expect(eligible("claude"));
     try std.testing.expect(eligible("claude-code"));
-    try std.testing.expect(!eligible("codex"));
-    try std.testing.expect(!eligible("pi"));
+    try std.testing.expect(eligible("codex"));
+    try std.testing.expect(eligible("pi"));
     try std.testing.expect(eligible("cursor"));
     try std.testing.expect(eligible("agent"));
     try std.testing.expect(eligible("antigravity"));
@@ -344,15 +346,15 @@ test "IGSH-1447 a new Claude tab is a live chat with no shell or terminal Claude
     try std.testing.expect(launchCommand(&out, "live-abc", "~/pro jects", "ffffffff-ffff-4fff-bfff-ffffffffffff", READER) == null);
 }
 
-test "IGSH-1546 a Codex or Pi live chat starts on the host with its own provider and no Claude permission flag" {
+test "IGSH-1546 a Codex or Pi live chat starts on the host with its own provider and full permissions" {
     var out: [1024]u8 = undefined;
     const sid = "ffffffff-ffff-4fff-bfff-ffffffffffff";
     const codex = launchCommandFor(&out, .codex, "live-abc", "~/projects", sid, READER) orelse return error.TestUnexpectedResult;
-    try std.testing.expectEqualStrings("python3 ~/.multiprompt-runtime/reader.py host enable codex ffffffff-ffff-4fff-bfff-ffffffffffff --tmux live-abc --cwd ~/projects && python3 ~/.multiprompt-runtime/reader.py host start codex ffffffff-ffff-4fff-bfff-ffffffffffff", codex);
+    try std.testing.expectEqualStrings("python3 ~/.multiprompt-runtime/reader.py host enable codex ffffffff-ffff-4fff-bfff-ffffffffffff --tmux live-abc --cwd ~/projects --permission-mode bypassPermissions && python3 ~/.multiprompt-runtime/reader.py host start codex ffffffff-ffff-4fff-bfff-ffffffffffff", codex);
     const pi = launchCommandFor(&out, .pi, "live-abc", "~/projects", sid, READER) orelse return error.TestUnexpectedResult;
     try std.testing.expect(std.mem.indexOf(u8, pi, "host enable pi ffffffff") != null);
     try std.testing.expect(std.mem.indexOf(u8, pi, "host start pi ffffffff") != null);
-    try std.testing.expect(std.mem.indexOf(u8, pi, "permission-mode") == null);
+    try std.testing.expect(std.mem.indexOf(u8, pi, "--permission-mode bypassPermissions") != null);
     try std.testing.expect(std.mem.indexOf(u8, pi, "send-keys") == null);
     try std.testing.expect(launchCommandFor(&out, .pi, "live-abc", "~/projects", "bad", READER) == null);
     const cursor = launchCommandFor(&out, .cursor, "live-abc", "~/projects", sid, READER) orelse return error.TestUnexpectedResult;
@@ -362,7 +364,7 @@ test "IGSH-1546 a Codex or Pi live chat starts on the host with its own provider
     const antigravity = launchCommandFor(&out, .antigravity, "live-abc", "~/projects", sid, READER) orelse return error.TestUnexpectedResult;
     try std.testing.expect(std.mem.indexOf(u8, antigravity, "host enable antigravity ffffffff") != null);
     try std.testing.expect(std.mem.indexOf(u8, antigravity, "host start antigravity ffffffff") != null);
-    try std.testing.expect(std.mem.indexOf(u8, antigravity, "permission-mode") == null);
+    try std.testing.expect(std.mem.indexOf(u8, antigravity, "--permission-mode bypassPermissions") != null);
     try std.testing.expect(std.mem.indexOf(u8, antigravity, ">/dev/null") == null);
     const claude = launchCommandFor(&out, .claude, "live-abc", "~/projects", sid, READER) orelse return error.TestUnexpectedResult;
     var expected: [1024]u8 = undefined;
@@ -408,4 +410,28 @@ test "IGSH-1666 hosted resumes retain provider and host identity" {
     const pi = resumeCommandFor(&out, .pi, "live-pi", sid) orelse return error.TestUnexpectedResult;
     try std.testing.expect(std.mem.indexOf(u8, pi, "host start pi ffffffff-ffff-4fff-bfff-ffffffffffff --tmux live-pi") != null);
     try std.testing.expect(resumeCommandFor(&out, .codex, "live-codex", "bad") == null);
+}
+
+pub fn newTerminalPermissionFlag(program: []const u8) []const u8 {
+    const word_end = std.mem.indexOfScalar(u8, program, ' ') orelse program.len;
+    const rest = std.mem.trim(u8, program[word_end..], " ");
+    if (rest.len > 0 and rest[0] != '-') return "";
+    const provider = hostedWorkspaceProvider(program[0..word_end]) orelse return "";
+    for ([_][]const u8{ "--permission-mode", "--dangerously-", "--ask-for-approval", "--sandbox", "--full-auto", "--yolo", " -a ", " -s " }) |flag| {
+        if (std.mem.indexOf(u8, program, flag) != null) return "";
+    }
+    return switch (provider) {
+        .claude, .antigravity => " --dangerously-skip-permissions",
+        .codex => " --dangerously-bypass-approvals-and-sandbox",
+        else => "",
+    };
+}
+
+test "MUBO-575 plain AI terminals also default to full permissions without overriding explicit choices" {
+    try std.testing.expectEqualStrings(" --dangerously-skip-permissions", newTerminalPermissionFlag("claude"));
+    try std.testing.expectEqualStrings(" --dangerously-bypass-approvals-and-sandbox", newTerminalPermissionFlag("codex"));
+    try std.testing.expectEqualStrings(" --dangerously-skip-permissions", newTerminalPermissionFlag("agy"));
+    for ([_][]const u8{ "pi", "bash", "codex login", "claude --permission-mode auto", "codex --sandbox read-only", "codex --full-auto", "agy --dangerously-skip-permissions" }) |program| {
+        try std.testing.expectEqualStrings("", newTerminalPermissionFlag(program));
+    }
 }

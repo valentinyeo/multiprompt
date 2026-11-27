@@ -3915,48 +3915,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         @import("win32.zig").WM_APP_PLUS_MENU_ACTION => {
             if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
-            const item: plus_menu.Item = blk: {
-                inline for (std.meta.fields(plus_menu.Item)) |field| {
-                    if (wp == field.value) break :blk @enumFromInt(field.value);
-                }
-                return 0;
-            };
-            switch (item) {
-                .attach => _ = PostMessageW(hwnd, WM_APP_CHAT_ATTACH, 0, 0),
-                .model_opus, .model_sonnet, .model_haiku, .model_fable, .model_sol, .model_terra, .model_luna, .model_astra, .model_neon, .model_carbon, .model_argon, .model_hydrogen, .model_flash, .model_agy_opus, .model_agy_sonnet, .effort_low, .effort_medium, .effort_high, .effort_xhigh => {
-                    const setting: @import("chat_live.zig").Setting = switch (item) {
-                        .model_opus => .{ .model = .opus },
-                        .model_sonnet => .{ .model = .sonnet },
-                        .model_haiku => .{ .model = .haiku },
-                        .model_fable => .{ .model = .fable },
-                        .model_sol => .{ .model = .sol },
-                        .model_terra => .{ .model = .terra },
-                        .model_luna => .{ .model = .luna },
-                        .model_astra => .{ .model = .astra },
-                        .model_neon => .{ .model = .neon },
-                        .model_carbon => .{ .model = .carbon },
-                        .model_argon => .{ .model = .argon },
-                        .model_hydrogen => .{ .model = .hydrogen },
-                        .model_flash => .{ .model = .flash },
-                        .model_agy_opus => .{ .model = .opus },
-                        .model_agy_sonnet => .{ .model = .sonnet },
-                        .effort_low => .{ .effort = .low },
-                        .effort_medium => .{ .effort = .medium },
-                        .effort_high => .{ .effort = .high },
-                        else => .{ .effort = .xhigh },
-                    };
-                    if (@import("chat_send.zig").chatSetLiveSetting(setting)) @import("chat_send.zig").chatSettingNotice(setting) else showHeaderNoticeAscii("Could not change chat settings", 4000, true);
-                },
-                .mode_ask, .mode_edits, .mode_plan, .mode_bypass => {
-                    const mode: @import("chat_slash.zig").PermissionMode = switch (item) {
-                        .mode_ask => .manual,
-                        .mode_edits => .acceptEdits,
-                        .mode_plan => .plan,
-                        else => .bypassPermissions,
-                    };
-                    if (!@import("chat_send.zig").chatModeSelect(mode)) showHeaderNoticeAscii("Could not change permission mode; try again", 4000, true);
-                },
-            }
+            plus_menu.dispatch(wp);
             _ = InvalidateRect(hwnd, null, 0);
             return 0;
         },
@@ -5557,7 +5516,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     more_menu.open();
                     return 0;
                 }
-                if (target == app_state.SEARCH_CHAT_PLUS_MENU_OFFSET) {
+                if (target == app_state.SEARCH_CHAT_PLUS_MENU_OFFSET or (target >= app_state.SEARCH_CHAT_AI_MENU_OFFSET and target <= app_state.SEARCH_CHAT_PERMISSION_MENU_OFFSET)) {
                     app_state.g_search_active = false;
                     app_state.g_search_from_inbox = false;
                     app_state.g_shell_focused = false;
@@ -5566,7 +5525,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = InvalidateRect(hwnd, null, 0);
                     _ = @import("win32.zig").UpdateWindow(hwnd);
                     if (app_state.g_chat_active) _ = @import("win32.zig").UpdateWindow(app_state.g_chat_transcript_hwnd);
-                    plus_menu.open();
+                    plus_menu.openPage(plus_menu.palettePage(target));
                     return 0;
                 }
                 if (target == SEARCH_CHAT_FOCUS_MESSAGES_OFFSET) {

@@ -1028,7 +1028,7 @@ fn chatHistoryStreamThread(stream: *ChatHistoryStream, key: chat_transcript.Iden
 
 pub fn chatLiveWrite(identity: @import("session_identity.zig").Session, line: []const u8) bool {
     _ = identity.requestId(line) orelse return false;
-    const setting = std.mem.indexOf(u8, line, ",\"op\":\"set_model\",") != null or std.mem.indexOf(u8, line, ",\"op\":\"set_effort\",") != null;
+    const setting = std.mem.indexOf(u8, line, ",\"op\":\"set_model\",") != null or std.mem.indexOf(u8, line, ",\"op\":\"set_effort\",") != null or std.mem.indexOf(u8, line, ",\"op\":\"set_permission_mode\",") != null;
     chatLiveLock(&g_chat_live_mutex);
     defer g_chat_live_mutex.unlock();
     const stream = g_chat_live_stream orelse return false;

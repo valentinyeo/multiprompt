@@ -25,7 +25,7 @@ test('IGSH-1861 every row group gets an active row from live data', () => {
   assert.match(plus, /modelFromStatus\(status\)/);
   assert.match(plus, /chatHistoryEntry\(session\.chatFileIdentity\(\)\)/);
   const live = read('src/chat_live.zig');
-  assert.match(live, /pub const Mode = enum \{ unknown, manual, acceptEdits, plan, bypassPermissions \}/);
+  assert.match(live, /pub const Mode = enum \{ unknown, manual, acceptEdits, plan, bypassPermissions, auto \}/);
   assert.match(live, /\.mode = std\.meta\.stringToEnum\(Mode, strOf\(payload, "mode"\)\) orelse \.unknown/);
 });
 
@@ -36,7 +36,7 @@ test('IGSH-1861 changes confirm with a short header notice that the policy lists
   }
   assert.ok(!send.includes('"Permission mode changed"'));
   const main = read('src/main.zig');
-  assert.equal(main.split('chatSettingNotice(setting)').length - 1, 2);
+  assert.equal((main + read('src/plus_menu.zig')).split('chatSettingNotice(setting)').length - 1, 2);
   const inventory = JSON.parse(read('tools/fixtures/IGSH-1649/action-notices.json'));
   assert.ok(inventory['chat_send.zig'].some(line => line.startsWith('chatSettingNotice:')));
 });

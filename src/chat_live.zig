@@ -18,7 +18,7 @@ pub const ItemStatus = enum { running, ok, failed, interrupted };
 pub const State = enum { idle, running };
 pub const Model = enum { unknown, opus, sonnet, haiku, fable, sol, terra, luna, astra, neon, carbon, argon, hydrogen, flash };
 pub const Effort = enum { unknown, low, medium, high, xhigh };
-pub const Mode = enum { unknown, manual, acceptEdits, plan, bypassPermissions };
+pub const Mode = enum { unknown, manual, acceptEdits, plan, bypassPermissions, auto };
 pub const Settings = struct { model: Model = .unknown, effort: Effort = .unknown, mode: Mode = .unknown, applied: bool = false };
 pub const RequestKind = enum { approval, question, plan };
 pub const Decision = enum { accept, accept_for_session, decline, cancel };
@@ -564,6 +564,14 @@ pub fn settingLine(a: std.mem.Allocator, id: u32, provider: []const u8, sid: []c
     errdefer out.deinit(a);
     try out.appendSlice(a, if (setting == .model) ",\"model\":" else ",\"effort\":");
     try appendQuoted(&out, a, value);
+    return finish(&out, a);
+}
+
+pub fn modeLine(a: std.mem.Allocator, id: u32, provider: []const u8, sid: []const u8, mode: []const u8) ![]u8 {
+    var out = try openLine(a, id, "set_permission_mode", provider, sid);
+    errdefer out.deinit(a);
+    try out.appendSlice(a, ",\"mode\":");
+    try appendQuoted(&out, a, mode);
     return finish(&out, a);
 }
 
@@ -1958,6 +1966,11 @@ test "setting requests and refused replies" {
     try std.testing.expect(std.mem.indexOf(u8, codex, "\"provider\":\"codex\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, codex, "\"model\":\"terra\"") != null);
     try std.testing.expect(settingReplyFailed("{\"id\":4294967295,\"result\":{\"status\":\"refused\"}}").?);
+    const mode = try modeLine(a, SETTING_REQUEST_ID, "claude", "session", "bypassPermissions");
+    defer a.free(mode);
+    try std.testing.expect(std.mem.indexOf(u8, mode, "\"op\":\"set_permission_mode\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, mode, "\"provider\":\"claude\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, mode, "\"mode\":\"bypassPermissions\"") != null);
     try std.testing.expect(settingReplyFailed("{\"id\":4294967295,\"error\":\"failed\"}").?);
     try std.testing.expect(!settingReplyFailed("{\"id\":4294967295,\"result\":{\"status\":\"ok\"}}").?);
     try std.testing.expect(settingReplyFailed("{\"id\":3,\"result\":{\"status\":\"error\"}}") == null);

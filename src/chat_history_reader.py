@@ -3200,9 +3200,9 @@ HOST_BINARY_NAMES = {'claude': 'claude', 'codex': 'codex', 'pi': 'pi', 'hax': 'h
 HOST_BINARY_FOLDERS = ('~/.local/bin', '~/.claude/local', '~/.npm-global/bin', '~/.bun/bin')
 HOST_FOLDER = re.compile(r"[A-Za-z0-9_./~+-]{1,220}\Z")
 HOST_USER_HOMES = Path("/home")
-HOST_PERMISSION_MODES = ('acceptEdits', 'auto', 'bypassPermissions', 'manual', 'dontAsk', 'plan')
+HOST_PERMISSION_MODES = ('acceptEdits', 'auto', 'bypassPermissions', 'manual', 'dontAsk', 'plan', 'default')
 HOST_BYPASS_APPROVAL_MODES = frozenset(('bypassPermissions', 'dontAsk'))
-HOST_SAVED_PERMISSION_MODES = frozenset(('acceptEdits', 'bypassPermissions', 'manual'))
+HOST_SAVED_PERMISSION_MODES = frozenset(('acceptEdits', 'bypassPermissions', 'manual', 'auto', 'default'))
 HOST_NIGHTLY_HOUR = 4
 HOST_ROTATE_RECHECK = 60
 HOST_START_RETRY_STEPS = (0, 30, 90, 180, 240)
@@ -3975,7 +3975,7 @@ def host_terminal_command(provider, sid):
     parts = [host_binary_name(provider), '--resume', sid]
     mode = config.get('permission_mode')
     if mode in HOST_PERMISSION_MODES:
-        parts += ['--permission-mode', mode]
+        parts += ['--permission-mode', 'default' if mode == 'manual' else mode]
     return ' '.join(parts)
 
 
@@ -4225,8 +4225,8 @@ def host_agent_env(provider, sid):
 
 
 def host_claude_argv(provider, sid, base, mode=None):
-    mode = mode if mode in HOST_PERMISSION_MODES else (host_config(provider, sid) or {}).get("permission_mode")
-    command = base + (["--permission-mode", mode] if mode in HOST_PERMISSION_MODES else [])
+    mode = mode if mode in HOST_PERMISSION_MODES else (host_config(provider, sid) or {}).get("permission_mode", "bypassPermissions")
+    command = base + (["--permission-mode", "default" if mode == "manual" else mode] if mode in HOST_PERMISSION_MODES else [])
     command += ["--print", "--input-format", "stream-json",
                 "--output-format", "stream-json", "--verbose",
                 "--include-partial-messages", "--permission-prompt-tool", "stdio"]
@@ -4344,16 +4344,20 @@ def host_model_name(value):
     return match.group(1) if match else ""
 
 
-HOST_MODE_NAMES = dict(default="manual", manual="manual", acceptEdits="acceptEdits", plan="plan", bypassPermissions="bypassPermissions")
+HOST_MODE_NAMES = dict(default="manual", manual="manual", auto="auto", acceptEdits="acceptEdits", plan="plan", bypassPermissions="bypassPermissions")
 
 
 def host_permission_mode(provider, sid, state=None):
+    if provider in ("pi", "antigravity"):
+        return "bypassPermissions"
     mode = state.get("mode") if isinstance(state, dict) else None
     if mode is None:
         stored = host_read(host_paths(provider, sid)["state"])
         mode = stored.get("mode") if stored else None
     if mode is None:
         mode = (host_config(provider, sid) or {}).get("permission_mode")
+    if provider == "codex" and mode in (None, "default", "auto"):
+        return "acceptEdits"
     return HOST_MODE_NAMES.get(mode if mode is not None else "default", "")
 
 
@@ -5961,7 +5965,7 @@ def host_auto_approval_response(request):
 
 
 def host_save_permission_mode(provider, sid, mode):
-    if mode not in HOST_SAVED_PERMISSION_MODES:
+    if mode not in HOST_SAVED_PERMISSION_MODES and not (provider == "codex" and mode in HOST_PERMISSION_MODES):
         return
     config = host_config(provider, sid)
     if config is None or config.get("permission_mode") == mode:
@@ -5975,7 +5979,7 @@ def host_save_default_permission_mode(provider, sid):
     mode = config.get("permission_mode")
     if mode in HOST_PERMISSION_MODES:
         return mode
-    if provider == "claude" and config.get("enabled") is True:
+    if provider in ("claude", "codex", "pi", "antigravity") and config.get("enabled") is True:
         config["permission_mode"] = "bypassPermissions"
         host_write(host_paths(provider, sid)["config"], config)
         return "bypassPermissions"
@@ -6075,7 +6079,7 @@ def host_answers(questions, answers):
 def host_set_mode(provider, sid, session, mode):
     if mode == "plan":
         session["state"].setdefault("plan_before", session["state"].get("mode") or "default")
-    if not host_control_request(session, dict(subtype="set_permission_mode", mode=mode)):
+    if not host_control_request(session, dict(subtype="set_permission_mode", mode="default" if mode == "manual" else mode)):
         return dict(status="error", reason="stdin_write_failed")
     session["state"]["mode"] = mode
     host_state_write(provider, sid, session["state"])
@@ -6501,6 +6505,8 @@ def host_antigravity_interrupt(provider, sid, session):
 
 
 def host_antigravity_set_mode(provider, sid, session, mode):
+    if mode in HOST_BYPASS_APPROVAL_MODES and host_enabled(provider, sid):
+        return dict(status="ok")
     host_log(provider, sid, "antigravity_mode_refused", dict(mode=mode))
     return host_refuse("antigravity_mode_fixed")
 
@@ -6995,8 +7001,11 @@ def host_codex_interrupt(provider, sid, session):
 def host_codex_set_mode(provider, sid, session, mode):
     session["state"]["mode"] = mode
     host_state_write(provider, sid, session["state"])
+    host_save_permission_mode(provider, sid, mode)
     approval, sandbox = host_codex_policy(session)
     host_log(provider, sid, "codex_permissions", dict(mode=mode, approval=approval, sandbox=sandbox))
+    if "settings" in session:
+        host_settings_event(provider, sid, host_chat_name(provider, sid), session)
     return dict(status="ok")
 
 
@@ -7252,6 +7261,8 @@ def host_pi_interrupt(provider, sid, session):
 
 
 def host_pi_set_mode(provider, sid, session, mode):
+    if mode in HOST_BYPASS_APPROVAL_MODES and host_enabled(provider, sid):
+        return dict(status="ok")
     return host_refuse("pi_always_full_access")
 
 
@@ -7266,6 +7277,10 @@ def host_pi_set_model(provider, sid, tmux, session, request):
         host_pi_save_model(config, model_provider, model)
         host_write(host_paths(provider, sid)["config"], config)
     session["pi_model"] = dict(provider=model_provider, model=model)
+    if "settings" in session:
+        session["settings"] = host_settings(provider, sid)
+        session["applied_settings"] = None
+        host_settings_event(provider, sid, tmux, session)
     host_log(provider, sid, "pi_set_model", dict(provider=model_provider, model=model))
     return dict(status="ok")
 
@@ -7974,7 +7989,7 @@ def host_cli(argv):
         return dict(chats=host_chats())
     if len(argv) == 2 and argv[0] == "connect":
         return host_connect(argv[1])
-    if not argv or argv[0] not in ("start", "stop", "status", "enable", "disable", "handover", "adopt", "terminal", "resume", "send", "restart", "fresh-start", "switch-ai"):
+    if not argv or argv[0] not in ("start", "stop", "status", "enable", "disable", "handover", "adopt", "terminal", "resume", "send", "restart", "fresh-start", "switch-ai", "model", "effort", "permission"):
         return dict(status="error", reason="invalid_command")
     command, rest = argv[0], argv[1:]
     if command == "restart" and rest == ["idle"]:
@@ -8007,8 +8022,9 @@ def host_cli(argv):
             config["tmux"] = tmux
         if folder is not None:
             config["cwd"] = folder
-        if mode is not None and config.get("permission_mode") not in HOST_PERMISSION_MODES:
-            config["permission_mode"] = mode
+        if config.get("permission_mode") not in HOST_PERMISSION_MODES:
+            if mode is not None or provider in ("claude", "codex", "pi", "antigravity"):
+                config["permission_mode"] = mode or "bypassPermissions"
         host_write(paths["config"], config)
         if host_handed_over(provider, sid):
             try:
@@ -8050,8 +8066,19 @@ def host_cli(argv):
         return host_resume(provider, sid, tmux, folder, mode)
     if command == "fresh-start":
         return host_reply(dict(op="fresh_start", provider=provider, sid=sid))
+    if command in ("model", "effort", "permission"):
+        if len(rest) != 3:
+            return host_refuse("missing_value")
+        if command == "effort" and provider == "antigravity" and rest[2] == "xhigh" and host_antigravity_choice(provider, sid)[0] not in HOST_ANTIGRAVITY_XHIGH_MODELS:
+            return host_refuse("invalid_effort")
+        key = {"model": "model", "effort": "effort", "permission": "mode"}[command]
+        operation = "set_permission_mode" if command == "permission" else "set_" + key
+        return host_reply(dict(op=operation, provider=provider, sid=sid, **{key: rest[2]}))
     if command == "switch-ai":
-        return host_reply(dict(op="switch_ai", provider=provider, sid=sid, to=rest[rest.index("--to") + 1] if "--to" in rest[:-1] else None))
+        target = rest[rest.index("--to") + 1] if "--to" in rest[:-1] else None
+        if target == provider and host_enabled(provider, sid):
+            return dict(status="already", provider=provider, sid=sid)
+        return host_reply(dict(op="switch_ai", provider=provider, sid=sid, to=target))
     if command == "restart":
         return host_restart(provider, sid)
     if command == "send":

@@ -93,7 +93,7 @@ Press @(0x0D) 'Enter: choose Accept edits from Ctrl+K'
 Wait-SlashMode 'acceptEdits'
 Snapshot 'slash-permissions-edits-applied'
 $controls = @(Get-Content (Join-Path $remoteState 'slash-control.jsonl') | ForEach-Object { $_ | ConvertFrom-Json })
-if ($controls.Count -ne 3 -or ($controls.request.mode -join ',') -cne 'plan,manual,acceptEdits') { throw 'Mode choices did not reach the host exactly once and in order' }
+if ($controls.Count -ne 3 -or ($controls.request.mode -join ',') -cne 'plan,default,acceptEdits') { throw 'Mode choices did not reach the host exactly once and in order' }
 foreach ($control in $controls) {
     if ($control.sid -cne $remoteSids['live-slash'] -or $control.request.subtype -cne 'set_permission_mode') { throw 'Mode control targeted another chat or operation' }
 }

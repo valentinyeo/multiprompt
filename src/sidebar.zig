@@ -2632,6 +2632,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_chat_switch_ai = result_idx == app_state.SEARCH_CHAT_SWITCH_CLAUDE_OFFSET or result_idx == app_state.SEARCH_CHAT_SWITCH_CODEX_OFFSET or result_idx == app_state.SEARCH_CHAT_SWITCH_PI_OFFSET or result_idx == app_state.SEARCH_CHAT_SWITCH_ANTIGRAVITY_OFFSET;
                     const is_chat_auto_switch = result_idx == SEARCH_CHAT_AUTO_SWITCH_OFFSET;
                     const is_chat_more_menu = result_idx == SEARCH_CHAT_MORE_MENU_OFFSET;
+                    const is_chat_controls = result_idx >= app_state.SEARCH_CHAT_AI_MENU_OFFSET and result_idx <= app_state.SEARCH_CHAT_PERMISSION_MENU_OFFSET;
                     const is_chat_plus_menu = result_idx == SEARCH_CHAT_PLUS_MENU_OFFSET;
                     const is_chat_copy = result_idx == SEARCH_CHAT_COPY_CODE_OFFSET;
                     const is_chat_attach = result_idx == SEARCH_CHAT_ATTACH_OFFSET or result_idx == SEARCH_CHAT_DICTATION_OFFSET;
@@ -3685,6 +3686,11 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, palette_hint_font);
                         var sa_hint = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = paletteDrawText(hdc, L("Ctrl+A"), -1, &sa_hint, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                    } else if (is_chat_controls) {
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, primary_color);
+                        var controls_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
+                        drawAscii(hdc, @import("plus_menu.zig").paletteTitle(result_idx), &controls_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
                     } else if (is_chat_mode) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);

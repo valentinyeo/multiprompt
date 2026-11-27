@@ -418,10 +418,28 @@ pub fn chatModePickerAvailable() bool {
     return chat_mode_picker_key.shell_id != 0;
 }
 
-pub fn chatModeSelect(mode: @import("chat_slash.zig").PermissionMode) bool {
+pub fn chatModeSelectable() bool {
+    return chatModePickerAvailable() or @import("chat_session.zig").chatSettingsEligible();
+}
+
+fn chatModePickerTargetsActiveShell() bool {
     const key = chat_mode_picker_key;
     const index = @import("inbox.zig").findShellById(key.shell_id) orelse return false;
-    if (key.sid[0] == 0 or !std.meta.eql(key, chatFileIdentityForShell(index))) return false;
+    return key.sid[0] != 0 and std.meta.eql(key, chatFileIdentityForShell(index));
+}
+
+fn chatModeSendLive(mode: @import("chat_slash.zig").PermissionMode) bool {
+    if (app_state.active_shell >= app_state.shell_count or !@import("chat_session.zig").chatSettingsEligible()) return false;
+    const key = chatFileIdentityForShell(app_state.active_shell);
+    const identity = key.checked() orelse return false;
+    const live = @import("chat_live.zig");
+    const line = live.modeLine(std.heap.page_allocator, live.SETTING_REQUEST_ID, key.provider(), std.mem.sliceTo(&key.sid, 0), @tagName(mode)) catch return false;
+    return chatLiveReply(.{ .identity = identity, .bytes = line });
+}
+
+pub fn chatModeSelect(mode: @import("chat_slash.zig").PermissionMode) bool {
+    const key = chat_mode_picker_key;
+    if (!chatModePickerTargetsActiveShell()) return chatModeSendLive(mode);
     if (chat_mode_busy.cmpxchgStrong(false, true, .acq_rel, .acquire) != null) return false;
     const job = std.heap.page_allocator.create(ChatModeJob) catch {
         chat_mode_busy.store(false, .release);
@@ -482,6 +500,7 @@ pub fn chatModeFinish(lp: @import("win32.zig").LPARAM) void {
             .acceptEdits => "Accept edits on",
             .plan => "Plan on",
             .bypassPermissions => "Bypass on",
+            .auto => "Auto on",
         };
         showHeaderNoticeAscii(text, 3000, false);
     }

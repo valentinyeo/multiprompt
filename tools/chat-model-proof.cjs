@@ -60,7 +60,13 @@ function verify(root) {
     assert.equal(png.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
     assert.ok(png.length > 1000);
   }
-  return { model: 'haiku', efforts: ['low', 'medium', 'high'], historyRetained: true, draftRetained: true };
+  return {
+    model: 'haiku',
+    efforts: ['low', 'medium', 'high'],
+    historyRetained: true,
+    draftRetained: true,
+    cleanup: `The owned Windows job stopped the app and its children (${cleanup.remaining_owned_processes} left running); the isolated profile, its process table and socket temp folder were removed (scratchRemoved=${cleanup.scratch_removed}); the evidence copy was kept (evidencePreserved=${cleanup.evidence_preserved}).`,
+  };
 }
 
 module.exports = { verify };
@@ -68,7 +74,7 @@ if (require.main === module) {
   const root = process.argv[2];
   try {
     const proof = verify(root);
-    fs.writeFileSync(path.join(root, 'result.json'), JSON.stringify({ feature: 'chat-model', status: 'passed', agentBoundary: 'Production embedded reader and host; fixture SSH, Windows compatibility and synthetic Claude process; no model call', cases: [{ name: 'model-settings', passed: true, detail: proof }] }, null, 2));
+    fs.writeFileSync(path.join(root, 'result.json'), JSON.stringify({ feature: 'chat-model', status: 'passed', agentBoundary: 'Production embedded reader and host; fixture SSH, Windows compatibility and synthetic Claude process; no model call', cleanup: proof.cleanup, cases: [{ name: 'model-settings', passed: true, detail: proof }] }, null, 2));
     console.log(JSON.stringify(proof));
   } catch (error) {
     console.error(error);

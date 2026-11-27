@@ -291,7 +291,7 @@ def workspace_anchor(listing, workspace):
 
 def enable_args(provider, sid, folder, tmux):
     command = ["enable", provider, sid, "--tmux", tmux, "--cwd", folder]
-    if provider == "claude":
+    if provider in ("claude", "codex", "pi", "antigravity"):
         command += ["--permission-mode", "bypassPermissions"]
     return command
 
@@ -840,6 +840,41 @@ def cmd_start(args):
     return 0 if first is None or first["state"] not in ("failed", "cancelled") else 3
 
 
+def cmd_control(args):
+    send = load_send()
+    listing = send.zsb("workspace-list")
+    target = pick_target(send, listing, args.name)
+    provider, sid = target.get("provider"), target.get("sid")
+    if not provider or not sid:
+        raise ValueError("chat has no session id yet")
+    config = send.read_json(send.host_root() / (send.host_config_key(provider, sid) + ".config.json"))
+    if not config:
+        raise ValueError("run this command on the chat's server")
+    if args.host is not None:
+        recorded = config.get("spawn_host")
+        if type(recorded) is int:
+            matches = recorded == args.host
+        elif listing.get("ok") is True:
+            matches = target.get("host") == host_name(listing, args.host)
+        else:
+            local = env_slot()
+            matches = (local if local is not None else servers_slot()) == args.host
+        if not matches:
+            raise ValueError("chat is on another host")
+    value = args.value
+    if args.command == "permission":
+        value = {"default": "manual", "bypass": "bypassPermissions", "untrusted": "manual",
+                 "workspace-write": "acceptEdits", "read-only": "plan"}.get(value, value)
+    if args.command == "ai":
+        if value not in ("claude", "codex", "pi", "antigravity"):
+            raise ValueError("unsupported AI")
+        reply = send.reader_cli("switch-ai", provider, sid, "--to", value)
+    else:
+        reply = send.reader_cli(args.command, provider, sid, value)
+    print(json.dumps(reply, separators=(",", ":")))
+    return 0 if reply.get("status") in ("ok", "switched", "already") else 3
+
+
 def cmd_restart(args):
     send = load_send()
     listing = send.zsb("workspace-list")
@@ -1166,6 +1201,11 @@ def parse(argv):
     begin.add_argument("--group")
     begin.add_argument("--provider", choices=PROVIDERS)
     begin.add_argument("--task", help="first task; - reads stdin")
+    for name in ("ai", "model", "effort", "permission"):
+        control = commands.add_parser(name, help="set this chat's " + name + " without replacing the chat")
+        control.add_argument("name")
+        control.add_argument("value")
+        control.add_argument("--host", type=int, choices=(0, 1, 2))
     again = commands.add_parser("restart", help="start a stopped chat and reopen its tab")
     again.add_argument("name")
     renamed = commands.add_parser("rename", help="rename a chat tab on the desktop")
@@ -1183,7 +1223,7 @@ def parse(argv):
     probe.add_argument("--ping", action="store_true")
     if not argv:
         return argparse.Namespace(command="list", json=False, workspace=None)
-    if argv[0] not in {"list", "whoami", "start", "restart", "rename", "move", "close", "send", "health", "-h", "--help"}:
+    if argv[0] not in {"list", "whoami", "start", "restart", "rename", "move", "close", "send", "health", "ai", "model", "effort", "permission", "-h", "--help"}:
         if argv[0] == "--json":
             return parser.parse_args(["list", *argv])
         raise ValueError("unknown command; use mp-sessions --help")
@@ -1205,7 +1245,7 @@ def main(argv=None):
     command = args.command or "list"
     send = load_send(session_api=False)
     handlers = dict(list=cmd_list, whoami=cmd_whoami, start=cmd_start, restart=cmd_restart, rename=cmd_rename, move=cmd_move,
-                    close=cmd_close, send=cmd_send, health=cmd_health)
+                    close=cmd_close, send=cmd_send, health=cmd_health, ai=cmd_control, model=cmd_control, effort=cmd_control, permission=cmd_control)
     try:
         if command == "send":
             tail = argv[1:] if argv and argv[0] == "send" else argv
