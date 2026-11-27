@@ -1,0 +1,1 @@
+Show installed plugin slash commands like pstack in Antigravity chats

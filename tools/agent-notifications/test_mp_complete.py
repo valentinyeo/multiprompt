@@ -209,6 +209,42 @@ class Completion(unittest.TestCase):
                 self.assertEqual(parsed[builtin][0], "B")
                 self.assertTrue(parsed[builtin][1])
 
+    def test_antigravity_returns_installed_plugin_skills(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(complete, "HOME", Path(tmp)):
+            home = Path(tmp)
+            project = home / "projects/demo"
+            project.mkdir(parents=True)
+            entries = {
+                home / ".gemini/config/plugins/pstack/skills/poteto-mode/SKILL.md":
+                    "---\nname: poteto-mode\ndescription: poteto's agent style\n---\n",
+                home / ".gemini/config/plugins/pstack/skills/tdd/SKILL.md":
+                    "---\nname: tdd\ndescription: Test first\nargument-hint: <scope>\n---\n",
+                home / ".gemini/config/plugins/pstack/skills/hidden/SKILL.md":
+                    "---\nname: hidden\ndescription: Not invocable\nuser-invocable: false\n---\n",
+                home / ".gemini/config/plugins/cloudflare/skills/workers/SKILL.md":
+                    "---\nname: workers\ndescription: Ship a worker\n---\n",
+            }
+            for path, content in entries.items():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content, encoding="utf-8")
+            (home / ".gemini/config/plugins/rtk").mkdir(parents=True, exist_ok=True)
+            status, rows = complete.antigravity_rows(project)
+            self.assertEqual("ok", status)
+            parsed = {row[1]: (row[0], row[2], row[3]) for row in rows}
+            self.assertEqual(parsed["poteto-mode"], ("S", "", "poteto's agent style"))
+            self.assertEqual(parsed["tdd"], ("S", "<scope>", "Test first"))
+            self.assertEqual(parsed["workers"], ("S", "", "Ship a worker"))
+            self.assertNotIn("hidden", parsed)
+
+    def test_antigravity_plugin_folder_missing_is_clean(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(complete, "HOME", Path(tmp)):
+            home = Path(tmp)
+            project = home / "projects/demo"
+            project.mkdir(parents=True)
+            status, rows = complete.antigravity_rows(project)
+            self.assertEqual("ok", status)
+            self.assertEqual([row[0] for row in rows], ["B"] * len(complete.ANTIGRAVITY_BUILTINS))
+
     def test_pi_returns_skills_prompts_workspace_and_builtins(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(complete, "HOME", Path(tmp)):
             home = Path(tmp)

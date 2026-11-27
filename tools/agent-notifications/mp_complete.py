@@ -360,6 +360,10 @@ def antigravity_rows(cwd):
         root = root.parent
     for folder in (".gemini/config/skills", ".gemini/antigravity-cli/skills", ".agents/skills", ".gemini/skills"):
         rows += scan(HOME / folder, "", "S", {})
+    plugins = HOME / ".gemini/config/plugins"
+    if plugins.is_dir():
+        for plugin in sorted(plugins.iterdir()):
+            rows += scan(plugin / "skills", "", "S", {})
     return "ok", rows
 
 
